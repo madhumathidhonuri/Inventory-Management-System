@@ -3,13 +3,13 @@ const router = express.Router();
 const db = require('../db/database');
 const xlsx = require('xlsx');
 
-// Helper: Format Excel date serial numbers or standard date strings
+// Helper: Format Excel date serial numbers or standard date strings into clean DD-MM-YYYY
 function formatExcelDate(val) {
   if (!val) return '';
   if (typeof val === 'number' || (!isNaN(val) && !String(val).includes('-') && !String(val).includes('/'))) {
     const num = Number(val);
     if (num > 30000 && num < 60000) {
-      // Excel epoch date conversion
+      // Excel epoch date conversion (1900 system)
       const d = new Date(Math.round((num - 25569) * 86400 * 1000));
       const day = String(d.getUTCDate()).padStart(2, '0');
       const month = String(d.getUTCMonth() + 1).padStart(2, '0');
@@ -20,11 +20,18 @@ function formatExcelDate(val) {
   return String(val).trim();
 }
 
-// Helper: Extract vehicle number from device and attributes
+// Helper: Extract real vehicle number (excluding VLTD device serial numbers)
 function getVehicleNumber(device, attrs = {}) {
-  const vehKey = Object.keys(attrs).find(k => /vehicle|veh_no|reg_no|truck|bus|car|auto/i.test(k));
-  if (vehKey && attrs[vehKey]) {
-    return String(attrs[vehKey]).trim();
+  const keys = ['VEHICLE NUMBER', 'Vehicle Number', 'Vehicle ID', 'Vehicle No', 'VEHICLE NO', 'Reg No', 'vehicle_number'];
+  for (const k of keys) {
+    if (attrs[k] && String(attrs[k]).trim()) {
+      const val = String(attrs[k]).trim();
+      // Skip if it is actually a VLTD serial number or IMEI
+      if (/^VAMO1AA|^TNOW|^VOLTY|^VLT1AA|^[0-9]{15}$/i.test(val) || (attrs.vltdsno && val === attrs.vltdsno)) {
+        continue;
+      }
+      return val;
+    }
   }
   return '';
 }
@@ -38,7 +45,7 @@ function getStockPlace(attrs = {}) {
   return '';
 }
 
-// Helper: Extract customer name from attributes (prioritizing real individual/client names over platform names)
+// Helper: Extract real customer name (prioritizing actual person / company owner over generic software platform names)
 function getCustomerName(attrs = {}) {
   if (attrs['CUSTOMER NAME'] && String(attrs['CUSTOMER NAME']).trim()) {
     return String(attrs['CUSTOMER NAME']).trim();
@@ -68,13 +75,16 @@ function getCustomerPhone(attrs = {}) {
   return '—';
 }
 
-// Helper: Extract Device Name
+// Helper: Extract clean Device Name (without prepended serial indexes)
 function getDeviceName(device, attrs = {}) {
   const devKey = Object.keys(attrs).find(k => /device.*name|model|product.*name/i.test(k));
+  let name = '';
   if (devKey && attrs[devKey]) {
-    return String(attrs[devKey]).trim();
+    name = String(attrs[devKey]).trim();
+  } else {
+    name = device.device_type_name || 'GPS Tracker';
   }
-  return device.device_type_name || 'GPS Tracker';
+  return name.replace(/^[0-9]+[\s.-]*/, '').trim() || name;
 }
 
 // Helper: Extract SIM numbers (supports Sim 1, Sim 2, simno1, simno2, or primary SIM)
@@ -85,35 +95,46 @@ function getSimNumbers(device, attrs = {}) {
   return sims.length > 0 ? sims.join(' / ') : '—';
 }
 
-// Helper: Extract Total Cost / Cost (strictly currency numbers, excluding "AMOUNT RECEIVED")
+// Helper: Extract Total Cost / Cost strictly as formatted currency numbers (ignoring text like "NOT RECEIVED")
 function getTotalCost(attrs = {}) {
   const keys = ['TOTAL COST', 'TOTAL_COST', 'COST', 'SALE PRICE', 'PRICE', 'INSTALLATION CHARGES'];
   for (const k of keys) {
-    if (attrs[k] !== undefined && attrs[k] !== null && String(attrs[k]).trim() !== '' && !isNaN(Number(attrs[k]))) {
-      return `₹${Number(attrs[k]).toLocaleString('en-IN')}`;
+    if (attrs[k] !== undefined && attrs[k] !== null && String(attrs[k]).trim() !== '') {
+      const clean = String(attrs[k]).replace(/[^0-9.]/g, '');
+      if (clean && !isNaN(Number(clean))) {
+        return `₹${Number(clean).toLocaleString('en-IN')}`;
+      }
     }
   }
-  if (attrs['Amount'] !== undefined && !isNaN(Number(attrs['Amount'])) && String(attrs['Amount']).trim() !== '') {
-    return `₹${Number(attrs['Amount']).toLocaleString('en-IN')}`;
+  if (attrs['Amount']) {
+    const clean = String(attrs['Amount']).replace(/[^0-9.]/g, '');
+    if (clean && !isNaN(Number(clean))) {
+      return `₹${Number(clean).toLocaleString('en-IN')}`;
+    }
   }
   return '—';
 }
 
-// Helper: Extract Amount Received Status
+// Helper: Extract clean Amount Received Status (RECEIVED, NOT RECEIVED, or RECEIVED with recipient)
 function getAmountReceivedStatus(attrs = {}) {
-  const keys = ['AMOUNT RECEIVED', 'Amount Received', 'AMOUNT RECEIVED BY', 'PAYMENT STATUS'];
-  for (const k of keys) {
-    if (attrs[k] !== undefined && attrs[k] !== null && String(attrs[k]).trim() !== '') {
-      const val = String(attrs[k]).trim().toUpperCase();
-      if (val.includes('NOT') || val.includes('UNPAID') || val.includes('DUE') || val.includes('PENDING')) {
-        return 'NOT RECEIVED';
-      }
-      if (val.includes('REC') || val.includes('PAID') || val.includes('DONE')) {
-        return 'RECEIVED';
-      }
-      return val;
+  const rawStatus = attrs['AMOUNT RECEIVED'] || attrs['Amount Received'] || attrs['PAYMENT STATUS'];
+  if (rawStatus && String(rawStatus).trim()) {
+    const val = String(rawStatus).trim().toUpperCase();
+    if (val.includes('NOT') || val.includes('UNPAID') || val.includes('PENDING') || val.includes('DUE')) {
+      return 'NOT RECEIVED';
     }
+    if (val.includes('REC') || val.includes('PAID') || val.includes('DONE')) {
+      return 'RECEIVED';
+    }
+    return val;
   }
+
+  // Check if amount was received by a specific person
+  if (attrs['AMOUNT RECEIVED BY'] && String(attrs['AMOUNT RECEIVED BY']).trim()) {
+    const by = String(attrs['AMOUNT RECEIVED BY']).trim();
+    return `RECEIVED (${by})`;
+  }
+
   return '—';
 }
 
@@ -295,7 +316,6 @@ function queryFilteredDevices(query) {
 router.get('/preview', (req, res) => {
   try {
     const devices = queryFilteredDevices(req.query);
-    const isManagerLayout = req.query.report_layout === 'manager' || req.query.type === 'manager_statement';
 
     res.json({
       success: true,
