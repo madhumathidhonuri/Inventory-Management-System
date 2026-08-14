@@ -1,0 +1,559 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import {
+  FileText,
+  Download,
+  FileSpreadsheet,
+  Layers,
+  Truck,
+  Wrench,
+  Boxes,
+  Filter,
+  RefreshCw,
+  Search,
+  CheckCircle2,
+  Calendar,
+  MapPin,
+  Car,
+  RotateCcw,
+  SlidersHorizontal,
+  Eye,
+  Check,
+  Receipt,
+  User,
+  Phone,
+  CreditCard
+} from 'lucide-react';
+import { fetchReportOptions, fetchReportPreview } from '../services/api';
+
+export default function ReportsPage() {
+  const [loadingOptions, setLoadingOptions] = useState(true);
+  const [options, setOptions] = useState({
+    batches: [],
+    deviceTypes: [],
+    stockPlaces: [],
+    batchPlacesMap: {},
+    stats: { totalDevices: 0, installedDevices: 0, uninstalledDevices: 0 }
+  });
+
+  // Filter States
+  const [filters, setFilters] = useState({
+    purchase_batch_id: '',
+    stock_place: '',
+    installed_filter: 'installed', // 'all' | 'installed' | 'uninstalled'
+    status: '',
+    device_type_id: '',
+    start_date: '',
+    end_date: '',
+    search: '',
+    report_layout: 'manager' // 'manager' | 'raw'
+  });
+
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewData, setPreviewData] = useState({ totalCount: 0, preview: [] });
+  const [downloading, setDownloading] = useState(null);
+
+  // Load options once on mount
+  useEffect(() => {
+    loadOptions();
+  }, []);
+
+  // Update preview whenever filters change
+  useEffect(() => {
+    updatePreview();
+  }, [filters]);
+
+  const loadOptions = async () => {
+    setLoadingOptions(true);
+    try {
+      const res = await fetchReportOptions();
+      if (res.success) {
+        setOptions(res.data);
+      }
+    } catch (err) {
+      console.error('Failed to load report options:', err);
+    } finally {
+      setLoadingOptions(false);
+    }
+  };
+
+  const updatePreview = async () => {
+    setPreviewLoading(true);
+    try {
+      const activeParams = {};
+      Object.keys(filters).forEach(k => {
+        if (filters[k]) activeParams[k] = filters[k];
+      });
+      const res = await fetchReportPreview(activeParams);
+      if (res.success) {
+        setPreviewData({
+          totalCount: res.totalCount,
+          preview: res.preview || []
+        });
+      }
+    } catch (err) {
+      console.error('Failed to preview report:', err);
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  // Filter available stock places dynamically based on selected list
+  const availableStockPlaces = useMemo(() => {
+    if (!filters.purchase_batch_id || !options.batchPlacesMap) {
+      return options.stockPlaces || [];
+    }
+    const bId = filters.purchase_batch_id.toString();
+    const batchPlaces = options.batchPlacesMap[bId] || {};
+    return Object.keys(batchPlaces).map(name => ({
+      name,
+      count: batchPlaces[name]
+    })).sort((a, b) => b.count - a.count);
+  }, [filters.purchase_batch_id, options]);
+
+  const handleResetFilters = () => {
+    setFilters({
+      purchase_batch_id: '',
+      stock_place: '',
+      installed_filter: 'installed',
+      status: '',
+      device_type_id: '',
+      start_date: '',
+      end_date: '',
+      search: '',
+      report_layout: 'manager'
+    });
+  };
+
+  const handleCustomExport = (format = 'xlsx') => {
+    setDownloading(`custom_${format}`);
+    const queryParams = new URLSearchParams();
+    queryParams.set('type', 'custom');
+    queryParams.set('format', format);
+
+    Object.keys(filters).forEach(k => {
+      if (filters[k]) queryParams.set(k, filters[k]);
+    });
+
+    window.location.href = `/api/reports/export?${queryParams.toString()}`;
+    setTimeout(() => setDownloading(null), 2500);
+  };
+
+  const handlePresetExport = (type, format = 'xlsx') => {
+    setDownloading(`${type}_${format}`);
+    window.location.href = `/api/reports/export?type=${type}&format=${format}`;
+    setTimeout(() => setDownloading(null), 2500);
+  };
+
+  const PRESET_REPORTS = [
+    {
+      id: 'manager_statement',
+      title: 'Manager Statement & Billing Register',
+      description: 'Vehicle Numbers, Customer Names, Phone Numbers, SIM Numbers, IMEI Numbers, Total Cost, and Amount Received Status.',
+      icon: Receipt,
+      color: 'text-indigo-600',
+      bg: 'bg-indigo-50',
+      border: 'border-indigo-200',
+      badge: 'Manager Requested Format',
+      badgeColor: 'bg-indigo-100 text-indigo-800'
+    },
+    {
+      id: 'installed',
+      title: 'Installed Devices Master Register',
+      description: 'Export all devices with vehicle numbers and customer details from your active inventory.',
+      icon: Car,
+      color: 'text-emerald-600',
+      bg: 'bg-emerald-50',
+      border: 'border-emerald-200',
+      badge: `${options.stats.installedDevices} Installed Units`,
+      badgeColor: 'bg-emerald-100 text-emerald-800'
+    },
+    {
+      id: 'purchases',
+      title: 'Upload Lists & Batches Summary',
+      description: 'Audit log of all uploaded spreadsheet files and imported device counts.',
+      icon: FileSpreadsheet,
+      color: 'text-purple-600',
+      bg: 'bg-purple-50',
+      border: 'border-purple-200',
+      badge: `${options.batches.length} Upload Lists`,
+      badgeColor: 'bg-purple-100 text-purple-800'
+    }
+  ];
+
+  return (
+    <div className="space-y-6 max-w-6xl mx-auto">
+      
+      {/* Top Banner & Summary Pills */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-gradient-to-r from-slate-900 via-indigo-900 to-slate-950 p-6 rounded-2xl text-white shadow-md">
+        <div>
+          <h2 className="text-xl font-bold tracking-tight flex items-center gap-2.5">
+            <Receipt className="w-6 h-6 text-indigo-400" /> Executive Reports & Excel Export Hub
+          </h2>
+          <p className="text-xs text-indigo-200 mt-1">
+            Export Manager Statements (Vehicle No, Customer, Phone, SIMs, IMEI, Total Cost, Payment Status) or Original List spreadsheets.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 self-start lg:self-auto">
+          <div className="bg-white/10 border border-white/20 rounded-xl px-3 py-1.5 text-xs text-white flex items-center gap-2">
+            <span className="text-slate-300">Total Devices:</span>
+            <span className="font-mono font-bold text-white">{options.stats.totalDevices}</span>
+          </div>
+
+          <div className="bg-emerald-500/20 border border-emerald-400/30 rounded-xl px-3 py-1.5 text-xs text-emerald-200 flex items-center gap-2">
+            <Car className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Installed:</span>
+            <span className="font-mono font-bold text-emerald-300">{options.stats.installedDevices}</span>
+          </div>
+
+          <div className="bg-blue-500/20 border border-blue-400/30 rounded-xl px-3 py-1.5 text-xs text-blue-200 flex items-center gap-2">
+            <Boxes className="w-3.5 h-3.5 text-blue-400" />
+            <span>In Stock:</span>
+            <span className="font-mono font-bold text-blue-300">{options.stats.uninstalledDevices}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Interactive Custom Report Builder Panel */}
+      <div className="glass-panel p-6 rounded-2xl space-y-6 border border-slate-200 shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+          <div>
+            <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+              <SlidersHorizontal className="w-5 h-5 text-indigo-600" /> Tailored Report & Export Builder
+            </h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Select output format, list name, stock place, and installation status to export matching records.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {/* Format Layout Toggle */}
+            <div className="bg-slate-100 p-1 rounded-xl flex items-center gap-1 border border-slate-200 text-xs">
+              <button
+                type="button"
+                onClick={() => setFilters({ ...filters, report_layout: 'manager' })}
+                className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
+                  filters.report_layout === 'manager'
+                    ? 'bg-indigo-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Manager Format
+              </button>
+              <button
+                type="button"
+                onClick={() => setFilters({ ...filters, report_layout: 'raw' })}
+                className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
+                  filters.report_layout === 'raw'
+                    ? 'bg-indigo-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Original List Columns
+              </button>
+            </div>
+
+            <button
+              onClick={handleResetFilters}
+              className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+              title="Reset all filters"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+
+        {/* Format Explanation Banner */}
+        {filters.report_layout === 'manager' && (
+          <div className="bg-indigo-50/80 border border-indigo-200 p-3.5 rounded-xl text-xs text-indigo-900 flex items-start gap-2.5">
+            <Receipt className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
+            <div>
+              <strong className="font-bold">Manager Statement Columns Exported:</strong>
+              <div className="mt-1 flex flex-wrap gap-1.5">
+                {['Device Name', 'Vehicle Number', 'Customer Name', 'Phone Number', 'SIM Numbers', 'IMEI Number', 'Total Cost', 'Amount Received Status', 'Stock Place', 'Date'].map(col => (
+                  <span key={col} className="bg-white border border-indigo-200 px-2 py-0.5 rounded text-[11px] font-semibold text-indigo-800 shadow-2xs">
+                    {col}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Filters Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          
+          {/* 1. Upload List Name */}
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
+              <FileSpreadsheet className="w-3.5 h-3.5 text-blue-600" /> 1. Select List Name
+            </label>
+            <select
+              value={filters.purchase_batch_id}
+              onChange={(e) => {
+                setFilters({ ...filters, purchase_batch_id: e.target.value, stock_place: '' });
+              }}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-800 font-bold focus:outline-none focus:border-indigo-500 focus:bg-white"
+            >
+              <option value="">All Upload Lists</option>
+              {options.batches.map(b => (
+                <option key={b.id} value={b.id}>
+                  {b.notes ? `${b.notes} (${b.source_file})` : b.source_file}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* 2. Installation / Vehicle Status Filter */}
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
+              <Car className="w-3.5 h-3.5 text-emerald-600" /> 2. Installation Status
+            </label>
+            <select
+              value={filters.installed_filter}
+              onChange={(e) => setFilters({ ...filters, installed_filter: e.target.value })}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-800 font-bold focus:outline-none focus:border-indigo-500 focus:bg-white"
+            >
+              <option value="installed">Installed Devices Only (Vehicle Number Present)</option>
+              <option value="all">All Devices (Installed & In-Stock)</option>
+              <option value="uninstalled">In-Stock / Uninstalled Only (No Vehicle Number)</option>
+            </select>
+          </div>
+
+          {/* 3. Stock Place / Location */}
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
+              <MapPin className="w-3.5 h-3.5 text-indigo-600" /> 3. Stock Place / Location
+            </label>
+            <select
+              value={filters.stock_place}
+              onChange={(e) => setFilters({ ...filters, stock_place: e.target.value })}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-800 font-bold focus:outline-none focus:border-indigo-500 focus:bg-white"
+            >
+              <option value="">All Stock Places</option>
+              {availableStockPlaces.map(p => (
+                <option key={p.name} value={p.name}>
+                  {p.name} ({p.count})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* 4. Device Type */}
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
+              <Boxes className="w-3.5 h-3.5 text-amber-600" /> Device Type
+            </label>
+            <select
+              value={filters.device_type_id}
+              onChange={(e) => setFilters({ ...filters, device_type_id: e.target.value })}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-800 font-medium focus:outline-none focus:border-indigo-500 focus:bg-white"
+            >
+              <option value="">All Device Types</option>
+              {options.deviceTypes.map(dt => (
+                <option key={dt.id} value={dt.id}>
+                  {dt.name} ({dt.device_count})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* 5. Date From */}
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
+              <Calendar className="w-3.5 h-3.5 text-slate-500" /> From Date
+            </label>
+            <input
+              type="date"
+              value={filters.start_date}
+              onChange={(e) => setFilters({ ...filters, start_date: e.target.value })}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs text-slate-800 focus:outline-none focus:border-indigo-500 focus:bg-white"
+            />
+          </div>
+
+          {/* 6. Date To */}
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
+              <Calendar className="w-3.5 h-3.5 text-slate-500" /> To Date
+            </label>
+            <input
+              type="date"
+              value={filters.end_date}
+              onChange={(e) => setFilters({ ...filters, end_date: e.target.value })}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs text-slate-800 focus:outline-none focus:border-indigo-500 focus:bg-white"
+            />
+          </div>
+
+        </div>
+
+        {/* Live Matching Summary & Action Buttons */}
+        <div className="bg-gradient-to-r from-indigo-50 via-blue-50 to-slate-50 border border-indigo-200 p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-2xs">
+          <div className="flex items-center gap-3">
+            <div className="p-3 bg-indigo-600 text-white rounded-xl shadow-xs">
+              <Receipt className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-bold text-slate-900">
+                  {previewLoading ? 'Filtering records...' : `${previewData.totalCount} Matching Records`}
+                </span>
+                <span className="text-[11px] font-semibold bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded-md">
+                  {filters.report_layout === 'manager' ? 'Manager Statement' : 'Clean List Export'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-600 mt-0.5">
+                {filters.report_layout === 'manager'
+                  ? 'Includes Device Name, Vehicle Number, Customer Name, Phone, SIMs, IMEI, Total Cost, and Payment Status'
+                  : 'Exports only the exact columns belonging to the selected list'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => handleCustomExport('xlsx')}
+              disabled={downloading === 'custom_xlsx' || previewData.totalCount === 0}
+              className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold rounded-xl flex items-center gap-2 shadow-xs transition-colors cursor-pointer"
+            >
+              {downloading === 'custom_xlsx' ? (
+                <RefreshCw className="w-4 h-4 animate-spin" />
+              ) : (
+                <FileSpreadsheet className="w-4 h-4" />
+              )}
+              Download Excel (.xlsx)
+            </button>
+
+            <button
+              onClick={() => handleCustomExport('csv')}
+              disabled={downloading === 'custom_csv' || previewData.totalCount === 0}
+              className="px-4 py-2.5 bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer"
+            >
+              CSV
+            </button>
+          </div>
+        </div>
+
+        {/* Live Preview Sample */}
+        {previewData.preview.length > 0 && (
+          <div className="space-y-2 pt-2 border-t border-slate-100">
+            <div className="flex items-center justify-between text-xs font-semibold text-slate-600">
+              <span className="flex items-center gap-1.5">
+                <Eye className="w-4 h-4 text-slate-400" /> Preview (First {previewData.preview.length} rows):
+              </span>
+              <span className="text-[11px] text-slate-400">
+                {filters.report_layout === 'manager' ? 'Manager Statement Columns' : 'List Columns'}
+              </span>
+            </div>
+
+            <div className="overflow-x-auto border border-slate-200 rounded-xl">
+              <table className="w-full text-left text-xs whitespace-nowrap">
+                <thead className="bg-slate-50 text-slate-700 border-b border-slate-200">
+                  <tr>
+                    <th className="p-2.5 font-bold">Device Name</th>
+                    <th className="p-2.5 font-bold">Vehicle Number</th>
+                    <th className="p-2.5 font-bold">Customer Name</th>
+                    <th className="p-2.5 font-bold">Phone Number</th>
+                    <th className="p-2.5 font-bold">SIM Number(s)</th>
+                    <th className="p-2.5 font-bold font-mono">IMEI Number</th>
+                    <th className="p-2.5 font-bold">Total Cost</th>
+                    <th className="p-2.5 font-bold">Amount Received Status</th>
+                    <th className="p-2.5 font-bold">Stock Place</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-slate-800">
+                  {previewData.preview.map((row) => (
+                    <tr key={row.id} className="hover:bg-slate-50">
+                      <td className="p-2.5 font-bold text-indigo-700">
+                        <span className="px-2 py-0.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded text-[11px]">
+                          {row.device_name || row.device_type_name || 'GPS Tracker'}
+                        </span>
+                      </td>
+                      <td className="p-2.5 font-bold text-emerald-700">
+                        {row.vehicle_number && row.vehicle_number !== 'Unassigned' ? (
+                          <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded font-mono">
+                            {row.vehicle_number}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400 font-normal">Unassigned</span>
+                        )}
+                      </td>
+                      <td className="p-2.5 font-semibold text-slate-900">{row.customer_name || '—'}</td>
+                      <td className="p-2.5 text-slate-600 font-mono">{row.phone_number || '—'}</td>
+                      <td className="p-2.5 text-slate-600 font-mono text-[11px]">{row.sim_numbers || '—'}</td>
+                      <td className="p-2.5 font-mono font-bold text-blue-600">{row.imei_number}</td>
+                      <td className="p-2.5 font-bold text-slate-800">{row.total_cost || '—'}</td>
+                      <td className="p-2.5">
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                          row.amount_received_status && row.amount_received_status.toUpperCase().includes('NOT')
+                            ? 'bg-red-50 text-red-700 border border-red-200'
+                            : row.amount_received_status && row.amount_received_status !== '—'
+                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                            : 'bg-slate-100 text-slate-600'
+                        }`}>
+                          {row.amount_received_status || '—'}
+                        </span>
+                      </td>
+                      <td className="p-2.5 font-medium text-slate-700">{row.stock_place || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+      </div>
+
+      {/* Preset Quick-Export Cards */}
+      <div className="space-y-3">
+        <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+          <Download className="w-4 h-4 text-indigo-600" /> One-Click Standard Report Presets
+        </h3>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {PRESET_REPORTS.map((rc) => {
+            const Icon = rc.icon;
+            return (
+              <div key={rc.id} className="glass-panel p-5 rounded-2xl flex flex-col justify-between space-y-4 border border-slate-200 shadow-2xs hover:shadow-xs transition-shadow">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-3">
+                      <div className={`p-2.5 rounded-xl ${rc.bg} ${rc.color}`}>
+                        <Icon className="w-5 h-5" />
+                      </div>
+                      <h4 className="text-sm font-bold text-slate-900">{rc.title}</h4>
+                    </div>
+                  </div>
+                  <span className={`inline-block text-[10px] font-bold px-2 py-0.5 rounded-md ${rc.badgeColor}`}>
+                    {rc.badge}
+                  </span>
+                  <p className="text-xs text-slate-600 leading-relaxed">{rc.description}</p>
+                </div>
+
+                <div className="flex gap-2 pt-2 border-t border-slate-100">
+                  <button
+                    onClick={() => handlePresetExport(rc.id, 'xlsx')}
+                    disabled={downloading === `${rc.id}_xlsx`}
+                    className="flex-1 py-2 bg-slate-50 hover:bg-slate-100 text-slate-800 text-xs font-semibold rounded-xl border border-slate-200 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5 text-emerald-600" />
+                    {downloading === `${rc.id}_xlsx` ? 'Downloading...' : 'Excel (.xlsx)'}
+                  </button>
+
+                  <button
+                    onClick={() => handlePresetExport(rc.id, 'csv')}
+                    disabled={downloading === `${rc.id}_csv`}
+                    className="py-2 px-3 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-medium rounded-xl border border-slate-200 transition-colors cursor-pointer"
+                  >
+                    CSV
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+    </div>
+  );
+}

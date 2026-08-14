@@ -1,0 +1,290 @@
+const express = require('express');
+const router = express.Router();
+const multer = require('multer');
+const xlsx = require('xlsx');
+const db = require('../db/database');
+
+const upload = multer({ storage: multer.memoryStorage() });
+
+// POST /api/purchase-batches/preview - Upload & parse Excel/CSV file before confirming
+router.post('/preview', upload.single('file'), (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: 'No file uploaded' });
+    }
+
+    const workbook = xlsx.read(req.file.buffer, { type: 'buffer' });
+    const sheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[sheetName];
+    const rawData = xlsx.utils.sheet_to_json(worksheet, { header: 1 });
+
+    if (rawData.length === 0) {
+      return res.status(400).json({ success: false, error: 'Uploaded sheet is empty' });
+    }
+
+    const headers = rawData[0].map(h => String(h).trim());
+    const rowObjects = xlsx.utils.sheet_to_json(worksheet);
+
+    // 1. Scan rows to find the IMEI column by checking for 15-digit numeric values
+    let detectedImeiCol = '';
+    const numRowsToCheck = Math.min(rawData.length, 10);
+    const colCounts = {};
+    
+    for (let r = 1; r < numRowsToCheck; r++) {
+      const row = rawData[r];
+      if (Array.isArray(row)) {
+        row.forEach((cell, colIdx) => {
+          const val = String(cell || '').trim();
+          if (/^\d{15}$/.test(val)) {
+            colCounts[colIdx] = (colCounts[colIdx] || 0) + 1;
+          }
+        });
+      }
+    }
+    
+    let bestColIdx = -1;
+    let maxCount = 0;
+    Object.keys(colCounts).forEach(colIdx => {
+      if (colCounts[colIdx] > maxCount) {
+        maxCount = colCounts[colIdx];
+        bestColIdx = parseInt(colIdx);
+      }
+    });
+    
+    if (bestColIdx !== -1 && headers[bestColIdx]) {
+      detectedImeiCol = headers[bestColIdx];
+    } else {
+      detectedImeiCol = headers.find(h => h.trim().toLowerCase() === 'imei') || 
+                        headers[0] || '';
+    }
+
+    let autoMapping = {
+      imei: detectedImeiCol
+    };
+
+    // Pre-check for duplicate IMEIs in current DB
+    const existingImeis = new Set(
+      db.prepare('SELECT imei_number FROM devices').all().map(d => d.imei_number)
+    );
+
+    const rowsWithValidation = rowObjects.map((row, index) => {
+      const imeiVal = String(row[autoMapping.imei] || '').trim();
+      const simVal = autoMapping.sim ? String(row[autoMapping.sim] || '').trim() : '';
+
+      const errors = [];
+      if (!imeiVal) {
+        errors.push('Missing IMEI');
+      } else if (existingImeis.has(imeiVal)) {
+        errors.push('IMEI already exists in database');
+      }
+
+      return {
+        row_number: index + 2, // 1-indexed header is line 1
+        raw: row,
+        detected_imei: imeiVal,
+        detected_sim: simVal,
+        detected_price: autoMapping.price ? row[autoMapping.price] : null,
+        valid: errors.length === 0,
+        errors
+      };
+    });
+
+    const totalRows = rowsWithValidation.length;
+    const validRows = rowsWithValidation.filter(r => r.valid).length;
+    const invalidRows = totalRows - validRows;
+
+    res.json({
+      success: true,
+      filename: req.file.originalname,
+      headers,
+      autoMapping,
+      totalRows,
+      validRows,
+      invalidRows,
+      previewRows: rowsWithValidation
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/purchase-batches/confirm - Execute bulk insertion of purchase batch & devices
+router.post('/confirm', (req, res) => {
+  const {
+    uploaded_by,
+    vendor_name,
+    device_type_id,
+    new_device_type_name,
+    purchase_date,
+    source_file,
+    notes,
+    items // Array of { imei, sim, price, additional_attributes }
+  } = req.body;
+
+  const vendor = (vendor_name && vendor_name.trim()) ? vendor_name.trim() : 'FuelTracks Vendor';
+
+  if ((!device_type_id && !new_device_type_name) || !items || !Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ success: false, error: 'Device type (ID or Name) and at least 1 device item are required' });
+  }
+
+  try {
+    const transaction = db.transaction(() => {
+      let targetDeviceTypeId = device_type_id;
+
+      // Check or create device type if new_device_type_name is provided
+      if (new_device_type_name && new_device_type_name.trim()) {
+        const typeName = new_device_type_name.trim();
+        const existingType = db.prepare('SELECT id FROM device_types WHERE LOWER(name) = LOWER(?)').get(typeName);
+        if (existingType) {
+          targetDeviceTypeId = existingType.id;
+        } else {
+          const insertTypeStmt = db.prepare('INSERT INTO device_types (name, category, custom_fields) VALUES (?, ?, ?)');
+          const typeRes = insertTypeStmt.run(typeName, 'GPS Tracker', '[]');
+          targetDeviceTypeId = typeRes.lastInsertRowid;
+        }
+      }
+
+      // Collect all distinct custom field names from all items
+      const targetType = db.prepare('SELECT * FROM device_types WHERE id = ?').get(targetDeviceTypeId);
+      if (!targetType) {
+        throw new Error(`Device type with ID ${targetDeviceTypeId} not found`);
+      }
+      let existingCustomFields = [];
+      try {
+        const parsed = JSON.parse(targetType.custom_fields || '[]');
+        existingCustomFields = Array.isArray(parsed) ? parsed : Object.keys(parsed);
+      } catch {}
+
+      const customFieldsSet = new Set(existingCustomFields);
+
+      for (const item of items) {
+        if (item.additional_attributes) {
+          Object.keys(item.additional_attributes).forEach(k => {
+            if (k && k !== 'original_row') customFieldsSet.add(k);
+          });
+        }
+      }
+
+      // Update device_types custom_fields schema
+      const updatedFieldsArray = Array.from(customFieldsSet);
+      db.prepare('UPDATE device_types SET custom_fields = ? WHERE id = ?').run(
+        JSON.stringify(updatedFieldsArray),
+        targetDeviceTypeId
+      );
+
+      // 1. Create Purchase Batch
+      const batchResult = db.prepare(`
+        INSERT INTO purchase_batches (upload_date, uploaded_by, vendor_name, device_type_id, total_devices_count, source_file, notes)
+        VALUES (datetime('now'), ?, ?, ?, ?, ?, ?)
+      `).run(uploaded_by || 'Warehouse Admin', vendor, targetDeviceTypeId, items.length, source_file || 'manual_upload.xlsx', notes || '');
+
+      const batchId = batchResult.lastInsertRowid;
+
+      const insertDeviceStmt = db.prepare(`
+        INSERT INTO devices (imei_number, sim_number, device_type_id, purchase_batch_id, purchase_date, purchase_price, vendor_name, current_status, current_holder_type, current_holder_id, current_holder_name, additional_attributes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'IN_WAREHOUSE', 'WAREHOUSE', 1, 'Central Warehouse', ?)
+      `);
+
+      const insertHistoryStmt = db.prepare(`
+        INSERT INTO device_history (device_id, imei_number, event_type, event_date, from_holder, to_holder, performed_by, remarks)
+        VALUES (?, ?, 'PURCHASED', datetime('now'), NULL, 'Central Warehouse', ?, ?)
+      `);
+
+      const createdDevices = [];
+      const skippedItems = [];
+
+      for (const item of items) {
+        const imei = String(item.imei || '').trim();
+        if (!imei) continue;
+
+        try {
+          const extraAttrs = item.additional_attributes || {};
+          const result = insertDeviceStmt.run(
+            imei,
+            item.sim || null,
+            targetDeviceTypeId,
+            batchId,
+            purchase_date || new Date().toISOString().split('T')[0],
+            item.price ? parseFloat(item.price) : null,
+            vendor,
+            JSON.stringify(extraAttrs)
+          );
+
+          const devId = result.lastInsertRowid;
+          insertHistoryStmt.run(
+            devId,
+            imei,
+            uploaded_by || 'Warehouse Admin',
+            `Purchased from ${vendor} (Batch #${batchId})`
+          );
+
+          createdDevices.push({ id: devId, imei });
+        } catch (err) {
+          skippedItems.push({ imei, reason: err.message });
+        }
+      }
+
+      return { batchId, deviceTypeId: targetDeviceTypeId, totalCount: createdDevices.length, skippedCount: skippedItems.length, skippedItems };
+    });
+
+    const result = transaction();
+    res.json({
+      success: true,
+      data: result
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/purchase-batches - List past upload batches
+router.get('/', (req, res) => {
+  try {
+    const batches = db.prepare(`
+      SELECT pb.*, dt.name as device_type_name, dt.category as device_type_category,
+             (SELECT COUNT(*) FROM devices d WHERE d.purchase_batch_id = pb.id) as live_devices_count
+      FROM purchase_batches pb
+      JOIN device_types dt ON pb.device_type_id = dt.id
+      ORDER BY pb.upload_date DESC
+    `).all();
+
+    res.json({ success: true, data: batches });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// DELETE /api/purchase-batches/:id - Delete an entire purchase batch/upload list and all its devices
+router.delete('/:id', (req, res) => {
+  const { id } = req.params;
+  try {
+    const batch = db.prepare('SELECT * FROM purchase_batches WHERE id = ?').get(id);
+    if (!batch) {
+      return res.status(404).json({ success: false, error: 'Upload list / purchase batch not found' });
+    }
+
+    const transaction = db.transaction(() => {
+      const devs = db.prepare('SELECT id, imei_number FROM devices WHERE purchase_batch_id = ?').all(id);
+      for (const dev of devs) {
+        db.prepare('DELETE FROM device_history WHERE device_id = ? OR imei_number = ?').run(dev.id, dev.imei_number);
+        db.prepare('DELETE FROM dispatch_items WHERE device_id = ? OR imei_number = ?').run(dev.id, dev.imei_number);
+        db.prepare('DELETE FROM installations WHERE device_id = ? OR imei_number = ?').run(dev.id, dev.imei_number);
+        db.prepare('DELETE FROM reminders WHERE device_id = ? OR imei_number = ?').run(dev.id, dev.imei_number);
+      }
+      db.prepare('DELETE FROM devices WHERE purchase_batch_id = ?').run(id);
+      db.prepare('DELETE FROM purchase_batches WHERE id = ?').run(id);
+      return devs.length;
+    });
+
+    const deletedCount = transaction();
+    res.json({
+      success: true,
+      count: deletedCount,
+      message: `Successfully deleted upload list '${batch.source_file || batch.notes || id}' and ${deletedCount} device(s)`
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+module.exports = router;
