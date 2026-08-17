@@ -33,9 +33,24 @@ app.use('/api/dashboard', require('./routes/dashboard'));
 app.use('/api/users', require('./routes/users'));
 app.use('/api/reports', require('./routes/reports'));
 
-// 404 Route handler
-app.use((req, res) => {
-  res.status(404).json({ success: false, error: 'Endpoint not found' });
+// Serve static React frontend bundle in production
+const frontendDistPath = path.join(__dirname, '../../frontend/dist');
+app.use(express.static(frontendDistPath));
+
+// Fallback to index.html for React Router SPA routes
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api')) {
+    return next();
+  }
+  const indexPath = path.join(frontendDistPath, 'index.html');
+  res.sendFile(indexPath, (err) => {
+    if (err) next();
+  });
+});
+
+// 404 Route handler for API endpoints
+app.use('/api/*', (req, res) => {
+  res.status(404).json({ success: false, error: 'API endpoint not found' });
 });
 
 // Error handling middleware
