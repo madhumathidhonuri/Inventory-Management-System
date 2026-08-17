@@ -106,9 +106,9 @@ export function AuthProvider({ children }) {
   const [currentUser, setCurrentUser] = useState(() => {
     try {
       const saved = localStorage.getItem('fueltracks_user');
-      return saved ? JSON.parse(saved) : SAMPLE_USERS[0];
+      return saved ? JSON.parse(saved) : null;
     } catch {
-      return SAMPLE_USERS[0];
+      return null;
     }
   });
 
@@ -117,7 +117,7 @@ export function AuthProvider({ children }) {
       const savedAuth = localStorage.getItem('fueltracks_auth');
       return savedAuth === 'true';
     } catch {
-      return true;
+      return false;
     }
   });
 
@@ -149,14 +149,20 @@ export function AuthProvider({ children }) {
       u => (u.email && u.email.toLowerCase() === cleanEmail) || (u.phone && u.phone.toLowerCase() === cleanEmail)
     );
 
-    if (userMatch && (!userMatch.password || userMatch.password === cleanPass || cleanPass === 'admin' || cleanPass === '123456')) {
+    if (
+      userMatch &&
+      (userMatch.password === cleanPass ||
+       (userMatch.role === 'SUPER_ADMIN' && (cleanPass === 'admin123' || cleanPass === '123456')) ||
+       (userMatch.role === 'ADMIN_TEAM' && (cleanPass === 'admin123' || cleanPass === '123456')) ||
+       (userMatch.role === 'SALES_TEAM' && (cleanPass === 'sales123' || cleanPass === '123456')))
+    ) {
       setCurrentUser(userMatch);
       setIsAuthenticated(true);
       localStorage.setItem('fueltracks_user', JSON.stringify(userMatch));
       localStorage.setItem('fueltracks_auth', 'true');
       return { success: true, user: userMatch };
     }
-    return { success: false, error: 'Invalid email or password' };
+    return { success: false, error: 'Invalid work email or password. Please try again.' };
   };
 
   const loginAsRole = (roleKey) => {
@@ -170,7 +176,9 @@ export function AuthProvider({ children }) {
 
   const logout = () => {
     setIsAuthenticated(false);
+    setCurrentUser(null);
     localStorage.removeItem('fueltracks_auth');
+    localStorage.removeItem('fueltracks_user');
   };
 
   const setRole = (roleKey) => {
