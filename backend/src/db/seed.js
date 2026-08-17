@@ -37,11 +37,9 @@ function seedDatabase() {
     VALUES (?, ?, ?)
   `);
 
-  const t1 = insertType.run('Vamosys Pro GPS', 'GPS Tracker', JSON.stringify({ require_sim: true, voltage_range: '9-36V', waterproof: 'IP67' })).lastInsertRowid;
-  const t2 = insertType.run('Tracknow OBD II', 'OBD Device', JSON.stringify({ require_sim: true, protocol: 'CAN-BUS' })).lastInsertRowid;
-  const t3 = insertType.run('Volty Ultra Sensor', 'Fuel Sensor', JSON.stringify({ require_sim: false, probe_length_cm: 70, sensor_type: 'Capacitive' })).lastInsertRowid;
-  const t4 = insertType.run('Basic Fleet Tracker', 'GPS Tracker', JSON.stringify({ require_sim: true, internal_battery: '300mAh' })).lastInsertRowid;
-  const t5 = insertType.run('Fuel Pro Digital Probe', 'Fuel Sensor', JSON.stringify({ require_sim: false, digital_output: 'RS485' })).lastInsertRowid;
+  const t1 = insertType.run('VAMOSYS', 'GPS Tracker', JSON.stringify({ require_sim: true })).lastInsertRowid;
+  const t2 = insertType.run('TRACKNOW', 'GPS Tracker', JSON.stringify({ require_sim: true })).lastInsertRowid;
+  const t3 = insertType.run('VOLTY', 'GPS Tracker', JSON.stringify({ require_sim: true })).lastInsertRowid;
 
   // Insert Purchase Batch
   const insertBatch = db.prepare(`

@@ -25,41 +25,67 @@ router.post('/preview', upload.single('file'), (req, res) => {
     const headers = rawData[0].map(h => String(h).trim());
     const rowObjects = xlsx.utils.sheet_to_json(worksheet);
 
-    // 1. Scan rows to find the IMEI column by checking for 15-digit numeric values
+    // 1. Scan rows & headers to find IMEI, SIM, and Price columns intelligently
     let detectedImeiCol = '';
-    const numRowsToCheck = Math.min(rawData.length, 10);
-    const colCounts = {};
+    let detectedSimCol = '';
+    let detectedPriceCol = '';
+    const numRowsToCheck = Math.min(rawData.length, 15);
+    const imeiCounts = {};
+    const simCounts = {};
     
     for (let r = 1; r < numRowsToCheck; r++) {
       const row = rawData[r];
       if (Array.isArray(row)) {
         row.forEach((cell, colIdx) => {
           const val = String(cell || '').trim();
-          if (/^\d{15}$/.test(val)) {
-            colCounts[colIdx] = (colCounts[colIdx] || 0) + 1;
+          if (/^\d{14,16}$/.test(val)) {
+            imeiCounts[colIdx] = (imeiCounts[colIdx] || 0) + 1;
+          }
+          if (/^\d{10,22}$/.test(val) && !/^\d{15}$/.test(val)) {
+            simCounts[colIdx] = (simCounts[colIdx] || 0) + 1;
           }
         });
       }
     }
     
-    let bestColIdx = -1;
-    let maxCount = 0;
-    Object.keys(colCounts).forEach(colIdx => {
-      if (colCounts[colIdx] > maxCount) {
-        maxCount = colCounts[colIdx];
-        bestColIdx = parseInt(colIdx);
+    let bestImeiColIdx = -1;
+    let maxImeiCount = 0;
+    Object.keys(imeiCounts).forEach(colIdx => {
+      if (imeiCounts[colIdx] > maxImeiCount) {
+        maxImeiCount = imeiCounts[colIdx];
+        bestImeiColIdx = parseInt(colIdx);
       }
     });
     
-    if (bestColIdx !== -1 && headers[bestColIdx]) {
-      detectedImeiCol = headers[bestColIdx];
+    if (bestImeiColIdx !== -1 && headers[bestImeiColIdx]) {
+      detectedImeiCol = headers[bestImeiColIdx];
     } else {
-      detectedImeiCol = headers.find(h => h.trim().toLowerCase() === 'imei') || 
-                        headers[0] || '';
+      detectedImeiCol = headers.find(h => /imei|device.*id|serial|vltd/i.test(h)) || headers[0] || '';
     }
 
+    // Auto-detect SIM column
+    let bestSimColIdx = -1;
+    let maxSimCount = 0;
+    Object.keys(simCounts).forEach(colIdx => {
+      if (parseInt(colIdx) !== bestImeiColIdx && simCounts[colIdx] > maxSimCount) {
+        maxSimCount = simCounts[colIdx];
+        bestSimColIdx = parseInt(colIdx);
+      }
+    });
+
+    if (bestSimColIdx !== -1 && headers[bestSimColIdx]) {
+      detectedSimCol = headers[bestSimColIdx];
+    } else {
+      detectedSimCol = headers.find(h => /sim|iccid|mobile|contact/i.test(h) && !/imei/i.test(h)) || '';
+    }
+
+    // Auto-detect Price column
+    detectedPriceCol = headers.find(h => /^cost$|price|rate|amount|purchase.*price/i.test(h)) || '';
+
     let autoMapping = {
-      imei: detectedImeiCol
+      imei: detectedImeiCol,
+      sim: detectedSimCol,
+      price: detectedPriceCol
     };
 
     // Pre-check for duplicate IMEIs in current DB

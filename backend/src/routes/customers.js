@@ -2,12 +2,14 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db/database');
 
-// GET /api/customers - List all customers with fleet vehicle count
+// GET /api/customers - List all customers with fleet vehicle count and billing summary
 router.get('/', (req, res) => {
   try {
     const { search, phone } = req.query;
     let query = `
-      SELECT c.*, COUNT(i.id) as vehicle_count
+      SELECT c.*,
+             COUNT(i.id) as vehicle_count,
+             COALESCE(SUM(i.sale_price), 0) as total_billed
       FROM customers c
       LEFT JOIN installations i ON c.id = i.customer_id
       WHERE 1=1
@@ -18,8 +20,8 @@ router.get('/', (req, res) => {
       query += ` AND c.phone_number = ?`;
       params.push(phone);
     } else if (search) {
-      query += ` AND (c.name LIKE ? OR c.phone_number LIKE ? OR c.email LIKE ? OR c.address LIKE ?)`;
-      params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
+      query += ` AND (c.name LIKE ? OR c.phone_number LIKE ? OR c.email LIKE ? OR c.address LIKE ? OR c.software_user_id LIKE ?)`;
+      params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
     }
 
     query += ` GROUP BY c.id ORDER BY c.created_at DESC`;
@@ -41,7 +43,7 @@ router.get('/:id', (req, res) => {
     }
 
     const installations = db.prepare(`
-      SELECT i.*, d.sim_number, d.current_status, dt.name as device_type_name
+      SELECT i.*, d.sim_number, d.current_status, d.additional_attributes, dt.name as device_type_name
       FROM installations i
       JOIN devices d ON i.device_id = d.id
       JOIN device_types dt ON d.device_type_id = dt.id
@@ -63,6 +65,62 @@ router.get('/:id', (req, res) => {
         reminders
       }
     });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// PUT /api/customers/:id - Update Customer profile and Software credentials
+router.put('/:id', (req, res) => {
+  const { id } = req.params;
+  const { name, phone_number, alternate_phone, email, address, customer_type, software_user_id, software_password, notes } = req.body;
+
+  try {
+    const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(id);
+    if (!customer) {
+      return res.status(404).json({ success: false, error: 'Customer not found' });
+    }
+
+    db.prepare(`
+      UPDATE customers
+      SET name = COALESCE(?, name),
+          phone_number = COALESCE(?, phone_number),
+          alternate_phone = COALESCE(?, alternate_phone),
+          email = COALESCE(?, email),
+          address = COALESCE(?, address),
+          customer_type = COALESCE(?, customer_type),
+          software_user_id = COALESCE(?, software_user_id),
+          software_password = COALESCE(?, software_password),
+          notes = COALESCE(?, notes)
+      WHERE id = ?
+    `).run(
+      name ? name.trim() : null,
+      phone_number ? phone_number.trim() : null,
+      alternate_phone !== undefined ? alternate_phone : null,
+      email !== undefined ? email : null,
+      address !== undefined ? address : null,
+      customer_type || null,
+      software_user_id !== undefined ? software_user_id : null,
+      software_password !== undefined ? software_password : null,
+      notes !== undefined ? notes : null,
+      id
+    );
+
+    const updated = db.prepare('SELECT * FROM customers WHERE id = ?').get(id);
+    res.json({ success: true, data: updated, message: 'Customer profile updated successfully' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// DELETE /api/customers/:id - Delete customer
+router.delete('/:id', (req, res) => {
+  const { id } = req.params;
+  try {
+    db.prepare('DELETE FROM reminders WHERE customer_id = ?').run(id);
+    db.prepare('DELETE FROM installations WHERE customer_id = ?').run(id);
+    db.prepare('DELETE FROM customers WHERE id = ?').run(id);
+    res.json({ success: true, message: 'Customer record deleted successfully' });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }

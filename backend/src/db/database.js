@@ -19,10 +19,12 @@ function initDatabase() {
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
-      phone TEXT UNIQUE NOT NULL,
-      email TEXT UNIQUE,
-      role TEXT NOT NULL CHECK(role IN ('SUPER_ADMIN', 'WAREHOUSE_MANAGER', 'SALES_MANAGER', 'INSTALLER', 'DEALER')),
+      phone TEXT NOT NULL,
+      email TEXT,
+      password TEXT DEFAULT '123456',
+      role TEXT NOT NULL,
       region TEXT DEFAULT 'All India',
+      allowed_columns TEXT DEFAULT '[]',
       active INTEGER DEFAULT 1,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
@@ -144,15 +146,25 @@ function initDatabase() {
       customer_id INTEGER,
       device_id INTEGER,
       imei_number TEXT,
-      type TEXT NOT NULL CHECK(type IN ('WARRANTY_EXPIRY', 'SERVICE_DUE', 'PAYMENT_PENDING', 'GENERAL')),
+      type TEXT NOT NULL CHECK(type IN ('PAYMENT_DUE', 'WARRANTY_EXPIRY', 'SERVICE_FOLLOWUP', 'AMC_RENEWAL')),
       due_date TEXT NOT NULL,
-      status TEXT DEFAULT 'PENDING' CHECK(status IN ('PENDING', 'DONE')),
+      status TEXT NOT NULL DEFAULT 'PENDING' CHECK(status IN ('PENDING', 'SENT', 'RESOLVED', 'DISMISSED')),
       remarks TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (customer_id) REFERENCES customers(id),
       FOREIGN KEY (device_id) REFERENCES devices(id)
     );
   `);
+
+  // Safe schema migrations for software credentials & payments
+  try { db.exec("ALTER TABLE customers ADD COLUMN software_user_id TEXT;"); } catch (e) {}
+  try { db.exec("ALTER TABLE customers ADD COLUMN software_password TEXT;"); } catch (e) {}
+  try { db.exec("ALTER TABLE customers ADD COLUMN notes TEXT;"); } catch (e) {}
+  try { db.exec("ALTER TABLE installations ADD COLUMN software_user_id TEXT;"); } catch (e) {}
+  try { db.exec("ALTER TABLE installations ADD COLUMN software_password TEXT;"); } catch (e) {}
+  try { db.exec("ALTER TABLE installations ADD COLUMN payment_status TEXT DEFAULT 'PENDING';"); } catch (e) {}
+  try { db.exec("ALTER TABLE users ADD COLUMN password TEXT DEFAULT '123456';"); } catch (e) {}
+  try { db.exec("ALTER TABLE users ADD COLUMN allowed_columns TEXT DEFAULT '[]';"); } catch (e) {}
 }
 
 initDatabase();

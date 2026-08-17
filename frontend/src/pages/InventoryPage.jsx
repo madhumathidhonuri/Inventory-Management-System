@@ -1,6 +1,36 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Boxes, Search, Filter, RefreshCw, Eye, Edit3, ShieldAlert, CheckCircle2, Truck, Plus, Edit2, Trash2, X, Save, AlertTriangle } from 'lucide-react';
-import { useAuth } from '../context/AuthContext';
+import {
+  Boxes,
+  Search,
+  Filter,
+  RefreshCw,
+  Eye,
+  Edit3,
+  Shield,
+  ShieldAlert,
+  CheckCircle2,
+  Truck,
+  Plus,
+  Edit2,
+  Trash2,
+  X,
+  Save,
+  AlertTriangle,
+  MapPin,
+  Building,
+  Calendar,
+  Download,
+  Copy,
+  Check,
+  RotateCcw,
+  Sparkles,
+  User,
+  Car,
+  CreditCard,
+  Layers,
+  Zap
+} from 'lucide-react';
+import { useAuth, canUserEditField } from '../context/AuthContext';
 import {
   fetchDevices,
   fetchDeviceTypes,
@@ -12,12 +42,16 @@ import {
   addDeviceColumn,
   renameDeviceColumn,
   deleteDeviceColumn,
-  fetchPurchaseBatches
+  fetchPurchaseBatches,
+  fetchDealersSummary,
+  bulkAssignDealer,
+  bulkTransferDevices,
+  fetchAuditLogs
 } from '../services/api';
 
-export default function InventoryPage({ onOpenTraceDrawer }) {
+export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClearInitialFilter }) {
   const { user } = useAuth();
-  const isSuperAdmin = user?.role === 'SUPER_ADMIN' || true;
+  const isSuperAdmin = user?.role === 'SUPER_ADMIN';
 
   const [devices, setDevices] = useState([]);
   const [deviceTypes, setDeviceTypes] = useState([]);
@@ -27,6 +61,35 @@ export default function InventoryPage({ onOpenTraceDrawer }) {
   const [statusFilter, setStatusFilter] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
   const [batchFilter, setBatchFilter] = useState('');
+
+  // Multi-Select & Batch Stock Movement State
+  const [selectedDeviceIds, setSelectedDeviceIds] = useState(new Set());
+  const [isBulkTransferModalOpen, setIsBulkTransferModalOpen] = useState(false);
+  const [transferPlace, setTransferPlace] = useState('');
+  const [transferDate, setTransferDate] = useState(new Date().toISOString().split('T')[0]);
+  const [transferRemarks, setTransferRemarks] = useState('');
+  const [transferSubmitting, setTransferSubmitting] = useState(false);
+  const [transferSuccessMsg, setTransferSuccessMsg] = useState('');
+
+  // Advanced Filter Dropdowns State
+  const [stockPlaceFilter, setStockPlaceFilter] = useState('');
+  const [salesPersonFilter, setSalesPersonFilter] = useState('');
+  const [rtoFilter, setRtoFilter] = useState('');
+  const [paymentFilter, setPaymentFilter] = useState('');
+  const [deploymentFilter, setDeploymentFilter] = useState('');
+  const [activationFilter, setActivationFilter] = useState('');
+  const [copiedImeisMsg, setCopiedImeisMsg] = useState('');
+
+  // Super Admin Team Edits & Activity Audit Log State
+  const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
+  const [auditLogs, setAuditLogs] = useState([]);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditSearch, setAuditSearch] = useState('');
+  const [auditTeamFilter, setAuditTeamFilter] = useState('');
+
+  // Highlight / Notification from Scanner Batch Actions
+  const [highlightImeis, setHighlightImeis] = useState(new Set());
+  const [highlightNotice, setHighlightNotice] = useState('');
 
   // Delete Batch / List State
   const [deletingBatchRecord, setDeletingBatchRecord] = useState(null);
@@ -65,10 +128,53 @@ export default function InventoryPage({ onOpenTraceDrawer }) {
   const [deletingCol, setDeletingCol] = useState(null);
   const [actionLoading, setActionLoading] = useState(false);
 
+  // Quick Operational Presets: 'ALL' | 'OFFICE' | 'INSTALLED' | 'READY_STOCK' | 'PENDING_PAYMENT' | 'PAID' | 'ACTIVATED'
+  const [quickPreset, setQuickPreset] = useState('ALL');
+
+  // Dealer / Stock Place Filtering & Summary State
+  const [dealersSummary, setDealersSummary] = useState([]);
+  const [dealerFilter, setDealerFilter] = useState('');
+
+  // Bulk Assign to Dealer Modal State
+  const [isBulkAssignModalOpen, setIsBulkAssignModalOpen] = useState(false);
+  const [bulkAssignImeisText, setBulkAssignImeisText] = useState('');
+  const [bulkAssignStockPlace, setBulkAssignStockPlace] = useState('');
+  const [bulkAssignDate, setBulkAssignDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [bulkAssignRemarks, setBulkAssignRemarks] = useState('');
+  const [bulkAssignSubmitting, setBulkAssignSubmitting] = useState(false);
+  const [bulkAssignSuccessMsg, setBulkAssignSuccessMsg] = useState('');
+
+  // Inline Editing Row State
+  const [inlineEditId, setInlineEditId] = useState(null);
+  const [inlineDraftAttrs, setInlineDraftAttrs] = useState({});
+  const [inlineSaving, setInlineSaving] = useState(false);
+
   useEffect(() => {
     loadData();
     refreshDeviceTypes();
+    loadDealersSummary();
   }, [statusFilter, typeFilter, batchFilter]);
+
+  // Handle incoming initialFilter from scanner
+  useEffect(() => {
+    if (initialFilter) {
+      setDealerFilter(''); // Keep all devices visible in table
+      if (initialFilter.imeis && Array.isArray(initialFilter.imeis)) {
+        setHighlightImeis(new Set(initialFilter.imeis));
+        setHighlightNotice(initialFilter.successMessage || `Updated ${initialFilter.imeis.length} device(s) with Stock Place "${initialFilter.stockPlace}".`);
+      }
+      loadData();
+      loadDealersSummary();
+    }
+  }, [initialFilter]);
+
+  const loadDealersSummary = () => {
+    fetchDealersSummary().then(res => {
+      if (res.success && Array.isArray(res.data)) {
+        setDealersSummary(res.data);
+      }
+    }).catch(err => console.error(err));
+  };
 
   const refreshDeviceTypes = () => {
     fetchDeviceTypes().then(res => {
@@ -123,6 +229,11 @@ export default function InventoryPage({ onOpenTraceDrawer }) {
       }
     });
 
+    if (keysSet.size === 0 && devices.length > 0) {
+      keysSet.add('STOCK PLACE');
+      keysSet.add('STOCK PLACE DATE');
+    }
+
     return Array.from(keysSet);
   }, [typeFilter, deviceTypes, devices]);
 
@@ -176,7 +287,8 @@ export default function InventoryPage({ onOpenTraceDrawer }) {
         imei_number: rowFormData.imei_number,
         sim_number: rowFormData.sim_number,
         purchase_price: rowFormData.purchase_price ? parseFloat(rowFormData.purchase_price) : null,
-        additional_attributes: rowFormData.additional_attributes
+        additional_attributes: rowFormData.additional_attributes,
+        performed_by: user?.name || user?.role || 'Admin'
       };
 
       const res = await updateDevice(editingRowDevice.id, payload);
@@ -265,6 +377,93 @@ export default function InventoryPage({ onOpenTraceDrawer }) {
     }
   };
 
+  // Load Super Admin Audit Logs
+  const loadAuditLogs = async (customParams = {}) => {
+    setAuditLoading(true);
+    try {
+      const q = { ...customParams };
+      if (auditSearch) q.search = auditSearch;
+      if (auditTeamFilter) q.performed_by = auditTeamFilter;
+      const res = await fetchAuditLogs(q);
+      if (res.success) {
+        setAuditLogs(res.data || []);
+      }
+    } catch (err) {
+      console.error('Failed to fetch audit logs:', err);
+    } finally {
+      setAuditLoading(false);
+    }
+  };
+
+  // Export Super Admin Audit Logs to CSV
+  const handleExportAuditCsv = () => {
+    if (auditLogs.length === 0) {
+      alert('No audit logs available to export');
+      return;
+    }
+    const headers = [
+      'Timestamp',
+      'Edited By / User',
+      'Event Type',
+      'IMEI Number',
+      'Device Type',
+      'Current Status',
+      'Change Details / Diff',
+      'Vehicle Number',
+      'Customer Name',
+      'Cost',
+      'Tax',
+      'Amount Received',
+      'Stock Place'
+    ];
+
+    const csvRows = [];
+    csvRows.push(headers.map(h => `"${h.replace(/"/g, '""')}"`).join(','));
+
+    auditLogs.forEach(log => {
+      const attrs = log.additional_attributes || {};
+      const vehKey = Object.keys(attrs).find(k => /vehicle/i.test(k));
+      const vehNo = (vehKey && attrs[vehKey]) || '';
+      const custKey = Object.keys(attrs).find(k => /customer.*name|customer/i.test(k));
+      const custName = (custKey && attrs[custKey]) || '';
+      const costKey = Object.keys(attrs).find(k => /^cost$/i.test(k) || /purchase_price/i.test(k));
+      const cost = (costKey && attrs[costKey]) || log.purchase_price || '';
+      const taxKey = Object.keys(attrs).find(k => /tax/i.test(k));
+      const tax = (taxKey && attrs[taxKey]) || '';
+      const payKey = Object.keys(attrs).find(k => /amount.*rec|payment/i.test(k));
+      const pay = (payKey && attrs[payKey]) || '';
+      const placeKey = Object.keys(attrs).find(k => /stock.*place|place/i.test(k));
+      const place = (placeKey && attrs[placeKey]) || log.to_holder || '';
+
+      const row = [
+        log.event_date || '',
+        log.performed_by || 'Admin',
+        log.event_type || 'UPDATE',
+        log.imei_number || '',
+        log.device_type_name || '',
+        log.current_device_status || '',
+        log.remarks || '',
+        vehNo,
+        custName,
+        cost,
+        tax,
+        pay,
+        place
+      ];
+
+      csvRows.push(row.map(val => `"${String(val || '').replace(/"/g, '""')}"`).join(','));
+    });
+
+    const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `Team_Edits_Audit_Report_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const handleAddColumn = async () => {
     if (!newColName.trim()) return;
     if (!activeDeviceTypeId) {
@@ -329,6 +528,496 @@ export default function InventoryPage({ onOpenTraceDrawer }) {
     return map[status] || 'badge-warehouse';
   };
 
+  // Dynamic extraction of unique filter options with live counts
+  const filterOptions = useMemo(() => {
+    const stockPlacesMap = {};
+    const salesPersonsMap = {};
+    const rtoLocationsMap = {};
+    let totalInstalled = 0;
+    let totalReadyStock = 0;
+    let totalPaid = 0;
+    let totalPending = 0;
+    let totalOfficeStock = 0;
+    let totalActivated = 0;
+    let totalNotActivated = 0;
+
+    devices.forEach(dev => {
+      const attrs = dev.additional_attributes || {};
+
+      // Stock place
+      const placeKey = Object.keys(attrs).find(k => /stock.*place|place|location/i.test(k));
+      const place = (placeKey && attrs[placeKey] ? String(attrs[placeKey]).trim() : dev.current_holder_name || '').trim();
+      if (place) {
+        stockPlacesMap[place] = (stockPlacesMap[place] || 0) + 1;
+        if (/office/i.test(place)) {
+          totalOfficeStock++;
+        }
+      }
+
+      // Sales person
+      const spKey = Object.keys(attrs).find(k => /sales.*(person|manager)/i.test(k));
+      const sp = (spKey && attrs[spKey] ? String(attrs[spKey]).trim() : '').trim();
+      if (sp) {
+        salesPersonsMap[sp] = (salesPersonsMap[sp] || 0) + 1;
+      }
+
+      // RTO location
+      const rtoKey = Object.keys(attrs).find(k => /rto/i.test(k));
+      const rto = (rtoKey && attrs[rtoKey] ? String(attrs[rtoKey]).trim() : '').trim();
+      if (rto) {
+        rtoLocationsMap[rto] = (rtoLocationsMap[rto] || 0) + 1;
+      }
+
+      // Installation / Vehicle
+      const vehKey = Object.keys(attrs).find(k => /vehicle|veh_no|reg_no/i.test(k));
+      const hasVeh = Boolean(vehKey && String(attrs[vehKey]).trim()) || dev.current_status === 'INSTALLED';
+      if (hasVeh) {
+        totalInstalled++;
+      } else {
+        totalReadyStock++;
+      }
+
+      // Payment status
+      const payKey = Object.keys(attrs).find(k => /amount.*rec|payment|received/i.test(k));
+      const payVal = payKey ? String(attrs[payKey] || '').toUpperCase().trim() : '';
+      if (hasVeh) {
+        const isPaid = (payVal.includes('REC') || payVal.includes('PAID')) && !payVal.includes('NOT') && !payVal.includes('UNPAID');
+        if (isPaid) {
+          totalPaid++;
+        } else {
+          totalPending++;
+        }
+      }
+
+      // Activation status
+      const actKey = Object.keys(attrs).find(k => /activat/i.test(k));
+      const actVal = actKey ? String(attrs[actKey] || '').toUpperCase().trim() : '';
+      if (actVal.includes('YES') || actVal.includes('TRUE') || actVal.includes('ACTIVE')) {
+        totalActivated++;
+      } else if (actVal.includes('NO') || actVal.includes('FALSE')) {
+        totalNotActivated++;
+      }
+    });
+
+    const stockPlacesList = Object.entries(stockPlacesMap)
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count);
+
+    const salesPersonsList = Object.entries(salesPersonsMap)
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count);
+
+    const rtoLocationsList = Object.entries(rtoLocationsMap)
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count);
+
+    return {
+      stockPlacesList,
+      salesPersonsList,
+      rtoLocationsList,
+      totalInstalled,
+      totalReadyStock,
+      totalPaid,
+      totalPending,
+      totalOfficeStock,
+      totalActivated,
+      totalNotActivated
+    };
+  }, [devices]);
+
+  // Operational Multi-Filter Filtering Engine
+  const filteredDevices = useMemo(() => {
+    return devices.filter(dev => {
+      const attrs = dev.additional_attributes || {};
+
+      // Vehicle & Installed status
+      const vehKey = Object.keys(attrs).find(k => /vehicle|veh_no|reg_no/i.test(k));
+      const vehNo = vehKey && attrs[vehKey] ? String(attrs[vehKey]).trim() : '';
+      const isInstalled = Boolean(vehNo) || dev.current_status === 'INSTALLED';
+
+      // Payment status
+      const payKey = Object.keys(attrs).find(k => /amount.*rec|payment|received/i.test(k));
+      const payVal = payKey ? String(attrs[payKey] || '').toUpperCase().trim() : '';
+      const isPaid = (payVal.includes('REC') || payVal.includes('PAID')) && !payVal.includes('NOT') && !payVal.includes('UNPAID');
+      const isPending = isInstalled && !isPaid;
+
+      // Stock place
+      const placeKey = Object.keys(attrs).find(k => /stock.*place|place|location/i.test(k));
+      const placeVal = (placeKey && attrs[placeKey] ? String(attrs[placeKey]) : dev.current_holder_name || '').trim();
+
+      // Sales person
+      const spKey = Object.keys(attrs).find(k => /sales.*(person|manager)/i.test(k));
+      const spVal = (spKey && attrs[spKey] ? String(attrs[spKey]) : '').trim();
+
+      // RTO location
+      const rtoKey = Object.keys(attrs).find(k => /rto/i.test(k));
+      const rtoVal = (rtoKey && attrs[rtoKey] ? String(attrs[rtoKey]) : '').trim();
+
+      // Activation
+      const actKey = Object.keys(attrs).find(k => /activat/i.test(k));
+      const actVal = actKey ? String(attrs[actKey] || '').toUpperCase().trim() : '';
+      const isActivated = actVal.includes('YES') || actVal.includes('TRUE') || actVal.includes('ACTIVE');
+
+      // 1. Dealer Allocations Bar Selection
+      if (dealerFilter && placeVal !== dealerFilter) return false;
+
+      // 2. Quick Preset Pills Filter
+      if (quickPreset === 'OFFICE' && !/office/i.test(placeVal)) return false;
+      if (quickPreset === 'INSTALLED' && !isInstalled) return false;
+      if (quickPreset === 'READY_STOCK' && isInstalled) return false;
+      if (quickPreset === 'PENDING_PAYMENT' && !isPending) return false;
+      if (quickPreset === 'PAID' && !isPaid) return false;
+      if (quickPreset === 'ACTIVATED' && !isActivated) return false;
+
+      // 3. Dropdown Specific Multi-Filters
+      if (stockPlaceFilter) {
+        if (stockPlaceFilter === '__OFFICE__') {
+          if (!/office/i.test(placeVal)) return false;
+        } else if (placeVal !== stockPlaceFilter) {
+          return false;
+        }
+      }
+
+      if (paymentFilter === 'PAID' && !isPaid) return false;
+      if (paymentFilter === 'PENDING' && !isPending) return false;
+
+      if (deploymentFilter === 'INSTALLED' && !isInstalled) return false;
+      if (deploymentFilter === 'READY_STOCK' && isInstalled) return false;
+
+      if (salesPersonFilter && spVal !== salesPersonFilter) return false;
+      if (rtoFilter && rtoVal !== rtoFilter) return false;
+
+      if (activationFilter === 'ACTIVATED' && !isActivated) return false;
+      if (activationFilter === 'NOT_ACTIVATED' && isActivated) return false;
+
+      return true;
+    });
+  }, [devices, quickPreset, dealerFilter, stockPlaceFilter, paymentFilter, deploymentFilter, salesPersonFilter, rtoFilter, activationFilter]);
+
+  // Reset all active filters
+  const handleResetAllFilters = () => {
+    setSearch('');
+    setQuickPreset('ALL');
+    setStockPlaceFilter('');
+    setSalesPersonFilter('');
+    setRtoFilter('');
+    setPaymentFilter('');
+    setDeploymentFilter('');
+    setActivationFilter('');
+    setStatusFilter('');
+    setTypeFilter('');
+    setBatchFilter('');
+    setDealerFilter('');
+    if (onClearInitialFilter) onClearInitialFilter();
+  };
+
+  const isAnyFilterActive = Boolean(
+    search ||
+    quickPreset !== 'ALL' ||
+    stockPlaceFilter ||
+    salesPersonFilter ||
+    rtoFilter ||
+    paymentFilter ||
+    deploymentFilter ||
+    activationFilter ||
+    statusFilter ||
+    typeFilter ||
+    batchFilter ||
+    dealerFilter
+  );
+
+  // Multi-Select Handlers
+  const handleToggleSelectAll = (checked) => {
+    if (checked) {
+      setSelectedDeviceIds(new Set(filteredDevices.map(d => d.id)));
+    } else {
+      setSelectedDeviceIds(new Set());
+    }
+  };
+
+  const handleToggleSelectRow = (id) => {
+    setSelectedDeviceIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleOpenBulkTransferModal = () => {
+    if (selectedDeviceIds.size === 0) {
+      alert('Please select at least one device');
+      return;
+    }
+    setTransferSuccessMsg('');
+    setIsBulkTransferModalOpen(true);
+  };
+
+  const handleExecuteBulkTransfer = async (e) => {
+    e.preventDefault();
+    if (!transferPlace.trim()) {
+      alert('Please select or enter target Stock Place');
+      return;
+    }
+    setTransferSubmitting(true);
+    try {
+      const res = await bulkTransferDevices({
+        ids: Array.from(selectedDeviceIds),
+        stock_place: transferPlace.trim(),
+        stock_place_date: transferDate,
+        remarks: transferRemarks.trim(),
+        performed_by: user?.name || user?.role || 'Operations Team'
+      });
+      if (res.success) {
+        setTransferSuccessMsg(`Successfully transferred ${res.count} device(s) to ${transferPlace}!`);
+        setTimeout(() => {
+          setIsBulkTransferModalOpen(false);
+          setTransferSuccessMsg('');
+          setSelectedDeviceIds(new Set());
+          loadData();
+        }, 1500);
+      }
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setTransferSubmitting(false);
+    }
+  };
+
+  const handleCopySelectedImeis = () => {
+    const selectedDevices = devices.filter(d => selectedDeviceIds.has(d.id));
+    const imeis = selectedDevices.map(d => d.imei_number).filter(Boolean);
+    if (imeis.length === 0) return;
+    navigator.clipboard.writeText(imeis.join('\n'));
+    setCopiedImeisMsg(`Copied ${imeis.length} selected IMEI(s) to clipboard!`);
+    setTimeout(() => setCopiedImeisMsg(''), 2500);
+  };
+
+  // Copy Filtered IMEIs to Clipboard
+  const handleCopyFilteredImeis = () => {
+    const imeis = filteredDevices.map(d => d.imei_number).filter(Boolean);
+    if (imeis.length === 0) {
+      alert('No IMEIs in current filtered view');
+      return;
+    }
+    navigator.clipboard.writeText(imeis.join('\n'));
+    setCopiedImeisMsg(`Copied ${imeis.length} IMEI(s) to clipboard!`);
+    setTimeout(() => setCopiedImeisMsg(''), 2500);
+  };
+
+  // Export Filtered Records directly to CSV (clean deduplicated columns and formatted dates)
+  const handleExportFilteredCsv = () => {
+    if (filteredDevices.length === 0) {
+      alert('No records available to export');
+      return;
+    }
+
+    // Helper to format raw Excel date integers into clean readable dates
+    const formatExportValue = (headerName, rawVal) => {
+      if (rawVal === undefined || rawVal === null) return '';
+      const str = String(rawVal).trim();
+      if (!str) return '';
+
+      // Check if it's an Excel serial date number
+      if (/date|month|validity/i.test(headerName)) {
+        const num = Number(str);
+        if (!isNaN(num) && num > 30000 && num < 70000) {
+          try {
+            const dateObj = new Date(Math.round((num - 25569) * 86400 * 1000));
+            const day = String(dateObj.getUTCDate()).padStart(2, '0');
+            const month = String(dateObj.getUTCMonth() + 1).padStart(2, '0');
+            const year = dateObj.getUTCFullYear();
+            return `${day}-${month}-${year}`;
+          } catch {
+            return str;
+          }
+        }
+      }
+      return str;
+    };
+
+    // Determine final ordered, deduplicated columns
+    const exportColumns = [];
+    const seenNormKeys = new Set();
+
+    // 1. Ensure IMEI is always the first column
+    exportColumns.push('IMEI Number');
+    seenNormKeys.add('IMEI');
+    seenNormKeys.add('IMEINUMBER');
+    seenNormKeys.add('DEVICEIMEI');
+
+    // 2. Add device type
+    exportColumns.push('Device Type');
+    seenNormKeys.add('DEVICETYPE');
+    seenNormKeys.add('DEVICENAME');
+
+    // 3. Add SIM Number if not in custom columns
+    const hasSimInCustom = customColumns.some(c => /^sim|simno|sim1/i.test(c));
+    if (!hasSimInCustom) {
+      exportColumns.push('SIM Number');
+      seenNormKeys.add('SIM');
+      seenNormKeys.add('SIMNUMBER');
+    }
+
+    // 4. Add all custom sheet columns without duplicate normalizations
+    customColumns.forEach(col => {
+      const norm = col.trim().toUpperCase().replace(/[\s_-]+/g, '');
+      if (!seenNormKeys.has(norm)) {
+        seenNormKeys.add(norm);
+        exportColumns.push(col);
+      }
+    });
+
+    // Build CSV Content
+    const csvRows = [];
+    csvRows.push(exportColumns.map(h => `"${h.replace(/"/g, '""')}"`).join(','));
+
+    filteredDevices.forEach(dev => {
+      const attrs = dev.additional_attributes || {};
+      const row = exportColumns.map(header => {
+        let val = '';
+        if (header === 'IMEI Number') {
+          val = dev.imei_number || '';
+        } else if (header === 'Device Type') {
+          val = dev.device_type_name || '';
+        } else if (header === 'SIM Number') {
+          val = dev.sim_number || '';
+        } else if (attrs[header] !== undefined && attrs[header] !== null) {
+          val = formatExportValue(header, attrs[header]);
+        } else {
+          // Case-insensitive fallback
+          const matchingKey = Object.keys(attrs).find(
+            k => k.trim().toUpperCase() === header.trim().toUpperCase()
+          );
+          if (matchingKey) {
+            val = formatExportValue(header, attrs[matchingKey]);
+          } else {
+            val = '';
+          }
+        }
+        return `"${String(val).replace(/"/g, '""')}"`;
+      });
+      csvRows.push(row.join(','));
+    });
+
+    const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `Inventory_Export_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // Handle Bulk Dealer Allocation Submit
+  const handleBulkAssignSubmit = async (e) => {
+    e.preventDefault();
+    if (!bulkAssignStockPlace.trim()) {
+      alert('Please enter or select a Dealer / Stock Place');
+      return;
+    }
+    const imeis = bulkAssignImeisText
+      .split(/[\n,;\t\s]+/)
+      .map(t => t.trim().toUpperCase())
+      .filter(t => t.length >= 4);
+
+    if (imeis.length === 0) {
+      alert('Please enter at least one IMEI number');
+      return;
+    }
+
+    setBulkAssignSubmitting(true);
+    try {
+      const res = await bulkAssignDealer({
+        imeis,
+        stock_place: bulkAssignStockPlace.trim(),
+        stock_place_date: bulkAssignDate,
+        remarks: bulkAssignRemarks,
+        performed_by: user?.username || 'Admin'
+      });
+      if (res.success) {
+        setBulkAssignSuccessMsg(`✅ ${res.message}`);
+        loadData();
+        loadDealersSummary();
+        setTimeout(() => {
+          setIsBulkAssignModalOpen(false);
+          setBulkAssignSuccessMsg('');
+          setBulkAssignImeisText('');
+        }, 1300);
+      }
+    } catch (err) {
+      alert('Failed: ' + err.message);
+    } finally {
+      setBulkAssignSubmitting(false);
+    }
+  };
+
+  // Handle WhatsApp Quick Share
+  const handleShareWhatsApp = (dev) => {
+    const attrs = dev.additional_attributes || {};
+    const phone = attrs['CUSTOMER PHONE NUMBER'] || attrs['Phone'] || attrs['Contact'] || '';
+    const cleanPhone = String(phone).replace(/[^0-9]/g, '');
+    const custName = attrs['CUSTOMER NAME'] || attrs['CERTIFICATE ISSUED TO'] || attrs['Name'] || 'Customer';
+    const vehKey = Object.keys(attrs).find(k => /vehicle|veh_no|reg_no/i.test(k));
+    const vehNo = vehKey && attrs[vehKey] ? String(attrs[vehKey]).trim() : 'Vehicle';
+    const devType = dev.device_type_name || 'GPS Tracker';
+    const date = attrs['CERTIFICATE ISSUED DATE'] || attrs['DATE'] || dev.purchase_date || '';
+
+    const msg = `Dear ${custName}, your FuelTracks GPS Device (${devType}) has been installed in vehicle ${vehNo}. IMEI: ${dev.imei_number}. Date: ${date}. Thank you for choosing FuelTracks!`;
+    const url = cleanPhone
+      ? `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(msg)}`
+      : `https://api.whatsapp.com/send?text=${encodeURIComponent(msg)}`;
+    window.open(url, '_blank');
+  };
+
+  // Handle 1-Click Payment Status Flip
+  const handleTogglePaymentStatus = async (dev) => {
+    const attrs = { ...(dev.additional_attributes || {}) };
+    const currentStatus = String(attrs['AMOUNT RECEIVED'] || attrs['Amount Received'] || '').trim().toUpperCase();
+    const newStatus = (currentStatus.includes('NOT') || currentStatus.includes('UNPAID') || currentStatus.includes('PENDING'))
+      ? 'RECEIVED'
+      : 'NOT RECEIVED';
+    
+    attrs['AMOUNT RECEIVED'] = newStatus;
+    try {
+      const res = await updateDevice(dev.id, {
+        additional_attributes: attrs,
+        performed_by: user?.username || 'Admin'
+      });
+      if (res.success) {
+        setDevices(prev => prev.map(d => d.id === dev.id ? { ...d, additional_attributes: attrs } : d));
+      }
+    } catch (err) {
+      alert('Failed to update payment status: ' + err.message);
+    }
+  };
+
+  // Start Inline Editing for a row
+  const handleStartInlineEdit = (dev) => {
+    setInlineEditId(dev.id);
+    setInlineDraftAttrs({ ...(dev.additional_attributes || {}) });
+  };
+
+  // Save Inline Editing
+  const handleSaveInlineEdit = async (devId) => {
+    setInlineSaving(true);
+    try {
+      const res = await updateDevice(devId, {
+        additional_attributes: inlineDraftAttrs,
+        performed_by: user?.username || 'Admin'
+      });
+      if (res.success) {
+        setDevices(prev => prev.map(d => d.id === devId ? { ...d, additional_attributes: inlineDraftAttrs } : d));
+        setInlineEditId(null);
+      }
+    } catch (err) {
+      alert('Failed to save inline changes: ' + err.message);
+    } finally {
+      setInlineSaving(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       
@@ -338,21 +1027,42 @@ export default function InventoryPage({ onOpenTraceDrawer }) {
           <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
             <Boxes className="w-5 h-5 text-blue-600" /> Dynamic Stock Inventory Grid
           </h2>
-          <p className="text-xs text-slate-500">Live view of all IMEI stock with complete Excel column preservation & dynamic schema editing</p>
+          <p className="text-xs text-slate-500">Live view of all IMEI stock with complete Excel column preservation & dynamic inline editing</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {/* Dispatch to Dealer Button */}
           <button
-            onClick={() => setIsAddColModalOpen(true)}
-            className="px-3.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold rounded-xl border border-blue-200 flex items-center gap-1.5 transition-colors shadow-2xs"
+            onClick={() => setIsBulkAssignModalOpen(true)}
+            className="px-3.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold rounded-xl border border-indigo-200 flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
+            title="Bulk dispatch scanned devices to dealer and update stock place with date"
           >
-            <Plus className="w-4 h-4 text-blue-600" /> Add Custom Column
+            <Truck className="w-4 h-4 text-indigo-600" /> Dispatch to Dealer
           </button>
+
+          {isSuperAdmin && (
+            <button
+              onClick={() => { setIsAuditModalOpen(true); loadAuditLogs(); }}
+              className="px-3.5 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs font-semibold rounded-xl border border-purple-200 flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
+              title="Super Admin: View and download all records edited by Admin & Sales teams"
+            >
+              <Shield className="w-4 h-4 text-purple-600" /> Team Edits & Audit Log
+            </button>
+          )}
+
+          {isSuperAdmin && (
+            <button
+              onClick={() => setIsAddColModalOpen(true)}
+              className="px-3.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold rounded-xl border border-blue-200 flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
+            >
+              <Plus className="w-4 h-4 text-blue-600" /> Add Custom Column
+            </button>
+          )}
           
           {isSuperAdmin && (
             <button
               onClick={() => { setClearScope(typeFilter ? 'FILTERED' : 'ALL'); setIsClearListModalOpen(true); }}
-              className="px-3.5 py-1.5 bg-red-50 hover:bg-red-100 text-red-700 text-xs font-semibold rounded-xl border border-red-200 flex items-center gap-1.5 transition-colors shadow-2xs"
+              className="px-3.5 py-1.5 bg-red-50 hover:bg-red-100 text-red-700 text-xs font-semibold rounded-xl border border-red-200 flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
               title="Delete Complete List / Wipe Stock"
             >
               <Trash2 className="w-4 h-4 text-red-600" /> Clear / Delete Stock List
@@ -360,90 +1070,328 @@ export default function InventoryPage({ onOpenTraceDrawer }) {
           )}
 
           <button
-            onClick={loadData}
-            className="px-3.5 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-medium rounded-xl border border-slate-200 flex items-center gap-1.5 transition-colors"
+            onClick={() => { loadData(); loadDealersSummary(); }}
+            className="px-3.5 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-medium rounded-xl border border-slate-200 flex items-center gap-1.5 transition-colors cursor-pointer"
           >
             <RefreshCw className="w-3.5 h-3.5 text-blue-600" /> Refresh Stock
           </button>
         </div>
       </div>
 
-      {/* Filter & Search Bar */}
-      <div className="glass-panel p-4 rounded-2xl flex flex-col md:flex-row gap-3 items-center justify-between">
-        
-        {/* Search */}
-        <form onSubmit={handleSearchSubmit} className="relative w-full md:w-80">
-          <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
-          <input
-            type="text"
-            placeholder="Search IMEI, SIM, Custom Fields..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-4 py-2 text-xs text-slate-900 placeholder-slate-400 font-mono focus:outline-none focus:border-blue-500 focus:bg-white"
-          />
-        </form>
-
-        {/* Filter Dropdowns */}
-        <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
-          
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-700 focus:outline-none focus:border-blue-500 font-medium"
+      {/* Quick Operational Presets Bar */}
+      <div className="flex flex-wrap items-center gap-2">
+        {[
+          { id: 'ALL', label: 'All Devices', count: devices.length },
+          { id: 'INSTALLED', label: '🚗 Installed in Vehicles', count: filterOptions.totalInstalled },
+          { id: 'PENDING_PAYMENT', label: '⏳ Payment Pending', count: filterOptions.totalPending },
+          { id: 'PAID', label: '✅ Payment Received', count: filterOptions.totalPaid }
+        ].map(chip => (
+          <button
+            key={chip.id}
+            onClick={() => setQuickPreset(quickPreset === chip.id ? 'ALL' : chip.id)}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 border ${
+              quickPreset === chip.id
+                ? 'bg-blue-600 text-white border-blue-600 shadow-xs ring-2 ring-blue-200'
+                : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50 hover:border-slate-300'
+            }`}
           >
-            <option value="">All Statuses</option>
-            <option value="IN_WAREHOUSE">In Warehouse</option>
-            <option value="WITH_DEALER">With Dealer</option>
-            <option value="INSTALLED">Installed</option>
-            <option value="FAULTY">Faulty / RMA</option>
-            <option value="RETURNED">Returned</option>
-          </select>
+            <span>{chip.label}</span>
+            <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-mono ${
+              quickPreset === chip.id ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-700'
+            }`}>
+              {chip.count}
+            </span>
+          </button>
+        ))}
 
-          <select
-            value={typeFilter}
-            onChange={(e) => setTypeFilter(e.target.value)}
-            className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-700 focus:outline-none focus:border-blue-500 font-medium"
+        {isAnyFilterActive && (
+          <button
+            onClick={handleResetAllFilters}
+            className="px-2.5 py-1.5 bg-slate-100 hover:bg-red-50 hover:text-red-700 text-slate-600 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1 border border-slate-200 hover:border-red-200 ml-auto"
+            title="Clear all active search & dropdown filters"
           >
-            <option value="">All Device Types</option>
-            {deviceTypes.map(dt => (
-              <option key={dt.id} value={dt.id}>{dt.name}</option>
-            ))}
-          </select>
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span>Reset Filters</span>
+          </button>
+        )}
+      </div>
 
-          {/* Upload Lists Selector with dynamic Delete Button */}
-          <div className="flex items-center gap-1.5">
-            <select
-              value={batchFilter}
-              onChange={(e) => setBatchFilter(e.target.value)}
-              className={`bg-slate-50 border rounded-xl px-3 py-2 text-xs focus:outline-none max-w-[200px] truncate transition-colors ${
-                batchFilter
-                  ? 'border-blue-400 bg-blue-50/40 text-blue-900 font-bold'
-                  : 'border-slate-200 text-slate-700 font-medium'
+      {/* Dealer / Stock Place Allocations Summary Bar */}
+      {dealersSummary.length > 0 && (
+        <div className="bg-slate-100/80 p-3 rounded-2xl border border-slate-200 space-y-2">
+          <div className="flex items-center justify-between text-[11px] font-bold text-slate-500 uppercase tracking-wider px-1">
+            <span className="flex items-center gap-1.5 text-indigo-900">
+              <Building className="w-3.5 h-3.5 text-indigo-600" /> Stock Allocations per Dealer / Branch
+            </span>
+            <span className="text-slate-400 font-normal">Click any location pill to filter</span>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button
+              onClick={() => setDealerFilter('')}
+              className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                !dealerFilter
+                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
+                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
               }`}
             >
-              <option value="">All Upload Lists</option>
-              {batches.map(b => (
-                <option key={b.id} value={b.id}>
-                  {b.notes ? `${b.notes} (${b.source_file})` : b.source_file}
-                </option>
-              ))}
-            </select>
+              All Locations ({devices.length})
+            </button>
 
-            {selectedBatchObj && isSuperAdmin && (
+            {dealersSummary.map((d, idx) => (
+              <button
+                key={idx}
+                onClick={() => setDealerFilter(dealerFilter === d.stock_place ? '' : d.stock_place)}
+                className={`px-2.5 py-1 rounded-xl text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 border ${
+                  dealerFilter === d.stock_place
+                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
+                    : 'bg-white text-slate-700 border-slate-200 hover:bg-indigo-50/60'
+                }`}
+                title={`Total: ${d.total_count} | In Stock: ${d.in_stock_count} | Installed: ${d.installed_count} ${d.latest_date ? `| Sent: ${d.latest_date}` : ''}`}
+              >
+                <MapPin className={`w-3 h-3 ${dealerFilter === d.stock_place ? 'text-white' : 'text-indigo-600'}`} />
+                <span className="truncate max-w-[180px]">{d.stock_place}</span>
+                <span className={`px-1.5 py-0.2 rounded-md text-[10px] font-bold ${
+                  dealerFilter === d.stock_place ? 'bg-white/20 text-white' : 'bg-indigo-50 text-indigo-700'
+                }`}>
+                  {d.total_count}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Advanced Filter & Search Toolbar */}
+      <div className="glass-panel p-4 rounded-2xl space-y-3 shadow-2xs">
+        
+        <div className="flex flex-col lg:flex-row gap-3 items-center justify-between">
+          
+          {/* Universal Search Box */}
+          <form onSubmit={handleSearchSubmit} className="relative w-full lg:w-96">
+            <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Search IMEI, SIM, Vehicle, Customer, Sales Person..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-8 py-2 text-xs text-slate-900 placeholder-slate-400 font-mono focus:outline-none focus:border-blue-500 focus:bg-white transition-colors"
+            />
+            {search && (
               <button
                 type="button"
-                onClick={() => setDeletingBatchRecord(selectedBatchObj)}
-                className="px-2.5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer shrink-0 animate-fadeIn"
-                title={`Delete list "${selectedBatchObj.source_file || selectedBatchObj.notes}" and its devices`}
+                onClick={() => setSearch('')}
+                className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600"
               >
-                <Trash2 className="w-3.5 h-3.5 text-white" />
-                <span className="hidden sm:inline">Delete List</span>
+                <X className="w-3.5 h-3.5" />
               </button>
             )}
+          </form>
+
+          {/* Action Hub: Copy Filtered IMEIs & Export CSV */}
+          <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto justify-end">
+            {copiedImeisMsg && (
+              <span className="text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-xl flex items-center gap-1.5 animate-fadeIn">
+                <Check className="w-3.5 h-3.5 text-emerald-600" /> {copiedImeisMsg}
+              </span>
+            )}
+
+            <button
+              onClick={handleCopyFilteredImeis}
+              className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold rounded-xl border border-slate-200 flex items-center gap-1.5 transition-colors cursor-pointer"
+              title="Copy all currently filtered IMEI numbers to clipboard"
+            >
+              <Copy className="w-3.5 h-3.5 text-slate-600" /> Copy IMEIs ({filteredDevices.length})
+            </button>
+
+            <button
+              onClick={handleExportFilteredCsv}
+              className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-semibold rounded-xl border border-emerald-200 flex items-center gap-1.5 transition-colors cursor-pointer"
+              title="Download currently filtered inventory table as CSV"
+            >
+              <Download className="w-3.5 h-3.5 text-emerald-600" /> Export CSV
+            </button>
+          </div>
+        </div>
+
+        {/* Dropdowns Multi-Filter Bar */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-2 pt-2 border-t border-slate-100">
+          
+          {/* 1. Stock Place Filter */}
+          <div className="space-y-1">
+            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Stock Place</label>
+            <select
+              value={stockPlaceFilter}
+              onChange={(e) => setStockPlaceFilter(e.target.value)}
+              className={`w-full bg-slate-50 border rounded-xl px-2.5 py-1.5 text-xs focus:outline-none focus:border-blue-500 font-medium transition-colors ${
+                stockPlaceFilter ? 'border-blue-400 bg-blue-50/50 text-blue-900 font-bold' : 'border-slate-200 text-slate-700'
+              }`}
+            >
+              <option value="">All Stock Places</option>
+              {filterOptions.stockPlacesList.map((p, idx) => (
+                <option key={idx} value={p.name}>{p.name} ({p.count})</option>
+              ))}
+            </select>
+          </div>
+
+          {/* 2. Payment Status Filter */}
+          <div className="space-y-1">
+            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Payment Status</label>
+            <select
+              value={paymentFilter}
+              onChange={(e) => setPaymentFilter(e.target.value)}
+              className={`w-full bg-slate-50 border rounded-xl px-2.5 py-1.5 text-xs focus:outline-none focus:border-blue-500 font-medium transition-colors ${
+                paymentFilter ? 'border-emerald-400 bg-emerald-50/50 text-emerald-900 font-bold' : 'border-slate-200 text-slate-700'
+              }`}
+            >
+              <option value="">All Payments</option>
+              <option value="PAID">✅ Received / Paid ({filterOptions.totalPaid})</option>
+              <option value="PENDING">⏳ Pending / Due ({filterOptions.totalPending})</option>
+            </select>
+          </div>
+
+          {/* 3. Deployment / Installation Filter */}
+          <div className="space-y-1">
+            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Deployment</label>
+            <select
+              value={deploymentFilter}
+              onChange={(e) => setDeploymentFilter(e.target.value)}
+              className={`w-full bg-slate-50 border rounded-xl px-2.5 py-1.5 text-xs focus:outline-none focus:border-blue-500 font-medium transition-colors ${
+                deploymentFilter ? 'border-indigo-400 bg-indigo-50/50 text-indigo-900 font-bold' : 'border-slate-200 text-slate-700'
+              }`}
+            >
+              <option value="">All Deployment</option>
+              <option value="INSTALLED">🚗 Installed ({filterOptions.totalInstalled})</option>
+              <option value="READY_STOCK">📦 Ready Stock ({filterOptions.totalReadyStock})</option>
+            </select>
+          </div>
+
+          {/* 4. Sales Person Filter */}
+          <div className="space-y-1">
+            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Sales Person</label>
+            <select
+              value={salesPersonFilter}
+              onChange={(e) => setSalesPersonFilter(e.target.value)}
+              className={`w-full bg-slate-50 border rounded-xl px-2.5 py-1.5 text-xs focus:outline-none focus:border-blue-500 font-medium transition-colors ${
+                salesPersonFilter ? 'border-purple-400 bg-purple-50/50 text-purple-900 font-bold' : 'border-slate-200 text-slate-700'
+              }`}
+            >
+              <option value="">All Sales Persons</option>
+              {filterOptions.salesPersonsList.map((sp, idx) => (
+                <option key={idx} value={sp.name}>{sp.name} ({sp.count})</option>
+              ))}
+            </select>
+          </div>
+
+          {/* 5. RTO Location Filter */}
+          <div className="space-y-1">
+            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">RTO Location</label>
+            <select
+              value={rtoFilter}
+              onChange={(e) => setRtoFilter(e.target.value)}
+              className={`w-full bg-slate-50 border rounded-xl px-2.5 py-1.5 text-xs focus:outline-none focus:border-blue-500 font-medium transition-colors ${
+                rtoFilter ? 'border-amber-400 bg-amber-50/50 text-amber-900 font-bold' : 'border-slate-200 text-slate-700'
+              }`}
+            >
+              <option value="">All RTO Locations</option>
+              {filterOptions.rtoLocationsList.map((r, idx) => (
+                <option key={idx} value={r.name}>{r.name} ({r.count})</option>
+              ))}
+            </select>
+          </div>
+
+          {/* 6. Device Type Filter */}
+          <div className="space-y-1">
+            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Device Type</label>
+            <select
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value)}
+              className={`w-full bg-slate-50 border rounded-xl px-2.5 py-1.5 text-xs focus:outline-none focus:border-blue-500 font-medium transition-colors ${
+                typeFilter ? 'border-blue-400 bg-blue-50/50 text-blue-900 font-bold' : 'border-slate-200 text-slate-700'
+              }`}
+            >
+              <option value="">All Types</option>
+              {deviceTypes.map(dt => (
+                <option key={dt.id} value={dt.id}>{dt.name}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* 7. Upload Batch / List */}
+          <div className="space-y-1">
+            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Upload List</label>
+            <div className="flex items-center gap-1">
+              <select
+                value={batchFilter}
+                onChange={(e) => setBatchFilter(e.target.value)}
+                className={`w-full bg-slate-50 border rounded-xl px-2 py-1.5 text-xs focus:outline-none max-w-full truncate transition-colors ${
+                  batchFilter
+                    ? 'border-blue-400 bg-blue-50/40 text-blue-900 font-bold'
+                    : 'border-slate-200 text-slate-700 font-medium'
+                }`}
+              >
+                <option value="">All Lists</option>
+                {batches.map(b => (
+                  <option key={b.id} value={b.id}>
+                    {b.notes ? `${b.notes} (${b.source_file})` : b.source_file}
+                  </option>
+                ))}
+              </select>
+
+              {selectedBatchObj && isSuperAdmin && (
+                <button
+                  type="button"
+                  onClick={() => setDeletingBatchRecord(selectedBatchObj)}
+                  className="p-1.5 bg-red-600 hover:bg-red-700 text-white rounded-xl transition-all shadow-xs cursor-pointer shrink-0"
+                  title={`Delete list "${selectedBatchObj.source_file || selectedBatchObj.notes}" and its devices`}
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-white" />
+                </button>
+              )}
+            </div>
           </div>
 
         </div>
+
+        {/* Active Filter summary badge */}
+        <div className="flex items-center justify-between text-xs text-slate-500 pt-1">
+          <div className="flex items-center gap-2">
+            <span>Showing <strong className="text-slate-900 font-mono font-bold">{filteredDevices.length}</strong> of {devices.length} devices</span>
+            {isAnyFilterActive && (
+              <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200 text-[10px] font-bold">
+                Filtered
+              </span>
+            )}
+          </div>
+        </div>
+
       </div>
+
+      {/* Highlight Notice Banner after Scanner / Dealer Update */}
+      {highlightNotice && (
+        <div className="p-3.5 bg-emerald-50 border border-emerald-300 rounded-2xl flex items-center justify-between gap-3 text-emerald-950 shadow-xs animate-in fade-in-50">
+          <div className="flex items-center gap-2.5 text-xs font-bold">
+            <div className="p-1.5 rounded-xl bg-emerald-600 text-white shadow-xs">
+              <CheckCircle2 className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="text-emerald-900 font-bold">{highlightNotice}</div>
+              <div className="text-[11px] font-normal text-emerald-700">All devices remain in the list below with the updated record highlighted in green.</div>
+            </div>
+          </div>
+          <button
+            onClick={() => {
+              setHighlightNotice('');
+              setHighlightImeis(new Set());
+              onClearInitialFilter?.();
+            }}
+            className="p-1.5 hover:bg-emerald-200/60 text-emerald-800 rounded-lg transition-colors cursor-pointer"
+            title="Dismiss notice"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* Devices Dynamic Spreadsheet Grid Table */}
       <div className="glass-panel rounded-2xl overflow-hidden">
@@ -451,28 +1399,39 @@ export default function InventoryPage({ onOpenTraceDrawer }) {
           <div className="p-12 text-center text-xs text-slate-500 flex items-center justify-center gap-2">
             <RefreshCw className="w-4 h-4 animate-spin text-blue-600" /> Loading stock inventory spreadsheet...
           </div>
-        ) : devices.length === 0 ? (
+        ) : filteredDevices.length === 0 ? (
           <div className="p-12 text-center text-xs text-slate-400">
-            No inventory devices found matching criteria.
+            No inventory devices found matching the selected filter criteria.
           </div>
         ) : (
           <div className="overflow-x-auto max-w-full">
             <table className="w-full text-left border-collapse text-xs whitespace-nowrap">
               <thead className="bg-slate-50 text-slate-700 border-b border-slate-200">
                 <tr>
+                  {/* Multi-select Header Checkbox */}
+                  <th className="p-3.5 w-10 text-center bg-slate-50 border-r border-slate-200">
+                    <input
+                      type="checkbox"
+                      title="Select / Deselect all visible devices"
+                      checked={filteredDevices.length > 0 && selectedDeviceIds.size === filteredDevices.length}
+                      onChange={(e) => handleToggleSelectAll(e.target.checked)}
+                      className="w-4 h-4 rounded text-purple-600 focus:ring-purple-500 cursor-pointer"
+                    />
+                  </th>
+
                   <th className="p-3.5 font-bold font-mono">Device IMEI</th>
                   <th className="p-3.5 font-bold">Device Type</th>
 
                   {/* Excel Sheet Columns */}
                   {customColumns.map((col) => (
-                    <th key={col} className="p-3.5 font-bold border-l border-slate-200/80 bg-blue-50/40 text-blue-900 group">
+                    <th key={col} className="p-3.5 font-bold border-l border-slate-200/80 bg-slate-100/50 text-slate-800 group">
                       <div className="flex items-center justify-between gap-2">
                         <span>{col}</span>
                         <div className="flex items-center gap-1 opacity-70 group-hover:opacity-100 transition-opacity">
                           <button
                             onClick={() => { setRenamingCol(col); setNewHeaderName(col); }}
                             title="Edit Column Header"
-                            className="p-1 hover:bg-blue-100 text-blue-700 rounded"
+                            className="p-1 hover:bg-slate-200 text-slate-700 rounded"
                           >
                             <Edit2 className="w-3 h-3" />
                           </button>
@@ -492,65 +1451,199 @@ export default function InventoryPage({ onOpenTraceDrawer }) {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {devices.map((dev) => (
-                  <tr key={dev.id} className="hover:bg-slate-50/80 transition-colors">
-                    <td className="p-3.5 font-mono text-blue-600 font-bold">
-                      <button
-                        onClick={() => onOpenTraceDrawer(dev.imei_number)}
-                        className="hover:underline font-bold"
-                      >
-                        {dev.imei_number}
-                      </button>
-                    </td>
-                    <td className="p-3.5 text-slate-800 font-medium">{dev.device_type_name}</td>
+                {filteredDevices.map((dev) => {
+                  const isInlineEditing = inlineEditId === dev.id;
+                  const isRecentlyUpdated = highlightImeis.has(dev.imei_number);
+                  const isSelected = selectedDeviceIds.has(dev.id);
+                  const attrs = dev.additional_attributes || {};
+                  const payVal = String(attrs['AMOUNT RECEIVED'] || attrs['Amount Received'] || '').toUpperCase();
+                  const isPending = payVal.includes('NOT') || payVal.includes('UNPAID') || payVal.includes('PENDING');
+                  const isPaid = payVal.includes('REC') || payVal.includes('PAID');
 
-                    {/* Dynamic Custom Attributes Cells */}
-                    {customColumns.map((col) => (
-                      <td key={col} className="p-3.5 border-l border-slate-200/60 font-mono text-slate-700 bg-slate-50/30">
-                        {dev.additional_attributes && dev.additional_attributes[col] !== undefined && dev.additional_attributes[col] !== null
-                          ? String(dev.additional_attributes[col])
-                          : '-'}
+                  return (
+                    <tr
+                      key={dev.id}
+                      className={`hover:bg-slate-50/80 transition-colors ${
+                        isSelected
+                          ? 'bg-purple-50/60'
+                          : isInlineEditing
+                          ? 'bg-purple-50/40'
+                          : isRecentlyUpdated
+                          ? 'bg-emerald-50/70 ring-1 ring-inset ring-emerald-200'
+                          : ''
+                      }`}
+                    >
+                      {/* Row Checkbox */}
+                      <td className="p-3.5 w-10 text-center border-r border-slate-200/60" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => handleToggleSelectRow(dev.id)}
+                          className="w-4 h-4 rounded text-purple-600 focus:ring-purple-500 cursor-pointer"
+                        />
                       </td>
-                    ))}
-
-                    <td className="p-3.5 text-right space-x-1.5 sticky right-0 bg-white border-l border-slate-200">
-                      <button
-                        onClick={() => openEditRowModal(dev)}
-                        title="Edit Row & Attributes"
-                        className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                      >
-                        <Edit2 className="w-4 h-4" />
-                      </button>
                       
-                      <button
-                        onClick={() => { setStatusEditingDevice(dev); setNewStatus(dev.current_status); }}
-                        title="Adjust Stock Status"
-                        className="p-1.5 text-slate-500 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
-                      >
-                        <ShieldAlert className="w-4 h-4" />
-                      </button>
+                      {/* IMEI Column */}
+                      <td className="p-3.5 font-mono text-purple-700 font-bold">
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={() => onOpenTraceDrawer(dev.imei_number)}
+                            className="hover:underline font-bold"
+                          >
+                            {dev.imei_number}
+                          </button>
+                          {isRecentlyUpdated && (
+                            <span className="px-1.5 py-0.2 rounded-full bg-emerald-100 text-emerald-800 text-[9px] font-bold uppercase tracking-wider">
+                              Updated
+                            </span>
+                          )}
+                        </div>
+                      </td>
 
-                      <button
-                        onClick={() => onOpenTraceDrawer(dev.imei_number)}
-                        title="Trace Full Journey"
-                        className="p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors"
-                      >
-                        <Eye className="w-4 h-4" />
-                      </button>
+                      {/* Device Type */}
+                      <td className="p-3.5 text-slate-800 font-medium">{dev.device_type_name}</td>
 
-                      {/* Super Admin Single Record Delete Button */}
-                      {isSuperAdmin && (
-                        <button
-                          onClick={() => setDeletingDeviceRecord(dev)}
-                          title="Delete Record (Super Admin)"
-                          className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                      {/* Dynamic Custom Attributes Cells */}
+                      {customColumns.map((col) => {
+                        const canEditCol = canUserEditField(user, col);
+                        const cellVal = isInlineEditing
+                          ? (inlineDraftAttrs[col] !== undefined ? inlineDraftAttrs[col] : '')
+                          : (dev.additional_attributes && dev.additional_attributes[col] !== undefined && dev.additional_attributes[col] !== null ? String(dev.additional_attributes[col]) : '-');
+
+                        const isPaymentCol = /amount.*received|payment/i.test(col);
+
+                        return (
+                          <td key={col} className="p-3.5 border-l border-slate-200/60 font-mono text-slate-700 bg-slate-50/30">
+                            {isInlineEditing ? (
+                              canEditCol ? (
+                                <input
+                                  type="text"
+                                  value={inlineDraftAttrs[col] !== undefined ? inlineDraftAttrs[col] : ''}
+                                  onChange={(e) => setInlineDraftAttrs({ ...inlineDraftAttrs, [col]: e.target.value })}
+                                  className="w-full min-w-[100px] bg-white border border-blue-400 rounded-lg p-1.5 text-xs text-slate-800 font-medium focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                />
+                              ) : (
+                                <div className="flex items-center gap-1 text-slate-400 text-xs italic bg-slate-100/80 px-2 py-1.5 rounded-lg select-none" title="Locked: Restricted for your role">
+                                  <span>🔒 {cellVal || '-'}</span>
+                                </div>
+                              )
+                            ) : isPaymentCol && cellVal !== '-' ? (
+                              canUserEditField(user, 'AMOUNT RECEIVED') ? (
+                                <button
+                                  onClick={() => handleTogglePaymentStatus(dev)}
+                                  title="Click to flip payment status (Sales / Super Admin)"
+                                  className={`px-2 py-0.5 rounded text-[10px] font-bold cursor-pointer transition-transform active:scale-95 ${
+                                    isPending
+                                      ? 'bg-red-100 text-red-800 hover:bg-red-200 border border-red-300'
+                                      : isPaid
+                                      ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200 border border-emerald-300'
+                                      : 'bg-slate-100 text-slate-700'
+                                  }`}
+                                >
+                                  {cellVal} 🔄
+                                </button>
+                              ) : (
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                  isPending
+                                    ? 'bg-red-50 text-red-700 border border-red-200'
+                                    : isPaid
+                                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                    : 'bg-slate-100 text-slate-700'
+                                }`}>
+                                  {cellVal}
+                                </span>
+                              )
+                            ) : (
+                              <span>{cellVal}</span>
+                            )}
+                          </td>
+                        );
+                      })}
+
+                      {/* Action Bar */}
+                      <td className="p-3.5 text-right space-x-1.5 sticky right-0 bg-white border-l border-slate-200 shadow-2xs">
+                        {isInlineEditing ? (
+                          <div className="flex items-center gap-1 justify-end">
+                            <button
+                              onClick={() => handleSaveInlineEdit(dev.id)}
+                              disabled={inlineSaving}
+                              className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1 shadow-xs cursor-pointer"
+                              title="Save Inline Edit"
+                            >
+                              <Save className="w-3.5 h-3.5" />
+                              <span>Save</span>
+                            </button>
+                            <button
+                              onClick={() => setInlineEditId(null)}
+                              className="px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-medium cursor-pointer"
+                              title="Cancel"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                            {/* WhatsApp Direct Share Button */}
+                            <button
+                              onClick={() => handleShareWhatsApp(dev)}
+                              title="Share Details via WhatsApp"
+                              className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer inline-flex items-center"
+                            >
+                              <span className="text-sm">💬</span>
+                            </button>
+
+                            {/* Quick Inline Edit Pencil */}
+                            <button
+                              onClick={() => handleStartInlineEdit(dev)}
+                              title="Quick In-Table Edit"
+                              className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"
+                            >
+                              <Edit3 className="w-4 h-4" />
+                            </button>
+
+                            {/* Full Modal Edit */}
+                            <button
+                              onClick={() => openEditRowModal(dev)}
+                              title="Edit Full Record Details"
+                              className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                            >
+                              <Edit2 className="w-4 h-4" />
+                            </button>
+                            
+                            {/* Status Change Modal */}
+                            <button
+                              onClick={() => { setStatusEditingDevice(dev); setNewStatus(dev.current_status); }}
+                              title="Adjust Stock Status"
+                              className="p-1.5 text-slate-500 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors cursor-pointer"
+                            >
+                              <ShieldAlert className="w-4 h-4" />
+                            </button>
+
+                            {/* Journey Trace Drawer */}
+                            <button
+                              onClick={() => onOpenTraceDrawer(dev.imei_number)}
+                              title="Trace Full Journey"
+                              className="p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </button>
+
+                            {/* Super Admin Single Record Delete Button */}
+                            {isSuperAdmin && (
+                              <button
+                                onClick={() => setDeletingDeviceRecord(dev)}
+                                title="Delete Record (Super Admin)"
+                                className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
+                          </>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -793,7 +1886,7 @@ export default function InventoryPage({ onOpenTraceDrawer }) {
                 onChange={(e) => setNewStatus(e.target.value)}
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-900 focus:outline-none focus:border-blue-500 font-medium"
               >
-                <option value="IN_WAREHOUSE">IN_WAREHOUSE (Central Warehouse)</option>
+                <option value="IN_WAREHOUSE">IN_WAREHOUSE (Unassigned Stock)</option>
                 <option value="WITH_DEALER">WITH_DEALER</option>
                 <option value="FAULTY">FAULTY (Mark Damaged/Faulty)</option>
                 <option value="RMA">RMA (Return to Manufacturer)</option>
@@ -846,32 +1939,56 @@ export default function InventoryPage({ onOpenTraceDrawer }) {
 
             <div className="grid grid-cols-2 gap-3 text-xs">
               <div>
-                <label className="block font-bold text-slate-700 mb-1">IMEI Number</label>
+                <label className="block font-bold text-slate-700 mb-1 flex items-center justify-between">
+                  <span>IMEI Number</span>
+                  {!canUserEditField(user, 'IMEI') && <span className="text-[10px] text-amber-600 font-normal">🔒 Locked</span>}
+                </label>
                 <input
                   type="text"
+                  disabled={!canUserEditField(user, 'IMEI')}
                   value={rowFormData.imei_number}
                   onChange={(e) => setRowFormData({ ...rowFormData, imei_number: e.target.value })}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-mono text-slate-900 font-bold focus:outline-none focus:border-blue-500"
+                  className={`w-full border rounded-xl p-2.5 font-mono text-xs font-bold focus:outline-none ${
+                    canUserEditField(user, 'IMEI')
+                      ? 'bg-slate-50 border-slate-200 text-slate-900 focus:border-slate-800'
+                      : 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed'
+                  }`}
                 />
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 mb-1">SIM Number</label>
+                <label className="block font-bold text-slate-700 mb-1 flex items-center justify-between">
+                  <span>SIM Number</span>
+                  {!canUserEditField(user, 'SIM') && <span className="text-[10px] text-amber-600 font-normal">🔒 Locked</span>}
+                </label>
                 <input
                   type="text"
+                  disabled={!canUserEditField(user, 'SIM')}
                   value={rowFormData.sim_number}
                   onChange={(e) => setRowFormData({ ...rowFormData, sim_number: e.target.value })}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-mono text-slate-900 focus:outline-none focus:border-blue-500"
+                  className={`w-full border rounded-xl p-2.5 font-mono text-xs focus:outline-none ${
+                    canUserEditField(user, 'SIM')
+                      ? 'bg-slate-50 border-slate-200 text-slate-900 focus:border-slate-800'
+                      : 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed'
+                  }`}
                 />
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Purchase Price (₹)</label>
+                <label className="block font-bold text-slate-700 mb-1 flex items-center justify-between">
+                  <span>Purchase Price (₹)</span>
+                  {!canUserEditField(user, 'PURCHASE_PRICE') && <span className="text-[10px] text-amber-600 font-normal">🔒 Locked</span>}
+                </label>
                 <input
                   type="number"
+                  disabled={!canUserEditField(user, 'PURCHASE_PRICE')}
                   value={rowFormData.purchase_price}
                   onChange={(e) => setRowFormData({ ...rowFormData, purchase_price: e.target.value })}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-mono text-slate-900 focus:outline-none focus:border-blue-500"
+                  className={`w-full border rounded-xl p-2.5 font-mono text-xs focus:outline-none ${
+                    canUserEditField(user, 'PURCHASE_PRICE')
+                      ? 'bg-slate-50 border-slate-200 text-slate-900 focus:border-slate-800'
+                      : 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed'
+                  }`}
                 />
               </div>
             </div>
@@ -879,25 +1996,39 @@ export default function InventoryPage({ onOpenTraceDrawer }) {
             {/* Dynamic Custom Attributes Inputs */}
             {customColumns.length > 0 && (
               <div className="pt-3 border-t border-slate-100 space-y-3">
-                <h4 className="text-xs font-bold text-slate-800">Dynamic Excel Custom Fields</h4>
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-slate-800">Dynamic Excel Custom Fields</h4>
+                  <span className="text-[10px] text-slate-500">Fields marked with 🔒 are restricted for your role</span>
+                </div>
                 <div className="grid grid-cols-2 gap-3 text-xs">
-                  {customColumns.map((col) => (
-                    <div key={col}>
-                      <label className="block font-medium text-slate-600 mb-1">{col}</label>
-                      <input
-                        type="text"
-                        value={rowFormData.additional_attributes[col] || ''}
-                        onChange={(e) => setRowFormData({
-                          ...rowFormData,
-                          additional_attributes: {
-                            ...rowFormData.additional_attributes,
-                            [col]: e.target.value
-                          }
-                        })}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-mono text-slate-800 focus:outline-none focus:border-blue-500"
-                      />
-                    </div>
-                  ))}
+                  {customColumns.map((col) => {
+                    const canEdit = canUserEditField(user, col);
+                    return (
+                      <div key={col}>
+                        <label className="block font-medium text-slate-600 mb-1 flex items-center justify-between">
+                          <span className="truncate max-w-[140px]">{col}</span>
+                          {!canEdit && <span className="text-[10px] text-amber-600">🔒 Locked</span>}
+                        </label>
+                        <input
+                          type="text"
+                          disabled={!canEdit}
+                          value={rowFormData.additional_attributes[col] || ''}
+                          onChange={(e) => setRowFormData({
+                            ...rowFormData,
+                            additional_attributes: {
+                              ...rowFormData.additional_attributes,
+                              [col]: e.target.value
+                            }
+                          })}
+                          className={`w-full border rounded-xl p-2 font-mono text-xs focus:outline-none ${
+                            canEdit
+                              ? 'bg-slate-50 border-slate-200 text-slate-800 focus:border-blue-500'
+                              : 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed'
+                          }`}
+                        />
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -1023,6 +2154,472 @@ export default function InventoryPage({ onOpenTraceDrawer }) {
                 Delete Column
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Dispatch & Assign to Dealer Modal */}
+      {isBulkAssignModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-lg p-6 space-y-4 shadow-2xl animate-in zoom-in-95 duration-150">
+            
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2 text-indigo-700 font-bold text-base">
+                <Truck className="w-5 h-5 text-indigo-600" />
+                <span>Bulk Dispatch to Dealer / Branch</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsBulkAssignModalOpen(false)}
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {bulkAssignSuccessMsg ? (
+              <div className="p-5 bg-emerald-50 border border-emerald-200 rounded-2xl text-emerald-800 text-sm font-bold text-center space-y-2 animate-in zoom-in-95">
+                <CheckCircle2 className="w-8 h-8 text-emerald-600 mx-auto" />
+                <div>{bulkAssignSuccessMsg}</div>
+                <p className="text-xs font-normal text-emerald-700">Stock place & movement logs updated successfully.</p>
+              </div>
+            ) : (
+              <form onSubmit={handleBulkAssignSubmit} className="space-y-3.5">
+                <p className="text-xs text-slate-500">
+                  Enter or paste device IMEIs to update their <strong>Stock Place</strong>, <strong>Stock Place Date</strong>, and <strong>Dealer Status</strong> in one click.
+                </p>
+
+                {/* IMEIs Input */}
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
+                    <span>Device IMEIs (one per line, comma or space separated) *</span>
+                    <span className="text-[11px] font-normal text-slate-400">
+                      {bulkAssignImeisText.split(/[\n,;\t\s]+/).filter(t => t.trim().length >= 4).length} IMEIs detected
+                    </span>
+                  </label>
+                  <textarea
+                    rows={4}
+                    required
+                    placeholder="864920050019101&#10;864920050019102&#10;864920050019103..."
+                    value={bulkAssignImeisText}
+                    onChange={(e) => setBulkAssignImeisText(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-mono text-slate-800 focus:outline-none focus:border-indigo-500 focus:bg-white"
+                  />
+                </div>
+
+                {/* Dealer / Stock Place Name */}
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                    <Building className="w-3.5 h-3.5 text-indigo-600" /> Dealer / Stock Place Name *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    list="inventory-known-places-list"
+                    placeholder="e.g. VIJAYAWADA - RAMESH, HYDERABAD HUB..."
+                    value={bulkAssignStockPlace}
+                    onChange={(e) => setBulkAssignStockPlace(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-900 focus:outline-none focus:border-indigo-500 focus:bg-white"
+                  />
+                  <datalist id="inventory-known-places-list">
+                    {dealersSummary.map((d, i) => (
+                      <option key={i} value={d.stock_place} />
+                    ))}
+                  </datalist>
+                </div>
+
+                {/* Dispatch Date */}
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                    <Calendar className="w-3.5 h-3.5 text-indigo-600" /> Dispatch / Stock Place Date *
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={bulkAssignDate}
+                    onChange={(e) => setBulkAssignDate(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 font-mono focus:outline-none focus:border-indigo-500 focus:bg-white"
+                  />
+                </div>
+
+                {/* Optional Remarks */}
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-700">
+                    Handover Note / Courier Reference (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Sent via DTDC Courier #1234 or Handed over directly"
+                    value={bulkAssignRemarks}
+                    onChange={(e) => setBulkAssignRemarks(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-indigo-500 focus:bg-white"
+                  />
+                </div>
+
+                <div className="flex gap-2 justify-end pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsBulkAssignModalOpen(false)}
+                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium rounded-xl cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={bulkAssignSubmitting}
+                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-xs cursor-pointer"
+                  >
+                    {bulkAssignSubmitting ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                    )}
+                    Update Stock Place & Movement Logs
+                  </button>
+                </div>
+              </form>
+            )}
+
+          </div>
+        </div>
+      )}
+
+      {/* Super Admin Team Edits & Activity Audit Log Modal */}
+      {isAuditModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-5xl p-6 space-y-4 shadow-2xl max-h-[90vh] flex flex-col animate-scaleIn">
+            
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-purple-100 text-purple-700 rounded-2xl">
+                  <Shield className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                    Team Edits & Activity Audit Log
+                    <span className="px-2.5 py-0.5 rounded-full bg-purple-100 text-purple-800 text-[11px] font-bold">
+                      {auditLogs.length} Records Logged
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Live tracking of all record modifications made by Operations Admin and Sales Commercial teams
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsAuditModalOpen(false)}
+                className="p-2 text-slate-400 hover:text-slate-700 rounded-xl hover:bg-slate-100 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Controls Bar: Search, Role Filter & Export */}
+            <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-50 p-3 rounded-2xl border border-slate-200">
+              <div className="flex flex-wrap items-center gap-2 flex-1 min-w-[280px]">
+                
+                {/* Search */}
+                <div className="relative flex-1 min-w-[180px]">
+                  <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="Search by IMEI, user, remark..."
+                    value={auditSearch}
+                    onChange={(e) => setAuditSearch(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && loadAuditLogs()}
+                    className="w-full pl-8 pr-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-purple-500 font-medium"
+                  />
+                </div>
+
+                {/* Team Filter */}
+                <select
+                  value={auditTeamFilter}
+                  onChange={(e) => {
+                    setAuditTeamFilter(e.target.value);
+                    loadAuditLogs({ performed_by: e.target.value });
+                  }}
+                  className="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-700 font-semibold focus:outline-none focus:border-purple-500 cursor-pointer"
+                >
+                  <option value="">All Teams & Users</option>
+                  <option value="Admin">Operations Admin Team</option>
+                  <option value="Sales">Sales Commercial Team</option>
+                  <option value="Owner">Super Admin (Owner)</option>
+                </select>
+
+                <button
+                  onClick={() => loadAuditLogs()}
+                  className="p-1.5 bg-white hover:bg-slate-100 text-slate-600 rounded-xl border border-slate-200 cursor-pointer transition-colors"
+                  title="Refresh Audit Logs"
+                >
+                  <RefreshCw className={`w-4 h-4 ${auditLoading ? 'animate-spin text-purple-600' : ''}`} />
+                </button>
+              </div>
+
+              {/* 1-Click CSV Download Button */}
+              <button
+                onClick={handleExportAuditCsv}
+                disabled={auditLogs.length === 0}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold rounded-xl flex items-center gap-2 shadow-xs cursor-pointer transition-all"
+                title="Download complete audit log and edited records as Excel/CSV"
+              >
+                <Download className="w-4 h-4" />
+                <span>Download Complete Audit CSV</span>
+              </button>
+            </div>
+
+            {/* Audit Logs Table */}
+            <div className="flex-1 overflow-auto rounded-2xl border border-slate-200 max-h-[55vh]">
+              {auditLoading ? (
+                <div className="p-12 text-center text-slate-400 space-y-2">
+                  <RefreshCw className="w-6 h-6 animate-spin mx-auto text-purple-600" />
+                  <p className="text-xs font-medium">Fetching complete team edits history...</p>
+                </div>
+              ) : auditLogs.length === 0 ? (
+                <div className="p-12 text-center text-slate-400 space-y-2">
+                  <Shield className="w-8 h-8 mx-auto text-slate-300" />
+                  <p className="text-sm font-semibold text-slate-600">No edit logs found matching your filters</p>
+                  <p className="text-xs text-slate-400">When Admin or Sales teams modify records, their exact changes will appear here.</p>
+                </div>
+              ) : (
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead className="bg-slate-100/80 sticky top-0 z-10 text-slate-700 font-bold border-b border-slate-200">
+                    <tr>
+                      <th className="p-3">Timestamp</th>
+                      <th className="p-3">Edited By / Team</th>
+                      <th className="p-3">IMEI & Device</th>
+                      <th className="p-3">Vehicle & Customer</th>
+                      <th className="p-3">Changed Details / Diff</th>
+                      <th className="p-3 text-right">Commercials</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {auditLogs.map((log) => {
+                      const attrs = log.additional_attributes || {};
+                      const vehKey = Object.keys(attrs).find(k => /vehicle/i.test(k));
+                      const vehNo = (vehKey && attrs[vehKey]) || '-';
+                      const custKey = Object.keys(attrs).find(k => /customer.*name|customer/i.test(k));
+                      const custName = (custKey && attrs[custKey]) || '-';
+                      const costKey = Object.keys(attrs).find(k => /^cost$/i.test(k) || /purchase_price/i.test(k));
+                      const cost = (costKey && attrs[costKey]) || log.purchase_price || '-';
+                      const payKey = Object.keys(attrs).find(k => /amount.*rec|payment/i.test(k));
+                      const pay = (payKey && attrs[payKey]) || '-';
+
+                      const isSales = /sales/i.test(log.performed_by || '');
+                      const isAdmin = /admin|operations|warehouse|tech/i.test(log.performed_by || '');
+
+                      return (
+                        <tr key={log.id} className="hover:bg-purple-50/30 transition-colors">
+                          
+                          {/* Timestamp */}
+                          <td className="p-3 font-mono text-[11px] text-slate-500 whitespace-nowrap">
+                            {log.event_date || 'Just now'}
+                          </td>
+
+                          {/* Performed By */}
+                          <td className="p-3 whitespace-nowrap">
+                            <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider inline-flex items-center gap-1 ${
+                              isSales
+                                ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                : isAdmin
+                                ? 'bg-blue-100 text-blue-800 border border-blue-200'
+                                : 'bg-purple-100 text-purple-800 border border-purple-200'
+                            }`}>
+                              {isSales ? '💼' : isAdmin ? '🛠️' : '👑'} {log.performed_by || 'Admin'}
+                            </span>
+                          </td>
+
+                          {/* IMEI & Device */}
+                          <td className="p-3 font-mono">
+                            <button
+                              onClick={() => { setIsAuditModalOpen(false); onOpenTraceDrawer(log.imei_number); }}
+                              className="text-blue-600 font-bold hover:underline"
+                            >
+                              {log.imei_number}
+                            </button>
+                            <div className="text-[10px] text-slate-400">{log.device_type_name}</div>
+                          </td>
+
+                          {/* Vehicle & Customer */}
+                          <td className="p-3">
+                            <div className="font-semibold text-slate-800">{vehNo}</div>
+                            <div className="text-[11px] text-slate-500">{custName}</div>
+                          </td>
+
+                          {/* Diff Details */}
+                          <td className="p-3 max-w-md">
+                            <div className="p-2 bg-slate-50 rounded-xl border border-slate-200/80 font-mono text-[11px] text-slate-700 space-y-0.5">
+                              {log.remarks ? log.remarks.split('; ').map((part, idx) => (
+                                <div key={idx} className="flex items-center gap-1.5">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-purple-500 shrink-0"></span>
+                                  <span>{part}</span>
+                                </div>
+                              )) : (
+                                <span>Record modified</span>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* Commercials */}
+                          <td className="p-3 text-right">
+                            <div className="font-bold text-slate-900">₹{cost}</div>
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                              String(pay).toUpperCase().includes('REC')
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : 'bg-red-100 text-red-800'
+                            }`}>
+                              {pay}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex items-center justify-between border-t border-slate-100 pt-3">
+              <span className="text-xs text-slate-500">
+                Super Admin Master Log • Showing latest updates across all inventory records
+              </span>
+              <button
+                onClick={() => setIsAuditModalOpen(false)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* Floating Multi-Select Action Bar */}
+      {selectedDeviceIds.size > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-slate-900/95 backdrop-blur-md text-white px-5 py-3 rounded-2xl shadow-2xl border border-slate-700 flex flex-wrap items-center gap-3 animate-in fade-in slide-in-from-bottom-5">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="text-xs font-bold bg-purple-600 px-2.5 py-1 rounded-lg">
+              {selectedDeviceIds.size} device(s) selected
+            </span>
+          </div>
+
+          <button
+            onClick={handleOpenBulkTransferModal}
+            className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+          >
+            <Building className="w-3.5 h-3.5" /> Transfer Stock Place
+          </button>
+
+          <button
+            onClick={handleCopySelectedImeis}
+            className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+          >
+            <Copy className="w-3.5 h-3.5" /> Copy Selected IMEIs
+          </button>
+
+          <button
+            onClick={() => setSelectedDeviceIds(new Set())}
+            className="text-xs text-slate-400 hover:text-white px-2 py-1 transition-colors cursor-pointer"
+          >
+            Deselect All
+          </button>
+        </div>
+      )}
+
+      {/* Bulk Stock Transfer Modal */}
+      {isBulkTransferModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-md p-6 space-y-4 shadow-2xl animate-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2 text-slate-900 font-bold text-base">
+                <div className="p-2 bg-purple-50 text-purple-700 rounded-xl">
+                  <Building className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3>Bulk Stock Place Transfer</h3>
+                  <p className="text-xs text-slate-500 font-normal">Reassign {selectedDeviceIds.size} selected devices</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsBulkTransferModalOpen(false)}
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {transferSuccessMsg ? (
+              <div className="p-5 bg-emerald-50 border border-emerald-200 rounded-2xl text-emerald-800 text-sm font-bold text-center space-y-2 animate-in zoom-in-95">
+                <CheckCircle2 className="w-8 h-8 text-emerald-600 mx-auto" />
+                <div>{transferSuccessMsg}</div>
+                <p className="text-xs font-normal text-emerald-700">Stock records & movement logs updated successfully.</p>
+              </div>
+            ) : (
+              <form onSubmit={handleExecuteBulkTransfer} className="space-y-3.5">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Target Stock Place / Branch *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. TESTING CHENNAI, HYDERABAD HUB, VIJAYAWADA..."
+                    value={transferPlace}
+                    onChange={(e) => setTransferPlace(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-900 font-semibold focus:outline-none focus:border-slate-800 focus:bg-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Stock Place Date *
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={transferDate}
+                    onChange={(e) => setTransferDate(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-900 font-mono focus:outline-none focus:border-slate-800 focus:bg-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Transfer Note / Courier Reference (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Handed over to Ramesh or Sent via Courier #9921"
+                    value={transferRemarks}
+                    onChange={(e) => setTransferRemarks(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-900 focus:outline-none focus:border-slate-800 focus:bg-white"
+                  />
+                </div>
+
+                <div className="flex gap-2 justify-end pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsBulkTransferModalOpen(false)}
+                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={transferSubmitting}
+                    className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl shadow-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    {transferSubmitting ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                    {transferSubmitting ? 'Transferring...' : `Transfer ${selectedDeviceIds.size} Device(s)`}
+                  </button>
+                </div>
+              </form>
+            )}
+
           </div>
         </div>
       )}

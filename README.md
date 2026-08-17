@@ -1,44 +1,50 @@
 # FuelTracks Technologies — Inventory Management System (IMS)
 
-An enterprise-grade, full-stack **Inventory Management System (IMS)** designed for tracking GPS trackers, VLTD devices, fuel level sensors, OBD units, and SIM cards by IMEI across their entire lifecycle — from bulk spreadsheet upload, warehouse storage, and vehicle installations to customer CRM and executive reporting.
+An enterprise-grade, full-stack **Inventory Management System (IMS)** designed for tracking GPS trackers, AIS-140 / VLTD devices, fuel level sensors, OBD units, and SIM cards by IMEI across their entire lifecycle — from smart vendor Excel ingestion, warehouse stock management, and batch stock transfers to vehicle installations, customer CRM, granular user permissions, and executive reporting.
 
 ---
 
 ## 🚀 Key Modules & Capabilities
 
-### 1. 📊 Executive Dashboard & Audit Feed
-- **Live Inventory KPIs**: Real-time counts for Total Devices, In-Stock Warehouse inventory, Installed Fleet units, and Faulty/RMA devices.
-- **Recently Updated & Edited Activity Feed**: Tracks live field edits, IMEI status changes, and technician audit histories.
-- **One-Click List Management**: Directly view or delete uploaded spreadsheet lists from the dashboard.
+### 1. 📊 Executive Dashboard & Real-Time Alerts
+- **5-Metric KPI Summary**: Live counts for **Total Master Stock**, **Total In-Stock (Unassigned + With Dealers)**, **Installed Fleet Units**, **With Dealer Dispatches**, and **Faulty / RMA Bay**.
+- **30-Day Warranty & Certificate Renewal Alert Center**: Automated tracking of 1-year certificate validity and SIM recharges with color-coded urgency badges (`Overdue`, `Urgently Due`, `Expiring Soon`) and **1-Click WhatsApp Reminders**.
+- **Live Operations Activity Feed**: Real-time log of team edits, field updates, stock transfers, and payment flips with instant CSV/Excel export.
+- **Stock Allocation Matrix**: Breakdown of device allocations across dealer branches and Unassigned Stock.
 
-### 2. 📁 Excel Bulk Upload & Dynamic List Management
-- **Smart Spreadsheet Ingestion**: Auto-detects and ingests columns from various vendor formats (*VAMO, Tracknow, Volty, BSTPL, etc.*).
-- **Preserves All Custom Excel Attributes**: Retains every original Excel column (e.g. `Vehicle Number`, `Stock Place`, `Sim 1`, `Sim 2`, `Customer`, `RTO Location`, `Vahan ID`, `Certificate Date`, etc.).
-- **List-Based Deletion**: Select any upload list to instantly wipe or replace batch records.
+### 2. 🔐 Super Admin Role-Based Access & Granular Column Permissions
+- **Team Account Creation**: Super Admin creates and manages **Admin Team** and **Sales Team** logins.
+- **Granular Column Edit Matrix**: Super Admin can check/uncheck exact editable columns per user:
+  - 🚗 *Vehicle & Registration*: `Vehicle Number`, `Customer Name`, `Chasis Number`, `Engine Number`, `Certificate Issued Date`, etc.
+  - 💼 *Commercial & Financials*: `Cost`, `Tax`, `Total Cost`, `Installation Charges`, `Payment Status`, `Amount Received`, etc.
+  - 📍 *Logistics & Location*: `Stock Place`, `Stock Place Date`, `SIM Number`, `Status`, `Remarks`.
+  - ⚙️ *Core Hardware*: `IMEI Number`, `Device Type`, `Vendor Name`, `Purchase Price`.
+- **Default Presets**: Pre-configured defaults for Technical Admins (technical fields unlocked, commercial locked) vs Sales (commercial unlocked, technical locked).
+- **1-Click Credential Sharing**: Copy email and password credentials with one click.
 
-### 3. 📄 Executive Reports & Excel Export Hub
-- **Manager Statement Format**: One-click download of clean billing & installation statements with exact manager columns:
-  - `Sl No`, `Device Name`, `Vehicle Number`, `Customer Name`, `Phone Number`, `SIM Numbers`, `IMEI Number`, `Total Cost`, `Amount Received Status`, `Stock Place`, `Date`.
-- **List-Specific Clean Exports**: Download spreadsheets matching the exact original columns of a selected file without unwanted synthetic fields.
-- **Multi-Dimensional Filters**: Filter exports by Upload List Name, Installation Status (Vehicle Number presence), Stock Place (dynamic per list), Date Range, and Device Type.
-- **Smart Excel Date & Text Formatting**: Automatic conversion of raw Excel serial date numbers (e.g., `46302` $\rightarrow$ `07-10-2026`) and preserved long SIM/IMEI text formatting.
+### 3. 📦 Dynamic Inventory Spreadsheet Grid & Batch Stock Transfer
+- **Full Custom Columns Preservation**: Automatically ingests and renders all vendor custom headers (e.g. `Stock Place`, `Sim 1`, `Vehicle Number`, `Vahan ID`, `Certificate Date`, etc.).
+- **Multi-Select & Bulk Stock Movement**: Select multiple rows via checkboxes and transfer **50+ IMEIs** to a dealer, branch, or test office in **1 click** with date and courier reference tracking.
+- **Inline Cell Editing & Diff Audit**: Edit cells directly in the table with permission locks (`🔒 Locked`) and automatic before $\rightarrow$ after audit logging.
+- **One-Click Payment Flip**: Rapidly toggle payment status (`PENDING` ↔ `PAID`) with real-time financial updates.
 
-### 4. 🔍 15-Digit IMEI Journey & Traceability Drawer
-- **Instant Search**: Slide-over journey drawer detailing any device's full lifecycle (`PURCHASED` → `INSTALLED` → `CUSTOMER`).
-- **Complete Timeline**: Timestamped history of status updates, vehicle assignments, and field edits.
+### 4. 📑 Smart Vendor Excel Ingestion & Auto-Mapper
+- **Intelligent Header Detection**: Automatically identifies `IMEI`, `SIM Number`, and `Cost / Price` from any vendor spreadsheet (*Tracknow, Vamosys, Volty, BSTPL, etc.*).
+- **Interactive Visual Column Mapper**: Review or remap columns dynamically with instant row validation before importing into **Unassigned Stock**.
+- **Deduplicated Export**: Clean Excel and CSV exports with deduplicated headers and formatted dates (`DD-MM-YYYY`).
 
-### 5. 📸 Continuous Barcode & Camera Scanner
-- **Live Camera Scanning**: High-speed camera reader (`html5-qrcode`) for smartphone cameras and webcams.
-- **Continuous Scan Mode**: Sequential scanning loop with live item counter and instant vehicle installation trigger.
-- **Simulation Mode**: Built-in test scanner for desktop testing.
+### 5. 🔍 15-Digit IMEI Journey & Traceability Drawer
+- **Instant Search & History**: Slide-over journey drawer detailing any device's full lifecycle timeline (`PURCHASED` → `STOCK_TRANSFERRED` → `INSTALLED` → `PAYMENT_RECEIVED`).
+- **Comprehensive Audit Diff**: Detailed before $\rightarrow$ after value changes for every update.
 
-### 6. 🛠️ Vehicle Installation & CRM Hub
-- **Single-Action Installation**: Record IMEI, vehicle license plate, customer name, phone number, and sale price in one step.
-- **Customer CRM**: Automatic customer profile creation and multi-vehicle fleet tracking.
+### 6. 📸 Continuous Barcode & Camera Scanner
+- **High-Speed Camera Scanning**: Live camera scanner (`html5-qrcode`) for smartphone cameras and webcams.
+- **Continuous Loop Mode**: Scan batches sequentially with live counter and instant installation trigger.
+- **Desktop Simulation Mode**: Built-in test scanner for desktop testing.
 
-### 7. 📱 Mobile Field Scanner Mode
-- **Responsive Field UI**: Optimized interface for field technicians and installers.
-- **Quick Actions**: Rapid device lookup and vehicle installations on mobile devices.
+### 7. 🛠️ Vehicle Installation & Customer CRM Hub
+- **Single-Action Vehicle Deployment**: Record IMEI, vehicle registration number, chassis/engine details, customer contact, and installation charges in one step.
+- **Customer CRM**: Automatic customer profile generation and multi-vehicle fleet tracking.
 
 ---
 
@@ -50,6 +56,7 @@ An enterprise-grade, full-stack **Inventory Management System (IMS)** designed f
 | **Backend** | Node.js, Express.js REST API |
 | **Database** | SQLite (`better-sqlite3`) with WAL (Write-Ahead Logging) mode |
 | **Scanning** | `html5-qrcode` Camera & Barcode Reader |
+| **Design System** | Clean Light Theme (Charcoal Slate `#0f172a`, Purple `#7c3aed`, Emerald `#059669`, Amber `#d97706`) |
 
 ---
 
@@ -65,7 +72,7 @@ cd Inventory-Management-System
 ```bash
 npm install
 ```
-*(This installs dependencies for both `backend` and `frontend` sub-packages).*
+*(Installs dependencies for both `backend` and `frontend` workspaces).*
 
 ### 3. Run Locally (Development Mode)
 ```bash
@@ -74,12 +81,15 @@ npm run dev
 - **Web Application**: [http://localhost:3000](http://localhost:3000)
 - **Backend REST API**: [http://localhost:5000](http://localhost:5000)
 
-### Additional Scripts:
-- `npm run backend` — Run backend server only with `node --watch` auto-reloading
-- `npm run frontend` — Run Vite frontend development server only
-- `npm run build` — Build production bundles
-- `npm run clear` — Clear database records
-- `npm test` — Run backend integration tests
+---
+
+## 🔑 Default Credentials & Role Matrix
+
+| Role | Default Access | Editable Fields |
+|---|---|---|
+| **👑 Super Admin** | Full access to all modules, lists, deletions, user roles, and audits | All fields unlocked |
+| **🛠️ Admin Team** | Operations, inventory, vehicle installations, stock movement | Vehicle info, certificates, stock place, SIM |
+| **💼 Sales Team** | Commercial tracking, customer CRM, payment updates | Cost, tax, payment status, amount received, sale price |
 
 ---
 
@@ -90,27 +100,25 @@ Inventory-Management-System/
 ├── backend/
 │   ├── data/                 # SQLite database storage (inventory.db)
 │   ├── src/
-│   │   ├── db/               # DB initialization, clear, and seed scripts
-│   │   ├── routes/           # REST API routes (devices, dashboard, reports, etc.)
-│   │   ├── test/             # API test suite
+│   │   ├── db/               # DB schema, migrations, and seed scripts
+│   │   ├── routes/           # REST API routes (devices, dashboard, users, reports, etc.)
 │   │   └── index.js          # Express server entrypoint
 │   └── package.json
 ├── frontend/
 │   ├── src/
 │   │   ├── components/       # Header, Sidebar, Scanner Modal, Journey Drawer
-│   │   ├── context/          # Role switcher & Auth context
-│   │   ├── pages/            # Dashboard, Inventory, Reports, CRM, Upload, etc.
-│   │   ├── services/         # API HTTP service layer
-│   │   ├── App.jsx           # Main React component
-│   │   └── index.css         # Styling & Glassmorphism design tokens
-│   ├── package.json
-│   └── vite.config.js
-├── .gitignore
-├── package.json              # Root package orchestrator
-└── README.md
+│   │   ├── context/          # AuthContext & Column Permission Matrix
+│   │   ├── pages/            # Dashboard, Inventory, Upload, Users, CRM, Reports
+│   │   ├── services/         # REST API client services
+│   │   ├── App.jsx           # Application routing & layout
+│   │   └── main.jsx          # React DOM entrypoint
+│   ├── index.html
+│   └── package.json
+├── package.json              # Root workspace orchestrator
+└── README.md                 # Project documentation
 ```
 
 ---
 
-## 📝 License
-Proprietary & Confidential — **FuelTracks Technologies Private Limited**.
+## 📄 License
+FuelTracks Technologies — Proprietary Inventory & Fleet Management System.

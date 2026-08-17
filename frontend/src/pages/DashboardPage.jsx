@@ -1,6 +1,32 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Boxes, Truck, Wrench, ShieldAlert, Activity, Search, RefreshCw, ArrowUpRight, Edit3, Clock, CheckCircle2, AlertCircle, Trash2, AlertTriangle } from 'lucide-react';
-import { fetchStats, fetchPurchaseBatches, deletePurchaseBatch } from '../services/api';
+import {
+  Boxes,
+  Truck,
+  Wrench,
+  ShieldAlert,
+  Activity,
+  Search,
+  RefreshCw,
+  ArrowUpRight,
+  Edit3,
+  Clock,
+  CheckCircle2,
+  AlertCircle,
+  Users,
+  DollarSign,
+  TrendingUp,
+  CreditCard,
+  AlertTriangle,
+  Barcode,
+  Plus,
+  FileSpreadsheet,
+  ChevronRight,
+  Car,
+  Phone,
+  Building,
+  Download
+} from 'lucide-react';
+import { fetchStats, fetchPurchaseBatches } from '../services/api';
 
 export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
   const [loading, setLoading] = useState(true);
@@ -9,24 +35,66 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
   const [batches, setBatches] = useState([]);
   const [batchFilter, setBatchFilter] = useState('');
   const [locationFilter, setLocationFilter] = useState('');
-  const [deletingBatchRecord, setDeletingBatchRecord] = useState(null);
-  const [deletingLoading, setDeletingLoading] = useState(false);
+
+  const handleExportRecentActivityCsv = () => {
+    if (!stats?.recentActivity || stats.recentActivity.length === 0) {
+      alert('No recent operations activity to export.');
+      return;
+    }
+
+    const headers = [
+      'Timestamp',
+      'Performed By / Team',
+      'Event Type',
+      'IMEI Number',
+      'Device Type',
+      'Vehicle Number',
+      'Customer Name',
+      'Customer Phone',
+      'Stock Place / Holder',
+      'Change Details / Diff',
+      'Cost',
+      'Tax',
+      'Payment Status'
+    ];
+
+    const csvRows = [headers.map(h => `"${h.replace(/"/g, '""')}"`).join(',')];
+
+    stats.recentActivity.forEach(act => {
+      const row = [
+        act.event_date || '',
+        act.performed_by || 'Admin',
+        act.event_type || 'STATUS_CHANGED',
+        act.imei_number || '',
+        act.device_type_name || '',
+        act.vehicle_number || '-',
+        act.customer_name || '-',
+        act.customer_phone || '-',
+        act.stock_place || act.to_holder || '',
+        act.remarks || '',
+        act.cost || '-',
+        act.tax || '-',
+        act.payment_status || 'PENDING'
+      ];
+      csvRows.push(row.map(val => `"${String(val || '').replace(/"/g, '""')}"`).join(','));
+    });
+
+    const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `Live_Operations_Activity_Log_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   // Fetch batches list once on mount
   useEffect(() => {
-    refreshBatches();
-  }, []);
-
-  const refreshBatches = () => {
     fetchPurchaseBatches().then(res => {
       if (res.success) setBatches(res.data);
     }).catch(err => console.error(err));
-  };
-
-  const selectedBatchObj = useMemo(() => {
-    if (!batchFilter) return null;
-    return batches.find(b => b.id.toString() === batchFilter.toString()) || null;
-  }, [batchFilter, batches]);
+  }, []);
 
   // Reload stats when filter values change
   useEffect(() => {
@@ -53,29 +121,11 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
     }
   };
 
-  const handleDeleteBatch = async () => {
-    if (!deletingBatchRecord) return;
-    setDeletingLoading(true);
-    try {
-      const res = await deletePurchaseBatch(deletingBatchRecord.id);
-      if (res.success) {
-        setDeletingBatchRecord(null);
-        setBatchFilter('');
-        refreshBatches();
-        loadData();
-      }
-    } catch (err) {
-      alert(err.message);
-    } finally {
-      setDeletingLoading(false);
-    }
-  };
-
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[400px] text-slate-500 text-xs">
         <RefreshCw className="w-5 h-5 animate-spin mr-2 text-blue-600" />
-        Loading executive dashboard stats...
+        Loading executive dashboard metrics...
       </div>
     );
   }
@@ -88,342 +138,535 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
           onClick={loadData}
           className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-semibold flex items-center gap-2 transition-colors shadow-xs cursor-pointer"
         >
-          <RefreshCw className="w-3.5 h-3.5 animate-spin-hover" /> Retry Connection
+          <RefreshCw className="w-3.5 h-3.5" /> Retry
         </button>
       </div>
     );
   }
 
-  const { statusCounts, typeCounts, recentActivity = [], placeCounts, totals } = stats;
+  const { statusCounts, financials, typeCounts = [], dealerAllocations = [], upcomingExpiries = [], recentActivity = [], totals } = stats;
+
+  const totalDevices = statusCounts?.TOTAL || totals?.devices || 0;
+  const inWarehouse = statusCounts?.IN_WAREHOUSE || 0;
+  const withDealer = statusCounts?.WITH_DEALER || 0;
+  const installed = statusCounts?.INSTALLED || 0;
+  const inStockCount = (inWarehouse + withDealer) || (totalDevices - installed);
+  const totalCustomers = totals?.customers || 0;
 
   const getEventBadge = (eventType) => {
     switch (eventType) {
-      case 'STATUS_CHANGED':
-        return <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">UPDATED / EDITED</span>;
-      case 'DISPATCHED':
-        return <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">DISPATCHED</span>;
       case 'INSTALLED':
-        return <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">INSTALLED</span>;
+        return <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">Installed</span>;
+      case 'DISPATCHED':
+      case 'STOCK_TRANSFERRED':
+        return <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-800 border border-purple-200">Dispatched</span>;
+      case 'STATUS_CHANGED':
+        return <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">Status Change</span>;
       case 'RETURNED':
-        return <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200">RETURNED</span>;
+        return <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-800 border border-red-200">Returned</span>;
       default:
-        return <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">{eventType}</span>;
+        return <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700">Updated</span>;
     }
   };
 
   return (
     <div className="space-y-6">
       
-      {/* Top Header Banner */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-gradient-to-r from-blue-700 via-indigo-700 to-slate-900 p-6 rounded-2xl text-white shadow-md">
+      {/* Top Welcome Header & Quick Action Buttons */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs">
         <div>
-          <h2 className="text-xl font-bold tracking-tight">Executive Stock & Operations Overview</h2>
-          <p className="text-xs text-blue-100 mt-1">Live operational statistics filtered by upload list and location</p>
+          <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+            <Activity className="w-5 h-5 text-purple-600" /> Executive Operations Dashboard
+          </h2>
+          <p className="text-xs text-slate-500">
+            Real-time overview of inventory stock, dealer dispatches, vehicle installations, and revenue collection.
+          </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3 self-start lg:self-auto">
-          {/* List Selection Filter */}
-          <div className="flex items-center gap-1.5">
-            <select
-              value={batchFilter}
-              onChange={(e) => {
-                setBatchFilter(e.target.value);
-                setLocationFilter('');
-              }}
-              className="bg-white/10 hover:bg-white/20 border border-white/25 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none font-semibold max-w-[220px] truncate"
-              style={{ colorScheme: 'dark' }}
-            >
-              <option value="" className="text-slate-800">All Upload Lists</option>
-              {batches.map(b => (
-                <option key={b.id} value={b.id} className="text-slate-800">
-                  {b.notes ? `${b.notes} (${b.source_file})` : b.source_file}
-                </option>
-              ))}
-            </select>
-
-            {selectedBatchObj && (
-              <button
-                type="button"
-                onClick={() => setDeletingBatchRecord(selectedBatchObj)}
-                className="px-3 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer shrink-0 animate-fadeIn"
-                title={`Delete list "${selectedBatchObj.source_file || selectedBatchObj.notes}" and its devices`}
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Delete List</span>
-              </button>
-            )}
-          </div>
-
-          {/* Location / Stock Place Filter */}
-          <select
-            value={locationFilter}
-            onChange={(e) => setLocationFilter(e.target.value)}
-            className="bg-white/10 hover:bg-white/20 border border-white/25 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none font-semibold max-w-[180px] truncate"
-            style={{ colorScheme: 'dark' }}
+        {/* Quick Manager Action Shortcuts */}
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => onNavigateTab('installations')}
+            className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
           >
-            <option value="" className="text-slate-800">All Locations</option>
-            {placeCounts && placeCounts.map(p => (
-              <option key={p.name} value={p.name} className="text-slate-800">
-                {p.name}
-              </option>
-            ))}
-          </select>
+            <Plus className="w-3.5 h-3.5" /> New Install
+          </button>
 
           <button
-            onClick={loadData}
-            className="px-3.5 py-2 bg-white/15 hover:bg-white/25 text-white border border-white/20 text-xs font-semibold rounded-xl flex items-center gap-2 transition-colors"
+            onClick={() => onNavigateTab('reports')}
+            className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
           >
-            <RefreshCw className="w-3.5 h-3.5" /> Refresh Data
+            <FileSpreadsheet className="w-3.5 h-3.5 text-slate-600" /> Export Excel
           </button>
         </div>
       </div>
 
-      {/* Delete Upload List Confirmation Modal in Dashboard */}
-      {deletingBatchRecord && (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-md p-6 space-y-4 shadow-2xl animate-scaleIn text-slate-900">
-            <div className="flex items-center gap-3 text-red-600">
-              <div className="p-2.5 bg-red-100 rounded-xl">
-                <Trash2 className="w-6 h-6 text-red-600" />
-              </div>
-              <div>
-                <h3 className="text-base font-bold text-slate-900">Delete Upload List</h3>
-                <p className="text-xs text-slate-500">Permanently delete this list and all its devices</p>
-              </div>
-            </div>
-
-            <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2 text-xs">
-              <div className="flex justify-between">
-                <span className="text-slate-500 font-medium">List / File:</span>
-                <span className="font-bold text-slate-900 font-mono">{deletingBatchRecord.source_file || 'Upload Batch'}</span>
-              </div>
-              {deletingBatchRecord.notes && (
-                <div className="flex justify-between">
-                  <span className="text-slate-500 font-medium">Notes / Label:</span>
-                  <span className="font-semibold text-slate-800">{deletingBatchRecord.notes}</span>
-                </div>
-              )}
-              <div className="flex justify-between">
-                <span className="text-slate-500 font-medium">Vendor:</span>
-                <span className="font-medium text-slate-700">{deletingBatchRecord.vendor_name}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500 font-medium">Device Type:</span>
-                <span className="font-medium text-slate-700">{deletingBatchRecord.device_type_name}</span>
-              </div>
-              <div className="flex justify-between pt-1 border-t border-slate-200">
-                <span className="text-slate-500 font-medium">Total Imported:</span>
-                <span className="font-bold text-blue-700 font-mono">{deletingBatchRecord.total_devices_count || 0} devices</span>
-              </div>
-            </div>
-
-            <p className="text-xs text-red-600 bg-red-50 border border-red-200 p-3 rounded-xl flex items-start gap-2">
-              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-              <span>Warning: This will permanently delete all devices in this list and their history. This action cannot be undone.</span>
-            </p>
-
-            <div className="flex gap-2 justify-end pt-2">
-              <button
-                onClick={() => setDeletingBatchRecord(null)}
-                disabled={deletingLoading}
-                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleDeleteBatch}
-                disabled={deletingLoading}
-                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-semibold rounded-xl flex items-center gap-1.5 shadow-xs"
-              >
-                {deletingLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-                Yes, Delete List
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* KPI Cards Grid */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* 5 Core Inventory KPI Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
         
-        <div onClick={() => onNavigateTab('inventory')} className="glass-panel p-4 rounded-2xl border-l-4 border-l-blue-600 hover:shadow-md transition-all cursor-pointer group">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Total Devices</span>
-            <div className="p-2 rounded-xl bg-blue-50 text-blue-600">
-              <Boxes className="w-5 h-5" />
+        {/* 1. Total Master Stock */}
+        <div
+          onClick={() => onNavigateTab('inventory')}
+          className="glass-panel p-4 rounded-2xl hover:border-purple-300 transition-all cursor-pointer group shadow-2xs"
+        >
+          <div className="flex items-center justify-between text-slate-500 mb-2">
+            <span className="text-[11px] font-bold uppercase tracking-wider">Total Master Stock</span>
+            <div className="p-1.5 rounded-xl bg-purple-50 text-purple-700 group-hover:bg-purple-700 group-hover:text-white transition-colors">
+              <Boxes className="w-4 h-4" />
             </div>
           </div>
-          <div className="mt-3">
-            <span className="text-2xl font-bold text-slate-900 font-mono">{totals.devices}</span>
-            <span className="text-[11px] text-blue-600 ml-2 font-semibold">All Types</span>
-          </div>
-          <div className="mt-2 text-[11px] text-slate-500 flex items-center gap-1 group-hover:text-blue-600 font-medium">
-            View stock inventory <ArrowUpRight className="w-3 h-3" />
+          <div className="text-2xl font-bold font-mono text-slate-900">{totalDevices}</div>
+          <div className="text-[11px] text-slate-500 mt-1 flex items-center justify-between">
+            <span>Entire fleet stock</span>
+            <ArrowUpRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-purple-600" />
           </div>
         </div>
 
-        <div onClick={() => onNavigateTab('inventory')} className="glass-panel p-4 rounded-2xl border-l-4 border-l-amber-500 hover:shadow-md transition-all cursor-pointer group">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">With Dealers</span>
-            <div className="p-2 rounded-xl bg-amber-50 text-amber-600">
-              <Truck className="w-5 h-5" />
+        {/* 2. Total In-Stock (Available / Uninstalled) */}
+        <div
+          onClick={() => onNavigateTab('inventory')}
+          className="glass-panel p-4 rounded-2xl hover:border-emerald-300 transition-all cursor-pointer group shadow-2xs"
+        >
+          <div className="flex items-center justify-between text-slate-500 mb-2">
+            <span className="text-[11px] font-bold uppercase tracking-wider">Total In-Stock</span>
+            <div className="p-1.5 rounded-xl bg-emerald-50 text-emerald-800 group-hover:bg-emerald-800 group-hover:text-white transition-colors">
+              <CheckCircle2 className="w-4 h-4" />
             </div>
           </div>
-          <div className="mt-3">
-            <span className="text-2xl font-bold text-slate-900 font-mono">{statusCounts.WITH_DEALER}</span>
-            <span className="text-[11px] text-amber-600 ml-2 font-semibold">Active Holding</span>
-          </div>
-          <div className="mt-2 text-[11px] text-slate-500 flex items-center gap-1 group-hover:text-amber-600 font-medium">
-            View dealer stock <ArrowUpRight className="w-3 h-3" />
+          <div className="text-2xl font-bold font-mono text-slate-900">{inStockCount}</div>
+          <div className="text-[11px] text-slate-500 mt-1 flex items-center justify-between">
+            <span>Ready for install</span>
+            <ArrowUpRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-emerald-600" />
           </div>
         </div>
 
-        <div onClick={() => onNavigateTab('installations')} className="glass-panel p-4 rounded-2xl border-l-4 border-l-emerald-600 hover:shadow-md transition-all cursor-pointer group">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Installed Vehicles</span>
-            <div className="p-2 rounded-xl bg-emerald-50 text-emerald-600">
-              <Wrench className="w-5 h-5" />
+        {/* 3. Installed In Vehicles */}
+        <div
+          onClick={() => onNavigateTab('installations')}
+          className="glass-panel p-4 rounded-2xl hover:border-emerald-300 transition-all cursor-pointer group shadow-2xs"
+        >
+          <div className="flex items-center justify-between text-slate-500 mb-2">
+            <span className="text-[11px] font-bold uppercase tracking-wider">Installed In Vehicles</span>
+            <div className="p-1.5 rounded-xl bg-emerald-50 text-emerald-800 group-hover:bg-emerald-800 group-hover:text-white transition-colors">
+              <Car className="w-4 h-4" />
             </div>
           </div>
-          <div className="mt-3">
-            <span className="text-2xl font-bold text-slate-900 font-mono">{statusCounts.INSTALLED}</span>
-            <span className="text-[11px] text-emerald-600 ml-2 font-semibold">Active Fleet</span>
-          </div>
-          <div className="mt-2 text-[11px] text-slate-500 flex items-center gap-1 group-hover:text-emerald-600 font-medium">
-            View installations <ArrowUpRight className="w-3 h-3" />
+          <div className="text-2xl font-bold font-mono text-emerald-850">{installed}</div>
+          <div className="text-[11px] text-slate-500 mt-1 flex items-center justify-between">
+            <span>{totalDevices > 0 ? Math.round((installed / totalDevices) * 100) : 0}% deployed</span>
+            <ArrowUpRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-emerald-600" />
           </div>
         </div>
 
-        <div onClick={() => onNavigateTab('inventory')} className="glass-panel p-4 rounded-2xl border-l-4 border-l-red-500 hover:shadow-md transition-all cursor-pointer group">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Faulty / RMA</span>
-            <div className="p-2 rounded-xl bg-red-50 text-red-600">
-              <ShieldAlert className="w-5 h-5" />
+        {/* 4. Dispatched to Dealers */}
+        <div
+          onClick={() => onNavigateTab('inventory')}
+          className="glass-panel p-4 rounded-2xl hover:border-amber-300 transition-all cursor-pointer group shadow-2xs"
+        >
+          <div className="flex items-center justify-between text-slate-500 mb-2">
+            <span className="text-[11px] font-bold uppercase tracking-wider">With Dealers</span>
+            <div className="p-1.5 rounded-xl bg-amber-50 text-amber-800 group-hover:bg-amber-800 group-hover:text-white transition-colors">
+              <Truck className="w-4 h-4" />
             </div>
           </div>
-          <div className="mt-3">
-            <span className="text-2xl font-bold text-slate-900 font-mono">{statusCounts.FAULTY}</span>
-            <span className="text-[11px] text-red-600 ml-2 font-semibold">Action Needed</span>
+          <div className="text-2xl font-bold font-mono text-amber-900">{withDealer}</div>
+          <div className="text-[11px] text-slate-500 mt-1 flex items-center justify-between">
+            <span>Dealer branches</span>
+            <ArrowUpRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-amber-600" />
           </div>
-          <div className="mt-2 text-[11px] text-slate-500 flex items-center gap-1 group-hover:text-red-600 font-medium">
-            View faulty items <ArrowUpRight className="w-3 h-3" />
+        </div>
+
+        {/* 5. Unassigned Ready Stock */}
+        <div
+          onClick={() => onNavigateTab('inventory')}
+          className="glass-panel p-4 rounded-2xl hover:border-slate-300 transition-all cursor-pointer group shadow-2xs"
+        >
+          <div className="flex items-center justify-between text-slate-500 mb-2">
+            <span className="text-[11px] font-bold uppercase tracking-wider">Unassigned Stock</span>
+            <div className="p-1.5 rounded-xl bg-slate-100 text-slate-700 group-hover:bg-slate-800 group-hover:text-white transition-colors">
+              <Building className="w-4 h-4" />
+            </div>
+          </div>
+          <div className="text-2xl font-bold font-mono text-slate-900">{inWarehouse}</div>
+          <div className="text-[11px] text-slate-500 mt-1 flex items-center justify-between">
+            <span>Central stock</span>
+            <ArrowUpRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-slate-900" />
           </div>
         </div>
 
       </div>
 
-      {/* Dynamic Stock Places Location Counts */}
-      {placeCounts && placeCounts.length > 0 && (
-        <div className="glass-panel p-5 rounded-2xl space-y-4">
+      {/* Row 2: Financials & Dealer Allocations Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        
+        {/* Revenue & Payment Status Card */}
+        <div className="glass-panel p-5 rounded-2xl space-y-4 shadow-2xs">
           <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-            <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-              <Boxes className="w-4 h-4 text-indigo-600" /> Devices by Stock Place / Location
-            </h3>
-            <span className="text-xs text-slate-400">Excel Column Grouping</span>
-          </div>
-
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 max-h-[300px] overflow-y-auto pr-1">
-            {placeCounts.map((place, idx) => {
-              const percentage = totals.devices > 0 ? ((place.value / totals.devices) * 100).toFixed(0) : 0;
-              return (
-                <div key={idx} className="p-3 bg-slate-50 border border-slate-100 rounded-xl space-y-2 flex flex-col justify-between hover:bg-slate-100/60 transition-colors shadow-2xs">
-                  <div className="flex justify-between items-start gap-2">
-                    <span className="text-[11px] font-bold text-slate-800 uppercase tracking-tight truncate max-w-[120px]" title={place.name}>
-                      {place.name}
-                    </span>
-                    <span className="text-[10px] font-bold px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded-md font-mono">
-                      {place.value}
-                    </span>
-                  </div>
-                  
-                  <div className="space-y-1">
-                    <div className="w-full bg-slate-200 rounded-full h-1 overflow-hidden">
-                      <div 
-                        className="bg-indigo-600 h-1 rounded-full animate-width-fill" 
-                        style={{ width: `${percentage}%` }}
-                      />
-                    </div>
-                    <div className="flex justify-between text-[9px] text-slate-500 font-medium">
-                      <span>Share</span>
-                      <span>{percentage}%</span>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* Recently Updated & Edited Records Feed */}
-      <div className="glass-panel p-5 rounded-2xl space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
-          <div>
-            <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-              <Edit3 className="w-4 h-4 text-blue-600" /> Recently Updated & Edited Records
-            </h3>
-            <p className="text-[11px] text-slate-500 mt-0.5">Live audit log of all device modifications, field edits, and status changes</p>
-          </div>
-          <span className="text-xs font-semibold px-2.5 py-1 bg-blue-50 text-blue-700 rounded-lg font-mono self-start sm:self-auto">
-            {recentActivity.length} {recentActivity.length === 1 ? 'Record' : 'Records'}
-          </span>
-        </div>
-
-        {recentActivity.length === 0 ? (
-          <div className="py-12 flex flex-col items-center justify-center text-center text-slate-400">
-            <div className="p-3 bg-slate-100 rounded-full mb-3 text-slate-400">
-              <Clock className="w-6 h-6" />
+            <div className="flex items-center gap-2 text-slate-900 font-bold text-sm">
+              <DollarSign className="w-4 h-4 text-emerald-600" />
+              <span>Revenue & Payment Status</span>
             </div>
-            <p className="text-sm font-semibold text-slate-700">No edited or updated records yet</p>
-            <p className="text-xs text-slate-500 mt-1 max-w-sm">
-              When any inventory record is edited, updated, dispatched, or installed, it will automatically appear here.
-            </p>
+            <span className="text-[11px] text-slate-400 font-medium">Billed Installs</span>
           </div>
-        ) : (
-          <div className="divide-y divide-slate-100 max-h-[360px] overflow-y-auto pr-1">
-            {recentActivity.map((act) => (
-              <div key={act.id} className="py-3 px-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-50/80 rounded-xl transition-colors">
-                <div className="flex items-start sm:items-center gap-3">
-                  <button
-                    onClick={() => onOpenTraceDrawer(act.imei_number)}
-                    className="font-mono text-xs font-bold text-blue-600 hover:text-blue-800 hover:underline bg-blue-50/60 px-2 py-1 rounded-md"
-                    title="Click to view lifecycle audit trace"
-                  >
-                    {act.imei_number}
-                  </button>
-                  
-                  {getEventBadge(act.event_type)}
 
-                  {act.device_type_name && (
-                    <span className="text-[10px] font-medium text-slate-500 hidden md:inline">
-                      {act.device_type_name}
-                    </span>
-                  )}
+          <div className="space-y-3">
+            {/* Total Installed Vehicles */}
+            <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200">
+              <div className="text-[11px] text-slate-500 font-bold uppercase tracking-wider">Total Installed Vehicles</div>
+              <div className="text-xl font-bold font-mono text-slate-900 mt-0.5">
+                {((financials?.payment_received_count || 0) + (financials?.payment_pending_count || 0)) || installed} <span className="text-xs font-normal text-slate-500">Vehicles</span>
+              </div>
+            </div>
+
+            {/* Collected (with ₹ Amount) vs Pending (Vehicles Count only) */}
+            <div className="grid grid-cols-2 gap-2.5">
+              <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 text-emerald-950 flex flex-col justify-between">
+                <div>
+                  <div className="text-[10px] font-bold text-emerald-700 uppercase">Payment Received</div>
+                  <div className="text-lg font-bold font-mono text-emerald-800 mt-0.5">
+                    ₹{(financials?.payment_received_amount || 0).toLocaleString()}
+                  </div>
                 </div>
-
-                {/* Remarks / Details */}
-                <div className="flex-1 sm:px-4 text-xs text-slate-600">
-                  <span className="font-medium text-slate-800">
-                    {act.remarks || `${act.from_holder || ''} → ${act.to_holder || ''}`}
-                  </span>
-                  {act.to_holder && act.to_holder !== act.from_holder && (
-                    <span className="text-[11px] text-slate-400 block sm:inline sm:ml-2">
-                      ({act.to_holder})
-                    </span>
-                  )}
-                </div>
-
-                {/* Performed By & Date */}
-                <div className="flex items-center justify-between sm:justify-end gap-3 text-slate-500 text-[11px] shrink-0">
-                  <span className="bg-slate-100 px-2 py-0.5 rounded text-slate-600 font-medium">
-                    By: {act.performed_by || 'User'}
-                  </span>
-                  <span className="font-mono text-slate-400">{act.event_date}</span>
+                <div className="text-[10px] text-emerald-600 font-medium mt-1">
+                  {financials?.payment_received_count || 0} vehicles paid
                 </div>
               </div>
-            ))}
+
+              <div className="p-3 bg-red-50 rounded-xl border border-red-200 text-red-950 flex flex-col justify-between">
+                <div>
+                  <div className="text-[10px] font-bold text-red-700 uppercase">Payment Pending</div>
+                  <div className="text-lg font-bold font-mono text-red-800 mt-0.5">
+                    {financials?.payment_pending_count || 0} <span className="text-xs font-normal">Vehicles</span>
+                  </div>
+                </div>
+                <div className="text-[10px] text-red-600 font-medium mt-1">
+                  Pending payment
+                </div>
+              </div>
+            </div>
+
+            {/* Collection Progress Bar */}
+            <div>
+              {(() => {
+                const totalPaidVehicles = (financials?.payment_received_count || 0) + (financials?.payment_pending_count || 0);
+                const rate = totalPaidVehicles > 0
+                  ? Math.round(((financials?.payment_received_count || 0) / totalPaidVehicles) * 100)
+                  : 0;
+                return (
+                  <>
+                    <div className="flex justify-between text-[11px] font-bold text-slate-600 mb-1">
+                      <span>Collection Rate</span>
+                      <span>{rate}%</span>
+                    </div>
+                    <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+                      <div
+                        className="bg-emerald-500 h-2 rounded-full transition-all duration-500"
+                        style={{ width: `${Math.min(100, rate)}%` }}
+                      />
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+
           </div>
-        )}
+        </div>
+
+        {/* Dealer Stock Allocation Matrix */}
+        <div className="lg:col-span-2 glass-panel p-5 rounded-2xl space-y-4 shadow-2xs flex flex-col">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+            <div className="flex items-center gap-2 text-slate-900 font-bold text-sm">
+              <Building className="w-4 h-4 text-indigo-600" />
+              <span>Dealer & Branch Stock Allocation Matrix</span>
+            </div>
+            <button
+              onClick={() => onNavigateTab('inventory')}
+              className="text-xs text-indigo-600 font-bold hover:underline flex items-center gap-1 cursor-pointer"
+            >
+              View Grid <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          <div className="overflow-y-auto max-h-[260px] pr-1 space-y-2.5 flex-1">
+            {dealerAllocations.length === 0 ? (
+              <div className="text-center py-8 text-xs text-slate-400">
+                No dealer or branch stock allocations recorded yet.
+              </div>
+            ) : (
+              dealerAllocations.map((d, i) => (
+                <div
+                  key={i}
+                  className="p-3 bg-slate-50 hover:bg-indigo-50/50 rounded-xl border border-slate-200/80 flex items-center justify-between gap-3 text-xs transition-colors"
+                >
+                  <div className="space-y-0.5">
+                    <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-indigo-600" />
+                      <span>{d.dealer}</span>
+                    </div>
+                    <div className="text-[11px] text-slate-500 flex items-center gap-3">
+                      <span>Installed: <strong className="text-emerald-700 font-mono">{d.installed}</strong></span>
+                      <span>In Stock: <strong className="text-blue-700 font-mono">{d.in_stock}</strong></span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <div className="text-right">
+                      <span className="font-mono font-bold text-indigo-700 text-sm">{d.total}</span>
+                      <div className="text-[10px] text-slate-400">Total Units</div>
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+      </div>
+
+      {/* Row 3: Vendor Brand Share & Upcoming Expiries Alerts */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        
+        {/* Vendor Inventory Share (Vamosys, Volty, TrackNow) */}
+        <div className="glass-panel p-5 rounded-2xl space-y-4 shadow-2xs">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+            <div className="flex items-center gap-2 text-slate-900 font-bold text-sm">
+              <Boxes className="w-4 h-4 text-blue-600" />
+              <span>Vendor Inventory Breakdown (Vamosys / Volty / TrackNow)</span>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            {typeCounts.length === 0 ? (
+              <div className="text-center py-6 text-xs text-slate-400">No vendor device models found.</div>
+            ) : (
+              typeCounts.map((t) => (
+                <div key={t.id} className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <div className="font-bold text-slate-900 flex items-center gap-2">
+                      <span>{t.device_type}</span>
+                      <span className="px-1.5 py-0.2 rounded text-[10px] font-normal bg-slate-200 text-slate-700">{t.category}</span>
+                    </div>
+                    <span className="font-mono font-bold text-slate-900">{t.total_count} units</span>
+                  </div>
+
+                  {/* Progress bar */}
+                  <div>
+                    <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden flex">
+                      <div
+                        className="bg-emerald-500 h-1.5"
+                        style={{ width: `${t.total_count > 0 ? (t.installed_count / t.total_count) * 100 : 0}%` }}
+                        title={`Installed: ${t.installed_count}`}
+                      />
+                      <div
+                        className="bg-indigo-500 h-1.5"
+                        style={{ width: `${t.total_count > 0 ? (t.with_dealer_count / t.total_count) * 100 : 0}%` }}
+                        title={`With Dealer: ${t.with_dealer_count}`}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between text-[11px] text-slate-500">
+                    <span className="text-emerald-700">● Installed: {t.installed_count}</span>
+                    <span className="text-amber-800">● With Dealer: {t.with_dealer_count}</span>
+                    <span className="text-slate-600">● Unassigned: {t.in_warehouse_count}</span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* 30-Day SIM & Warranty Expiry Alert Widget */}
+        <div className="glass-panel p-5 rounded-2xl space-y-4 shadow-2xs flex flex-col">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+            <div className="flex items-center gap-2 text-amber-900 font-bold text-sm">
+              <Clock className="w-4 h-4 text-amber-600" />
+              <span>Upcoming 30-Day SIM & Warranty Expiries</span>
+            </div>
+            <span className="text-[11px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+              {upcomingExpiries.length} Renewal Alerts
+            </span>
+          </div>
+
+          <div className="overflow-y-auto max-h-[280px] space-y-2.5 flex-1 pr-1">
+            {upcomingExpiries.length === 0 ? (
+              <div className="text-center py-8 text-xs text-slate-400">
+                ✅ No vehicles expiring in the next 30 days. All warranty and SIM validities are active.
+              </div>
+            ) : (
+              upcomingExpiries.map((exp) => {
+                const isOverdue = exp.days_remaining < 0;
+                const isUrgent = exp.days_remaining <= 15 && !isOverdue;
+
+                return (
+                  <div
+                    key={exp.id}
+                    className={`p-3 rounded-xl border flex items-center justify-between gap-3 text-xs ${
+                      isOverdue
+                        ? 'bg-red-50/70 border-red-200 text-red-900'
+                        : isUrgent
+                        ? 'bg-amber-50/70 border-amber-200 text-amber-950'
+                        : 'bg-slate-50 border-slate-200 text-slate-800'
+                    }`}
+                  >
+                    <div className="space-y-0.5">
+                      <div className="font-bold flex items-center gap-1.5">
+                        <Car className={`w-3.5 h-3.5 ${isOverdue ? 'text-red-600' : isUrgent ? 'text-amber-600' : 'text-slate-600'}`} />
+                        <span className="font-mono">{exp.vehicle_number}</span>
+                        <span className="text-slate-500 font-normal">({exp.customer_name})</span>
+                        <span className={`px-2 py-0.2 rounded-full text-[9px] font-bold uppercase tracking-wider ${
+                          isOverdue
+                            ? 'bg-red-100 text-red-800'
+                            : isUrgent
+                            ? 'bg-amber-100 text-amber-900'
+                            : 'bg-slate-200 text-slate-700'
+                        }`}>
+                          {isOverdue ? `Overdue (${Math.abs(exp.days_remaining)}d)` : `${exp.days_remaining} days left`}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-slate-500">
+                        IMEI: <span className="font-mono">{exp.imei_number}</span> • Valid Till: <strong className="font-mono">{exp.warranty_end_date}</strong>
+                      </div>
+                    </div>
+
+                    <a
+                      href={`https://api.whatsapp.com/send?phone=${String(exp.customer_contact || '').replace(/[^0-9]/g, '')}&text=${encodeURIComponent(
+                        `Hello ${exp.customer_name},\n\nYour GPS device subscription & certificate for vehicle *${exp.vehicle_number}* (IMEI: ${exp.imei_number}) is due for renewal on *${exp.warranty_end_date}*.\n\nPlease contact FuelTracks support to renew your SIM & certificate validity.\n\nThank you!`
+                      )}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title="Send WhatsApp renewal reminder to customer"
+                      className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-[11px] font-bold flex items-center gap-1 shrink-0 shadow-2xs cursor-pointer"
+                    >
+                      <span>💬</span> WhatsApp
+                    </a>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+      </div>
+
+      {/* Row 4: Live Operations Activity Stream with Full Records & CSV Export */}
+      <div className="glass-panel p-5 rounded-2xl space-y-4 shadow-2xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+          <div className="flex items-center gap-2 text-slate-900 font-bold text-sm">
+            <Activity className="w-4 h-4 text-purple-600" />
+            <span>Live Operations Activity Feed</span>
+            <span className="px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200 text-[10px] font-bold">
+              {recentActivity.length} Recent Edits
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleExportRecentActivityCsv}
+              disabled={recentActivity.length === 0}
+              className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer"
+              title="Download all live operations activity and team edit records as Excel/CSV"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Export Activity Log (Excel/CSV)</span>
+            </button>
+          </div>
+        </div>
+
+        <div className="overflow-x-auto max-h-[380px] rounded-xl border border-slate-200">
+          {recentActivity.length === 0 ? (
+            <div className="text-center py-12 text-xs text-slate-400">
+              No recent activity logged yet. Operations will appear here live as teams update records.
+            </div>
+          ) : (
+            <table className="w-full text-left text-xs border-collapse">
+              <thead className="bg-slate-100/90 sticky top-0 z-10 text-slate-700 font-bold border-b border-slate-200">
+                <tr>
+                  <th className="p-3">Timestamp</th>
+                  <th className="p-3">Performed By</th>
+                  <th className="p-3">IMEI & Device</th>
+                  <th className="p-3">Vehicle & Customer</th>
+                  <th className="p-3">Change Details / Diff</th>
+                  <th className="p-3 text-right">Commercials</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 bg-white">
+                {recentActivity.map((act) => {
+                  const isSales = /sales/i.test(act.performed_by || '');
+                  const isAdmin = /admin|operations|warehouse|tech/i.test(act.performed_by || '');
+                  const isOwner = /owner|super/i.test(act.performed_by || '');
+
+                  return (
+                    <tr key={act.id} className="hover:bg-slate-50 transition-colors">
+                      {/* Timestamp */}
+                      <td className="p-3 font-mono text-[11px] text-slate-500 whitespace-nowrap">
+                        {act.event_date || 'Just now'}
+                      </td>
+
+                      {/* Performed By */}
+                      <td className="p-3 whitespace-nowrap">
+                        <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider inline-flex items-center gap-1 ${
+                          isSales
+                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                            : isAdmin
+                            ? 'bg-amber-100 text-amber-900 border border-amber-200'
+                            : 'bg-purple-100 text-purple-800 border border-purple-200'
+                        }`}>
+                          {isSales ? '💼' : isAdmin ? '🛠️' : '👑'} {act.performed_by || 'Admin'}
+                        </span>
+                      </td>
+
+                      {/* IMEI & Device */}
+                      <td className="p-3 font-mono">
+                        <button
+                          onClick={() => onOpenTraceDrawer(act.imei_number)}
+                          className="font-bold text-slate-900 hover:text-purple-700 hover:underline"
+                        >
+                          {act.imei_number}
+                        </button>
+                        <div className="text-[10px] text-slate-400">{act.device_type_name || 'GPS Tracker'}</div>
+                      </td>
+
+                      {/* Vehicle & Customer */}
+                      <td className="p-3">
+                        <div className="font-semibold text-slate-800">{act.vehicle_number || '-'}</div>
+                        <div className="text-[11px] text-slate-500">{act.customer_name || '-'}</div>
+                      </td>
+
+                      {/* Diff Details */}
+                      <td className="p-3 max-w-sm">
+                        <div className="p-2 bg-slate-50 rounded-xl border border-slate-200/80 font-mono text-[11px] text-slate-700 space-y-0.5">
+                          {act.remarks ? act.remarks.split('; ').map((part, idx) => (
+                            <div key={idx} className="flex items-center gap-1.5">
+                              <span className="w-1.5 h-1.5 rounded-full bg-purple-500 shrink-0" />
+                              <span>{part}</span>
+                            </div>
+                          )) : (
+                            <span>Record updated</span>
+                          )}
+                        </div>
+                      </td>
+
+                      {/* Commercials */}
+                      <td className="p-3 text-right">
+                        <div className="font-bold text-slate-900">
+                          {act.cost && act.cost !== '-' ? `₹${act.cost}` : '-'}
+                        </div>
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                          String(act.payment_status).toUpperCase().includes('REC') || String(act.payment_status).toUpperCase().includes('PAID')
+                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                            : 'bg-red-50 text-red-700 border border-red-200'
+                        }`}>
+                          {act.payment_status || 'PENDING'}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
       </div>
 
     </div>

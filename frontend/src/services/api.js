@@ -211,6 +211,17 @@ export async function recordInstallation(payload) {
   return data;
 }
 
+export async function recordBulkInstallations(payload) {
+  const res = await fetch(`${API_BASE}/installations/bulk`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) throw new Error(data.error || 'Failed to record bulk installations');
+  return data;
+}
+
 export async function fetchInstallations(params = {}) {
   const query = new URLSearchParams(params).toString();
   const res = await fetch(`${API_BASE}/installations?${query}`);
@@ -231,6 +242,26 @@ export async function fetchCustomerById(id) {
   return res.json();
 }
 
+export async function updateCustomer(id, payload) {
+  const res = await fetch(`${API_BASE}/customers/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) throw new Error(data.error || 'Failed to update customer');
+  return data;
+}
+
+export async function deleteCustomer(id) {
+  const res = await fetch(`${API_BASE}/customers/${id}`, {
+    method: 'DELETE'
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) throw new Error(data.error || 'Failed to delete customer');
+  return data;
+}
+
 export async function lookupCustomerByPhone(phone) {
   const res = await fetch(`${API_BASE}/customers/lookup/phone/${encodeURIComponent(phone)}`);
   if (!res.ok) throw new Error('Failed to lookup customer');
@@ -249,8 +280,29 @@ export async function createUser(payload) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
   });
-  if (!res.ok) throw new Error('Failed to create user');
-  return res.json();
+  const data = await res.json();
+  if (!res.ok || !data.success) throw new Error(data.error || 'Failed to create user');
+  return data;
+}
+
+export async function updateUser(id, payload) {
+  const res = await fetch(`${API_BASE}/users/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) throw new Error(data.error || 'Failed to update user');
+  return data;
+}
+
+export async function deleteUser(id) {
+  const res = await fetch(`${API_BASE}/users/${id}`, {
+    method: 'DELETE'
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) throw new Error(data.error || 'Failed to delete user');
+  return data;
 }
 
 export async function fetchReportOptions() {
@@ -265,3 +317,44 @@ export async function fetchReportPreview(params = {}) {
   if (!res.ok) throw new Error('Failed to fetch report preview');
   return res.json();
 }
+
+export async function globalSearchDevices(query) {
+  const res = await fetch(`${API_BASE}/devices/global-search?q=${encodeURIComponent(query)}`);
+  if (!res.ok) throw new Error('Failed to perform global search');
+  return res.json();
+}
+
+export async function bulkAssignDealer(payload) {
+  const res = await fetch(`${API_BASE}/devices/bulk-assign-dealer`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  if (!res.ok) throw new Error('Failed to assign devices to dealer');
+  return res.json();
+}
+
+export async function fetchDealersSummary() {
+  const res = await fetch(`${API_BASE}/devices/dealers-summary`);
+  if (!res.ok) throw new Error('Failed to fetch dealers summary');
+  return res.json();
+}
+
+export async function fetchAuditLogs(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  const res = await fetch(`${API_BASE}/devices/audit-logs?${query}`);
+  if (!res.ok) throw new Error('Failed to fetch audit logs');
+  return res.json();
+}
+
+export async function bulkTransferDevices(payload) {
+  const res = await fetch(`${API_BASE}/devices/bulk-transfer`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) throw new Error(data.error || 'Failed to transfer devices');
+  return data;
+}
+

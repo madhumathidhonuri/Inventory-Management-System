@@ -5,11 +5,11 @@ import Sidebar from './components/Sidebar';
 import ImeiJourneyDrawer from './components/ImeiJourneyDrawer';
 import BarcodeScannerModal from './components/BarcodeScannerModal';
 
+import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
 import InventoryPage from './pages/InventoryPage';
 import PurchaseUploadPage from './pages/PurchaseUploadPage';
 import InstallationPage from './pages/InstallationPage';
-import CustomerCrmPage from './pages/CustomerCrmPage';
 import DeviceTypesPage from './pages/DeviceTypesPage';
 import ReportsPage from './pages/ReportsPage';
 import UserManagementPage from './pages/UserManagementPage';
@@ -36,12 +36,23 @@ function MainLayout() {
     setScannerOpen(true);
   };
 
-  const handleScannedComplete = (scannedList, actionType) => {
+  const [inventoryInitialFilter, setInventoryInitialFilter] = useState(null);
+
+  const handleScannedComplete = (scannedList, actionType, meta = {}) => {
     if (scannerCallback) {
       scannerCallback(scannedList);
       setScannerCallback(null);
     } else if (actionType === 'INSTALL') {
       setActiveTab('installations');
+    } else if (actionType === 'INVENTORY') {
+      setInventoryInitialFilter({
+        stockPlace: meta.stockPlace || '',
+        imeis: meta.imeis || scannedList,
+        successMessage: meta.successMessage || ''
+      });
+      setActiveTab('inventory');
+    } else if (actionType === 'TRACE' && scannedList.length > 0) {
+      openTraceDrawer(scannedList[0]);
     }
   };
 
@@ -59,13 +70,17 @@ function MainLayout() {
       case 'dashboard':
         return <DashboardPage onOpenTraceDrawer={openTraceDrawer} onNavigateTab={setActiveTab} />;
       case 'inventory':
-        return <InventoryPage onOpenTraceDrawer={openTraceDrawer} />;
+        return (
+          <InventoryPage
+            onOpenTraceDrawer={openTraceDrawer}
+            initialFilter={inventoryInitialFilter}
+            onClearInitialFilter={() => setInventoryInitialFilter(null)}
+          />
+        );
       case 'upload':
         return <PurchaseUploadPage onUploadSuccess={() => setActiveTab('inventory')} />;
       case 'installations':
         return <InstallationPage onOpenScannerWithCallback={openScannerWithCallback} onOpenTraceDrawer={openTraceDrawer} />;
-      case 'customers':
-        return <CustomerCrmPage onOpenTraceDrawer={openTraceDrawer} />;
       case 'types':
         return <DeviceTypesPage />;
       case 'reports':
@@ -119,10 +134,20 @@ function MainLayout() {
   );
 }
 
+function AppContent() {
+  const { isAuthenticated } = useAuth();
+
+  if (!isAuthenticated) {
+    return <LoginPage />;
+  }
+
+  return <MainLayout />;
+}
+
 export default function App() {
   return (
     <AuthProvider>
-      <MainLayout />
+      <AppContent />
     </AuthProvider>
   );
 }

@@ -218,4 +218,19 @@ router.post('/columns/delete', (req, res) => {
   }
 });
 
+// DELETE device type
+router.delete('/:id', (req, res) => {
+  const { id } = req.params;
+  try {
+    const attachedDevices = db.prepare('SELECT count(*) as count FROM devices WHERE device_type_id = ?').get(id);
+    if (attachedDevices && attachedDevices.count > 0) {
+      return res.status(400).json({ success: false, error: `Cannot delete device type with ${attachedDevices.count} active device records attached.` });
+    }
+    db.prepare('DELETE FROM device_types WHERE id = ?').run(id);
+    res.json({ success: true, message: 'Device type deleted successfully' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;

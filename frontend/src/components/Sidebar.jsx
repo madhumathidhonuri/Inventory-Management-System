@@ -6,18 +6,17 @@ export default function Sidebar({ activeTab, setActiveTab }) {
   const { user } = useAuth();
 
   const NAV_ITEMS = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['SUPER_ADMIN', 'WAREHOUSE_MANAGER', 'SALES_MANAGER', 'INSTALLER', 'DEALER'] },
-    { id: 'inventory', label: 'Stock Inventory', icon: Boxes, roles: ['SUPER_ADMIN', 'WAREHOUSE_MANAGER', 'SALES_MANAGER', 'DEALER'] },
-    { id: 'upload', label: 'Excel Bulk Upload', icon: FileSpreadsheet, roles: ['SUPER_ADMIN', 'WAREHOUSE_MANAGER'] },
-    { id: 'installations', label: 'Installations Hub', icon: Wrench, roles: ['SUPER_ADMIN', 'WAREHOUSE_MANAGER', 'SALES_MANAGER', 'INSTALLER'] },
-    { id: 'customers', label: 'Customer CRM', icon: Users, roles: ['SUPER_ADMIN', 'SALES_MANAGER', 'INSTALLER'] },
-    { id: 'types', label: 'Device Catalog', icon: Settings, roles: ['SUPER_ADMIN', 'WAREHOUSE_MANAGER'] },
-    { id: 'reports', label: 'Reports & Exports', icon: FileText, roles: ['SUPER_ADMIN', 'WAREHOUSE_MANAGER', 'SALES_MANAGER'] },
+    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['SUPER_ADMIN', 'ADMIN_TEAM', 'SALES_TEAM', 'WAREHOUSE_MANAGER', 'SALES_MANAGER', 'INSTALLER', 'DEALER'] },
+    { id: 'inventory', label: 'Stock Inventory', icon: Boxes, roles: ['SUPER_ADMIN', 'ADMIN_TEAM', 'SALES_TEAM', 'WAREHOUSE_MANAGER', 'SALES_MANAGER', 'DEALER'] },
+    { id: 'upload', label: 'Excel Bulk Upload', icon: FileSpreadsheet, roles: ['SUPER_ADMIN', 'ADMIN_TEAM', 'WAREHOUSE_MANAGER'] },
+    { id: 'installations', label: 'Installations Hub', icon: Wrench, roles: ['SUPER_ADMIN', 'ADMIN_TEAM', 'SALES_TEAM', 'WAREHOUSE_MANAGER', 'SALES_MANAGER', 'INSTALLER'] },
+    { id: 'types', label: 'Device Catalog', icon: Settings, roles: ['SUPER_ADMIN', 'ADMIN_TEAM', 'WAREHOUSE_MANAGER'] },
+    { id: 'reports', label: 'Reports & Exports', icon: FileText, roles: ['SUPER_ADMIN', 'ADMIN_TEAM', 'SALES_TEAM', 'WAREHOUSE_MANAGER', 'SALES_MANAGER'] },
     { id: 'users', label: 'User Roles', icon: UserCheck, roles: ['SUPER_ADMIN'] },
-    { id: 'mobile', label: 'Field Mobile Scanner', icon: Smartphone, roles: ['SUPER_ADMIN', 'INSTALLER', 'WAREHOUSE_MANAGER'] }
+    { id: 'mobile', label: 'Field Mobile Scanner', icon: Smartphone, roles: ['SUPER_ADMIN', 'ADMIN_TEAM', 'INSTALLER', 'WAREHOUSE_MANAGER'] }
   ];
 
-  const visibleItems = NAV_ITEMS.filter(item => item.roles.includes(user.role));
+  const visibleItems = NAV_ITEMS.filter(item => item.roles.includes(user.role) || user.role === 'SUPER_ADMIN');
 
   return (
     <aside className="w-64 bg-white border-r border-slate-200 flex flex-col justify-between hidden md:flex min-h-[calc(100vh-57px)]">
