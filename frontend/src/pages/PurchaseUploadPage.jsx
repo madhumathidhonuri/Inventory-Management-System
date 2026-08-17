@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { FileSpreadsheet, Upload, CheckCircle2, AlertTriangle, Download, ArrowRight, Check, X, RefreshCw, FileText } from 'lucide-react';
 import { fetchDeviceTypes, previewPurchaseUpload, confirmPurchaseUpload } from '../services/api';
 import * as xlsx from 'xlsx';
