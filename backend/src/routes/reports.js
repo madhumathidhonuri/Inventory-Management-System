@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db/database');
 const xlsx = require('xlsx');
+const ExcelJS = require('exceljs');
 
 const MONTH_NAMES = [
   'JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE',
@@ -672,6 +673,249 @@ router.get('/export', (req, res) => {
       res.setHeader('Content-Disposition', `attachment; filename="${filename}.xlsx"`);
       return res.send(buffer);
     }
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Helper: Compute 100% dynamic Daily Master Inventory Distribution Matrix
+function computeDailyDistributionMatrix() {
+  const deviceTypes = db.prepare('SELECT id, name FROM device_types WHERE active = 1 ORDER BY name ASC').all();
+  const batches = db.prepare('SELECT device_type_id, SUM(total_devices_count) as total_purchased FROM purchase_batches GROUP BY device_type_id').all();
+  const batchMap = {};
+  batches.forEach(b => { batchMap[b.device_type_id] = b.total_purchased || 0; });
+
+  const devices = db.prepare(`
+    SELECT 
+      d.id, 
+      d.device_type_id, 
+      dt.name as device_name, 
+      d.current_status, 
+      d.current_holder_name, 
+      d.additional_attributes 
+    FROM devices d 
+    JOIN device_types dt ON d.device_type_id = dt.id
+  `).all();
+
+  const locationsSet = new Set();
+  const matrix = {};
+
+  deviceTypes.forEach(dt => {
+    matrix[dt.name] = {
+      device_type_id: dt.id,
+      device_name: dt.name,
+      locations: {},
+      certificates_issued: 0,
+      in_stock_total: 0,
+      purchased_total: batchMap[dt.id] || 0
+    };
+  });
+
+  devices.forEach(dev => {
+    let attrs = {};
+    try { attrs = JSON.parse(dev.additional_attributes || '{}'); } catch {}
+
+    const devName = dev.device_name || 'UNKNOWN';
+    if (!matrix[devName]) {
+      matrix[devName] = {
+        device_type_id: dev.device_type_id,
+        device_name: devName,
+        locations: {},
+        certificates_issued: 0,
+        in_stock_total: 0,
+        purchased_total: 0
+      };
+    }
+
+    const isInstalled = dev.current_status === 'INSTALLED' || Boolean(attrs['VEHICLE NUMBER'] || attrs['VEHICLE NO']);
+
+    if (isInstalled) {
+      matrix[devName].certificates_issued++;
+    } else {
+      let place = attrs['STOCK PLACE'] || attrs['STOCK LOCATION'] || dev.current_holder_name || 'OFFICE';
+      place = String(place).trim().toUpperCase();
+      if (!place || place === '—' || place === '-' || place === 'NULL') place = 'OFFICE';
+      locationsSet.add(place);
+
+      matrix[devName].locations[place] = (matrix[devName].locations[place] || 0) + 1;
+      matrix[devName].in_stock_total++;
+    }
+  });
+
+  // Dynamic locations sorting: Main hubs first if present, then alphabetical
+  const priority = ['OFFICE', 'RESIDENCE', 'CHENNAI', 'TESTING CHENNAI'];
+  const allLocations = Array.from(locationsSet).sort((a, b) => {
+    const pA = priority.indexOf(a);
+    const pB = priority.indexOf(b);
+    if (pA !== -1 && pB !== -1) return pA - pB;
+    if (pA !== -1) return -1;
+    if (pB !== -1) return 1;
+    return a.localeCompare(b);
+  });
+
+  // Calculate dynamic column totals for bottom summary row
+  const columnTotals = {
+    locations: {},
+    certificates_issued: 0,
+    in_stock_total: 0,
+    purchased_total: 0
+  };
+
+  allLocations.forEach(loc => {
+    columnTotals.locations[loc] = 0;
+    Object.values(matrix).forEach(m => {
+      columnTotals.locations[loc] += (m.locations[loc] || 0);
+    });
+  });
+
+  Object.values(matrix).forEach(m => {
+    columnTotals.certificates_issued += m.certificates_issued;
+    columnTotals.in_stock_total += m.in_stock_total;
+    columnTotals.purchased_total += m.purchased_total;
+  });
+
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+
+  return {
+    locations: allLocations,
+    rows: Object.values(matrix),
+    columnTotals,
+    generatedAt: dateStr
+  };
+}
+
+// GET /api/reports/daily-distribution - Live dynamic Daily Stock Matrix JSON
+router.get('/daily-distribution', (req, res) => {
+  try {
+    const data = computeDailyDistributionMatrix();
+    res.json({ success: true, data });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/reports/export-daily-distribution - Excel export with Blue Header & Orange Total Row
+router.get('/export-daily-distribution', async (req, res) => {
+  try {
+    const matrixData = computeDailyDistributionMatrix();
+    const { locations, rows, columnTotals, generatedAt } = matrixData;
+
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'FuelTracks Technologies IMS';
+    wb.lastModifiedBy = 'Super Admin';
+    wb.created = new Date();
+
+    const ws = wb.addWorksheet('Daily Inventory Report', {
+      views: [{ showGridLines: true }]
+    });
+
+    // Headers array: DEVICE, ...dynamicLocations, CERTIFICATES ISSUED, TOTAL, PURCHASED
+    const headers = ['DEVICE', ...locations, 'CERTIFICATES ISSUED', 'TOTAL', 'PURCHASED'];
+    const headerRow = ws.addRow(headers);
+    headerRow.height = 28;
+
+    headerRow.eachCell((cell, colNumber) => {
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FF366092' } // Elegant Sky/Steel Blue Header
+      };
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 10, name: 'Calibri' };
+      cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+      cell.border = {
+        top: { style: 'thin', color: { argb: 'FFB0C4DE' } },
+        left: { style: 'thin', color: { argb: 'FFB0C4DE' } },
+        bottom: { style: 'medium', color: { argb: 'FF1F497D' } },
+        right: { style: 'thin', color: { argb: 'FFB0C4DE' } }
+      };
+    });
+
+    // Data rows for each device model
+    rows.forEach(r => {
+      const rowValues = [
+        r.device_name,
+        ...locations.map(loc => r.locations[loc] || ''),
+        r.certificates_issued || 0,
+        r.in_stock_total || 0,
+        r.purchased_total || 0
+      ];
+
+      const row = ws.addRow(rowValues);
+      row.height = 24;
+
+      row.eachCell((cell, colNum) => {
+        const isDeviceCol = colNum === 1;
+        const isSummaryCol = colNum >= headers.length - 2;
+
+        cell.font = {
+          size: 10,
+          name: 'Calibri',
+          bold: isDeviceCol || isSummaryCol,
+          color: { argb: isSummaryCol ? 'FF1E293B' : 'FF334155' }
+        };
+        cell.alignment = {
+          vertical: 'middle',
+          horizontal: isDeviceCol ? 'left' : 'center'
+        };
+        cell.border = {
+          top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          right: { style: 'thin', color: { argb: 'FFE2E8F0' } }
+        };
+
+        if (isSummaryCol) {
+          cell.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: 'FFF8FAFC' }
+          };
+        }
+      });
+    });
+
+    // Footer Orange Total Row
+    const footerValues = [
+      'TOTAL',
+      ...locations.map(loc => `TOTAL = ${columnTotals.locations[loc] || 0}`),
+      `TOTAL = ${columnTotals.certificates_issued || 0}`,
+      `TOTAL = ${columnTotals.in_stock_total || 0}`,
+      `TOTAL = ${columnTotals.purchased_total || 0}`
+    ];
+
+    const footerRow = ws.addRow(footerValues);
+    footerRow.height = 26;
+
+    footerRow.eachCell((cell, colNum) => {
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFED7D31' } // Vibrant Orange Footer Row
+      };
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 9, name: 'Calibri' };
+      cell.alignment = { vertical: 'middle', horizontal: 'center' };
+      cell.border = {
+        top: { style: 'medium', color: { argb: 'FFFFFFFF' } },
+        left: { style: 'thin', color: { argb: 'FFFFFFFF' } },
+        bottom: { style: 'medium', color: { argb: 'FFFFFFFF' } },
+        right: { style: 'thin', color: { argb: 'FFFFFFFF' } }
+      };
+    });
+
+    // Set responsive column widths
+    ws.columns.forEach((col, index) => {
+      if (index === 0) col.width = 16;
+      else if (index >= headers.length - 3) col.width = 20;
+      else col.width = 15;
+    });
+
+    const filename = `Daily_Master_Inventory_Report_${new Date().toISOString().split('T')[0]}`;
+    const buffer = await wb.xlsx.writeBuffer();
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}.xlsx"`);
+    res.send(buffer);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }

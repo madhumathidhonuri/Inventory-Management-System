@@ -21,12 +21,19 @@ import {
   Receipt,
   User,
   Phone,
-  CreditCard
+  CreditCard,
+  Table,
+  Sparkles,
+  Building
 } from 'lucide-react';
-import { fetchReportOptions, fetchReportPreview } from '../services/api';
+import { fetchReportOptions, fetchReportPreview, fetchDailyDistributionReport } from '../services/api';
 
 export default function ReportsPage() {
+  const [activeTab, setActiveTab] = useState('daily_matrix'); // 'daily_matrix' | 'custom_builder'
   const [loadingOptions, setLoadingOptions] = useState(true);
+  const [dailyMatrixLoading, setDailyMatrixLoading] = useState(false);
+  const [dailyMatrix, setDailyMatrix] = useState(null);
+
   const [options, setOptions] = useState({
     batches: [],
     deviceTypes: [],
@@ -54,15 +61,36 @@ export default function ReportsPage() {
   const [previewData, setPreviewData] = useState({ totalCount: 0, preview: [] });
   const [downloading, setDownloading] = useState(null);
 
-  // Load options once on mount
+  // Load options & daily matrix on mount
   useEffect(() => {
     loadOptions();
+    loadDailyMatrix();
   }, []);
 
   // Update preview whenever filters change
   useEffect(() => {
     updatePreview();
   }, [filters]);
+
+  const loadDailyMatrix = async () => {
+    setDailyMatrixLoading(true);
+    try {
+      const res = await fetchDailyDistributionReport();
+      if (res.success) {
+        setDailyMatrix(res.data);
+      }
+    } catch (err) {
+      console.error('Failed to load daily matrix:', err);
+    } finally {
+      setDailyMatrixLoading(false);
+    }
+  };
+
+  const handleExportDailyMatrix = () => {
+    setDownloading('daily_matrix');
+    window.location.href = '/api/reports/export-daily-distribution';
+    setTimeout(() => setDownloading(null), 2500);
+  };
 
   const loadOptions = async () => {
     setLoadingOptions(true);
@@ -185,7 +213,7 @@ export default function ReportsPage() {
   ];
 
   return (
-    <div className="space-y-6 max-w-6xl mx-auto">
+    <div className="space-y-6 max-w-7xl mx-auto">
       
       {/* Top Banner & Summary Pills */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-gradient-to-r from-slate-900 via-indigo-900 to-slate-950 p-6 rounded-2xl text-white shadow-md">
@@ -194,13 +222,13 @@ export default function ReportsPage() {
             <Receipt className="w-6 h-6 text-indigo-400" /> Executive Reports & Excel Export Hub
           </h2>
           <p className="text-xs text-indigo-200 mt-1">
-            Export Manager Statements (Vehicle No, Customer, Phone, SIMs, IMEI, Total Cost, Payment Status) or Original List spreadsheets.
+            Auto-generated Daily Master Stock Distribution Matrix and customizable Manager Executive Statements.
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 self-start lg:self-auto">
           <div className="bg-white/10 border border-white/20 rounded-xl px-3 py-1.5 text-xs text-white flex items-center gap-2">
-            <span className="text-slate-300">Total Devices:</span>
+            <span className="text-slate-300">Total Master Stock:</span>
             <span className="font-mono font-bold text-white">{options.stats.totalDevices}</span>
           </div>
 
@@ -218,8 +246,189 @@ export default function ReportsPage() {
         </div>
       </div>
 
-      {/* Interactive Custom Report Builder Panel */}
-      <div className="glass-panel p-6 rounded-2xl space-y-6 border border-slate-200 shadow-sm">
+      {/* Main Mode Navigation Tabs */}
+      <div className="flex items-center gap-3 border-b border-slate-200 pb-2">
+        <button
+          onClick={() => setActiveTab('daily_matrix')}
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 border ${
+            activeTab === 'daily_matrix'
+              ? 'bg-blue-700 text-white border-blue-700 shadow-2xs'
+              : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+          }`}
+        >
+          <Table className="w-4 h-4" />
+          <span>Daily Master Stock Distribution Matrix</span>
+          <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-white/20 text-white font-normal">
+            Auto-Prepared
+          </span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('custom_builder')}
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 border ${
+            activeTab === 'custom_builder'
+              ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
+              : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+          }`}
+        >
+          <SlidersHorizontal className="w-4 h-4" />
+          <span>Tailored Report & Billing Register Export</span>
+        </button>
+      </div>
+
+      {/* TAB 1: Auto-Prepared Daily Master Stock Distribution Matrix */}
+      {activeTab === 'daily_matrix' && (
+        <div className="glass-panel p-6 rounded-2xl space-y-5 border border-slate-200 shadow-sm animate-fadeIn">
+          
+          {/* Header & 1-Click Super Admin Export Action */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  <Table className="w-5 h-5 text-blue-700" /> Daily Master Stock Distribution Matrix
+                </h3>
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-800 border border-blue-200">
+                  {dailyMatrix?.generatedAt || 'Today'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 mt-1">
+                Auto-prepared daily distribution matrix across all dynamic locations, dealer holders, and vehicle installations.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={loadDailyMatrix}
+                disabled={dailyMatrixLoading}
+                className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition-colors cursor-pointer"
+                title="Refresh Matrix"
+              >
+                <RefreshCw className={`w-4 h-4 ${dailyMatrixLoading ? 'animate-spin text-blue-600' : ''}`} />
+              </button>
+
+              <button
+                onClick={handleExportDailyMatrix}
+                disabled={downloading === 'daily_matrix' || !dailyMatrix}
+                className="px-4 py-2.5 bg-blue-700 hover:bg-blue-800 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-2xs transition-all cursor-pointer"
+              >
+                <FileSpreadsheet className="w-4 h-4" />
+                <span>{downloading === 'daily_matrix' ? 'Generating Excel...' : 'Download Daily Report Excel (.xlsx)'}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Matrix Table Display with Blue Header and Orange Footer */}
+          {dailyMatrixLoading || !dailyMatrix ? (
+            <div className="flex items-center justify-center py-16 text-xs text-slate-500">
+              <RefreshCw className="w-5 h-5 animate-spin mr-2 text-blue-600" />
+              Computing dynamic stock distribution matrix...
+            </div>
+          ) : (
+            <div className="space-y-4">
+              
+              <div className="overflow-x-auto rounded-xl border border-slate-300 shadow-2xs">
+                <table className="w-full text-center border-collapse text-xs">
+                  
+                  {/* Sky / Steel Blue Header Row (#366092) */}
+                  <thead>
+                    <tr className="bg-[#366092] text-white font-bold text-[11px] uppercase tracking-wider">
+                      <th className="p-3 text-left border-r border-[#2a4d77] whitespace-nowrap sticky left-0 bg-[#366092] z-10">
+                        DEVICE
+                      </th>
+                      {dailyMatrix.locations.map(loc => (
+                        <th key={loc} className="p-3 border-r border-[#2a4d77] whitespace-nowrap min-w-[100px]">
+                          {loc}
+                        </th>
+                      ))}
+                      <th className="p-3 border-r border-[#2a4d77] whitespace-nowrap bg-[#2c5380]">
+                        CERTIFICATES ISSUED
+                      </th>
+                      <th className="p-3 border-r border-[#2a4d77] whitespace-nowrap bg-[#2c5380]">
+                        TOTAL
+                      </th>
+                      <th className="p-3 whitespace-nowrap bg-[#2c5380]">
+                        PURCHASED
+                      </th>
+                    </tr>
+                  </thead>
+
+                  {/* Device Data Rows */}
+                  <tbody className="divide-y divide-slate-200 bg-white">
+                    {dailyMatrix.rows.map(r => (
+                      <tr key={r.device_name} className="hover:bg-blue-50/30 transition-colors">
+                        <td className="p-3 text-left font-bold text-slate-900 border-r border-slate-200 sticky left-0 bg-white z-10 whitespace-nowrap">
+                          {r.device_name}
+                        </td>
+                        {dailyMatrix.locations.map(loc => (
+                          <td key={loc} className="p-3 font-mono font-medium text-slate-700 border-r border-slate-200">
+                            {r.locations[loc] ? (
+                              <span className="font-bold text-slate-900">{r.locations[loc]}</span>
+                            ) : (
+                              <span className="text-slate-300">—</span>
+                            )}
+                          </td>
+                        ))}
+                        <td className="p-3 font-mono font-bold text-emerald-800 bg-emerald-50/40 border-r border-slate-200">
+                          {r.certificates_issued}
+                        </td>
+                        <td className="p-3 font-mono font-bold text-blue-900 bg-blue-50/40 border-r border-slate-200">
+                          {r.in_stock_total}
+                        </td>
+                        <td className="p-3 font-mono font-bold text-slate-800 bg-slate-50 border-r border-slate-200">
+                          {r.purchased_total}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+
+                  {/* Vibrant Orange Summary Footer Row (#ED7D31) */}
+                  <tfoot>
+                    <tr className="bg-[#ED7D31] text-white font-bold text-[11px] shadow-sm">
+                      <td className="p-3 text-left border-r border-orange-400 sticky left-0 bg-[#ED7D31] z-10 uppercase tracking-wider">
+                        TOTAL
+                      </td>
+                      {dailyMatrix.locations.map(loc => (
+                        <td key={loc} className="p-3 border-r border-orange-400 font-mono whitespace-nowrap">
+                          TOTAL = {dailyMatrix.columnTotals.locations[loc] || 0}
+                        </td>
+                      ))}
+                      <td className="p-3 border-r border-orange-400 font-mono whitespace-nowrap bg-orange-700/80">
+                        TOTAL = {dailyMatrix.columnTotals.certificates_issued}
+                      </td>
+                      <td className="p-3 border-r border-orange-400 font-mono whitespace-nowrap bg-orange-700/80">
+                        TOTAL = {dailyMatrix.columnTotals.in_stock_total}
+                      </td>
+                      <td className="p-3 font-mono whitespace-nowrap bg-orange-700/80">
+                        TOTAL = {dailyMatrix.columnTotals.purchased_total}
+                      </td>
+                    </tr>
+                  </tfoot>
+
+                </table>
+              </div>
+
+              {/* Dynamic Columns Info Note */}
+              <div className="p-3 bg-blue-50/70 border border-blue-200 rounded-xl text-xs text-blue-950 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-blue-600 shrink-0" />
+                  <span>
+                    <strong>100% Dynamic Locations:</strong> As new branches, stock places, or dealer transfers are saved, columns expand and calculate totals automatically.
+                  </span>
+                </div>
+                <span className="text-[11px] font-bold text-blue-800 bg-white px-2.5 py-0.5 rounded-lg border border-blue-200 shadow-2xs">
+                  {dailyMatrix.locations.length} Locations Detected
+                </span>
+              </div>
+
+            </div>
+          )}
+
+        </div>
+      )}
+
+      {/* TAB 2: Interactive Custom Report Builder Panel */}
+      {activeTab === 'custom_builder' && (
+      <div className="glass-panel p-6 rounded-2xl space-y-6 border border-slate-200 shadow-sm animate-fadeIn">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
           <div>
             <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
@@ -545,6 +754,7 @@ export default function ReportsPage() {
         )}
 
       </div>
+      )}
 
       {/* Preset Quick-Export Cards */}
       <div className="space-y-3">

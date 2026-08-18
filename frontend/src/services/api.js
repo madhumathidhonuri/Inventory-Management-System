@@ -318,6 +318,12 @@ export async function fetchReportPreview(params = {}) {
   return res.json();
 }
 
+export async function fetchDailyDistributionReport() {
+  const res = await fetch(`${API_BASE}/reports/daily-distribution`);
+  if (!res.ok) throw new Error('Failed to fetch daily distribution report');
+  return res.json();
+}
+
 export async function globalSearchDevices(query) {
   const res = await fetch(`${API_BASE}/devices/global-search?q=${encodeURIComponent(query)}`);
   if (!res.ok) throw new Error('Failed to perform global search');

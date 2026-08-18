@@ -33,7 +33,8 @@ import {
   Cpu,
   Tag,
   Receipt,
-  Calendar
+  Calendar,
+  Table
 } from 'lucide-react';
 import { fetchStats, fetchPurchaseBatches, fetchDeviceTypes } from '../services/api';
 
@@ -268,6 +269,15 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
 
         {/* Quick Manager Action Shortcuts */}
         <div className="flex flex-wrap items-center gap-2">
+          <a
+            href="/api/reports/export-daily-distribution"
+            download
+            className="px-3.5 py-2 bg-blue-700 hover:bg-blue-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+            title="Download Excel spreadsheet of the Daily Master Stock Distribution Matrix across all locations"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5" /> Daily Report (Excel)
+          </a>
+
           <button
             onClick={() => handleOpenMonthlyExportModal('AUGUST')}
             className="px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
@@ -287,7 +297,7 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
             onClick={() => onNavigateTab('reports')}
             className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
           >
-            <FileSpreadsheet className="w-3.5 h-3.5 text-slate-600" /> Export Center
+            <Table className="w-3.5 h-3.5 text-slate-600" /> Reports Hub
           </button>
         </div>
       </div>
