@@ -165,6 +165,24 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
     loadData();
   }, [selectedDeviceTypeId, selectedBatchId, locationFilter]);
 
+  const selectedTypeObj = useMemo(() => {
+    if (!selectedDeviceTypeId) return null;
+    return deviceTypes.find(dt => dt.id.toString() === selectedDeviceTypeId.toString()) || null;
+  }, [selectedDeviceTypeId, deviceTypes]);
+
+  const selectedBatchObj = useMemo(() => {
+    if (!selectedBatchId) return null;
+    return batches.find(b => b.id.toString() === selectedBatchId.toString()) || null;
+  }, [selectedBatchId, batches]);
+
+  const isFiltered = Boolean(selectedDeviceTypeId || selectedBatchId || locationFilter);
+
+  const handleResetFilters = () => {
+    setSelectedDeviceTypeId('');
+    setSelectedBatchId('');
+    setLocationFilter('');
+  };
+
   const loadData = async () => {
     setLoading(true);
     setError(null);
@@ -217,24 +235,6 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
   const installed = statusCounts?.INSTALLED || 0;
   const inStockCount = (inWarehouse + withDealer) || (totalDevices - installed);
   const totalCustomers = totals?.customers || 0;
-
-  const selectedTypeObj = useMemo(() => {
-    if (!selectedDeviceTypeId) return null;
-    return deviceTypes.find(dt => dt.id.toString() === selectedDeviceTypeId.toString()) || null;
-  }, [selectedDeviceTypeId, deviceTypes]);
-
-  const selectedBatchObj = useMemo(() => {
-    if (!selectedBatchId) return null;
-    return batches.find(b => b.id.toString() === selectedBatchId.toString()) || null;
-  }, [selectedBatchId, batches]);
-
-  const isFiltered = Boolean(selectedDeviceTypeId || selectedBatchId || locationFilter);
-
-  const handleResetFilters = () => {
-    setSelectedDeviceTypeId('');
-    setSelectedBatchId('');
-    setLocationFilter('');
-  };
 
   const getEventBadge = (eventType) => {
     switch (eventType) {
