@@ -4,15 +4,34 @@ const db = require('../db/database');
 
 // GET /api/dashboard/stats - Executive Dashboard statistics & metrics
 router.get('/stats', (req, res) => {
-  const { purchase_batch_id, stock_place } = req.query;
+  const { purchase_batch_id, device_type_id, vendor_name, stock_place } = req.query;
 
   try {
-    // 1. Scan devices to detect the dynamic placeKey
+    // 1. Build initial device filter clauses
+    let devWhere = [];
+    let devParams = [];
+
+    if (purchase_batch_id) {
+      devWhere.push('purchase_batch_id = ?');
+      devParams.push(purchase_batch_id);
+    }
+    if (device_type_id) {
+      devWhere.push('device_type_id = ?');
+      devParams.push(device_type_id);
+    }
+    if (vendor_name) {
+      devWhere.push('vendor_name = ?');
+      devParams.push(vendor_name);
+    }
+
+    const devWhereSql = devWhere.length > 0 ? `WHERE ${devWhere.join(' AND ')}` : '';
+
+    // Scan devices to detect dynamic placeKey and compute dynamic attributes
     const allFilteredDevices = db.prepare(`
-      SELECT id, device_type_id, current_status, current_holder_name, current_holder_type, additional_attributes, updated_at
+      SELECT id, device_type_id, vendor_name, purchase_batch_id, current_status, current_holder_name, current_holder_type, additional_attributes, updated_at
       FROM devices
-      ${purchase_batch_id ? 'WHERE purchase_batch_id = ?' : ''}
-    `).all(...(purchase_batch_id ? [purchase_batch_id] : []));
+      ${devWhereSql}
+    `).all(...devParams);
 
     let placeKey = null;
     for (const dev of allFilteredDevices) {
@@ -25,7 +44,7 @@ router.get('/stats', (req, res) => {
       }
     }
 
-    // 2. Build dynamic filtering SQL whereClause
+    // 2. Build dynamic filtering SQL whereClause with alias 'd'
     let filterClauses = [];
     let queryParams = [];
 
@@ -33,7 +52,14 @@ router.get('/stats', (req, res) => {
       filterClauses.push('d.purchase_batch_id = ?');
       queryParams.push(purchase_batch_id);
     }
-
+    if (device_type_id) {
+      filterClauses.push('d.device_type_id = ?');
+      queryParams.push(device_type_id);
+    }
+    if (vendor_name) {
+      filterClauses.push('d.vendor_name = ?');
+      queryParams.push(vendor_name);
+    }
     if (stock_place && placeKey) {
       filterClauses.push(`json_extract(d.additional_attributes, '$.' || ?) = ?`);
       queryParams.push(placeKey, stock_place);
@@ -112,28 +138,39 @@ router.get('/stats', (req, res) => {
       }
     }
 
-    // Also factor in installations table billing if present
-    const instBilling = db.prepare(`
-      SELECT 
-        COUNT(*) as total_inst,
-        COALESCE(SUM(sale_price), 0) as total_price,
-        COALESCE(SUM(CASE WHEN payment_status = 'RECEIVED' THEN sale_price ELSE 0 END), 0) as paid_price,
-        COALESCE(SUM(CASE WHEN payment_status != 'RECEIVED' THEN sale_price ELSE 0 END), 0) as pending_price,
-        COUNT(CASE WHEN payment_status = 'RECEIVED' THEN 1 END) as paid_count,
-        COUNT(CASE WHEN payment_status != 'RECEIVED' THEN 1 END) as pending_count
-      FROM installations
-    `).get();
+    // Also factor in installations table billing if present (joined with devices matching filter)
+    try {
+      const instBilling = db.prepare(`
+        SELECT 
+          COUNT(*) as total_inst,
+          COALESCE(SUM(i.sale_price), 0) as total_price,
+          COALESCE(SUM(CASE WHEN i.payment_status = 'RECEIVED' THEN i.sale_price ELSE 0 END), 0) as paid_price,
+          COALESCE(SUM(CASE WHEN i.payment_status != 'RECEIVED' THEN i.sale_price ELSE 0 END), 0) as pending_price,
+          COUNT(CASE WHEN i.payment_status = 'RECEIVED' THEN 1 END) as paid_count,
+          COUNT(CASE WHEN i.payment_status != 'RECEIVED' THEN 1 END) as pending_count
+        FROM installations i
+        JOIN devices d ON i.device_id = d.id
+        ${whereClause}
+      `).get(...queryParams);
 
-    if (instBilling && instBilling.total_price > totalBilled) {
-      totalBilled = instBilling.total_price;
-      paymentReceivedAmount = instBilling.paid_price;
-      paymentPendingAmount = instBilling.pending_price;
-      paymentReceivedCount = instBilling.paid_count;
-      paymentPendingCount = instBilling.pending_count;
+      if (instBilling && instBilling.total_price > totalBilled) {
+        totalBilled = instBilling.total_price;
+        paymentReceivedAmount = instBilling.paid_price;
+        paymentPendingAmount = instBilling.pending_price;
+        paymentReceivedCount = instBilling.paid_count;
+        paymentPendingCount = instBilling.pending_count;
+      }
+    } catch (e) {
+      // Fallback to attribute-based billing
     }
 
     // 5. Vendor / Device Type Breakdown computed dynamically
-    const allDeviceTypes = db.prepare(`SELECT * FROM device_types ORDER BY id ASC`).all();
+    const allDeviceTypes = db.prepare(`
+      SELECT dt.*, (SELECT COUNT(*) FROM devices d WHERE d.device_type_id = dt.id) as live_count
+      FROM device_types dt
+      ORDER BY dt.name ASC
+    `).all();
+
     const typeMap = {};
     allDeviceTypes.forEach(dt => {
       typeMap[dt.id] = {
@@ -180,10 +217,12 @@ router.get('/stats', (req, res) => {
       }
     }
 
-    const typeCounts = Object.values(typeMap).map(t => ({
-      ...t,
-      installed_percent: t.total_count > 0 ? Math.round((t.installed_count / t.total_count) * 100) : 0
-    }));
+    const typeCounts = Object.values(typeMap)
+      .filter(t => (device_type_id ? t.id.toString() === device_type_id.toString() : t.total_count > 0 || allDeviceTypes.some(d => d.id === t.id)))
+      .map(t => ({
+        ...t,
+        installed_percent: t.total_count > 0 ? Math.round((t.installed_count / t.total_count) * 100) : 0
+      }));
 
     // 6. Dealer / Branch Allocation Matrix
     const dealerMap = {};
@@ -220,13 +259,13 @@ router.get('/stats', (req, res) => {
 
     // 7. Upcoming 30-Day SIM & Warranty & Certificate Expiries Alert Center
     const todayDate = new Date();
-    const expiryThresholdMs = 45 * 24 * 60 * 60 * 1000; // 45 days
 
     const allDevicesForExpiry = db.prepare(`
       SELECT d.id, d.imei_number, d.sim_number, d.additional_attributes, dt.name as device_type_name
       FROM devices d
       JOIN device_types dt ON d.device_type_id = dt.id
-    `).all();
+      ${whereClause}
+    `).all(...queryParams);
 
     const upcomingExpiries = [];
 
@@ -295,9 +334,10 @@ router.get('/stats', (req, res) => {
       FROM device_history dh
       JOIN devices d ON dh.device_id = d.id
       JOIN device_types dt ON d.device_type_id = dt.id
+      ${whereClause}
       ORDER BY dh.id DESC, dh.event_date DESC
       LIMIT 50
-    `).all();
+    `).all(...queryParams);
 
     const recentActivity = recentActivityRaw.map(act => {
       let attrs = {};
@@ -326,9 +366,9 @@ router.get('/stats', (req, res) => {
 
     // 9. Aggregate Totals
     const totalDevices = db.prepare(`SELECT COUNT(*) as c FROM devices d ${whereClause}`).get(...queryParams).c;
-    const totalInstallations = db.prepare(`SELECT COUNT(*) as c FROM devices WHERE current_status = 'INSTALLED'`).get().c;
+    const totalInstallations = db.prepare(`SELECT COUNT(*) as c FROM devices d ${whereClause ? `${whereClause} AND d.current_status = 'INSTALLED'` : "WHERE d.current_status = 'INSTALLED'"}`).get(...queryParams).c;
     const totalCustomers = db.prepare(`SELECT COUNT(*) as c FROM customers`).get().c;
-    const totalDispatched = db.prepare(`SELECT COUNT(*) as c FROM devices WHERE current_status = 'WITH_DEALER'`).get().c;
+    const totalDispatched = db.prepare(`SELECT COUNT(*) as c FROM devices d ${whereClause ? `${whereClause} AND d.current_status = 'WITH_DEALER'` : "WHERE d.current_status = 'WITH_DEALER'"}`).get(...queryParams).c;
 
     res.json({
       success: true,

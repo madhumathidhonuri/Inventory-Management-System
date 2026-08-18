@@ -42,6 +42,8 @@ export default function ReportsPage() {
     installed_filter: 'installed', // 'all' | 'installed' | 'uninstalled'
     status: '',
     device_type_id: '',
+    month: '',
+    payment_status: '',
     start_date: '',
     end_date: '',
     search: '',
@@ -117,6 +119,8 @@ export default function ReportsPage() {
       installed_filter: 'installed',
       status: '',
       device_type_id: '',
+      month: '',
+      payment_status: '',
       start_date: '',
       end_date: '',
       search: '',
@@ -358,7 +362,45 @@ export default function ReportsPage() {
             </select>
           </div>
 
-          {/* 5. Date From */}
+          {/* 5. Month Filter */}
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
+              <Calendar className="w-3.5 h-3.5 text-emerald-600" /> Month (August, July, etc.)
+            </label>
+            <select
+              value={filters.month}
+              onChange={(e) => setFilters({ ...filters, month: e.target.value })}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-800 font-bold focus:outline-none focus:border-indigo-500 focus:bg-white"
+            >
+              <option value="">All Months</option>
+              {(options.allMonths || ['JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE', 'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER']).map(m => {
+                const optMonth = options.availableMonths?.find(am => am.month === m);
+                return (
+                  <option key={m} value={m}>
+                    {m} {optMonth ? `(${optMonth.total} records • ${optMonth.received} paid)` : ''}
+                  </option>
+                );
+              })}
+            </select>
+          </div>
+
+          {/* 6. Payment Status Filter */}
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
+              <CreditCard className="w-3.5 h-3.5 text-blue-600" /> Payment Status
+            </label>
+            <select
+              value={filters.payment_status}
+              onChange={(e) => setFilters({ ...filters, payment_status: e.target.value })}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-800 font-bold focus:outline-none focus:border-indigo-500 focus:bg-white"
+            >
+              <option value="">All Payments</option>
+              <option value="RECEIVED">✅ Payments Received Only (Paid)</option>
+              <option value="PENDING">⏳ Payment Pending Only</option>
+            </select>
+          </div>
+
+          {/* 7. Date From */}
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
               <Calendar className="w-3.5 h-3.5 text-slate-500" /> From Date
@@ -371,7 +413,7 @@ export default function ReportsPage() {
             />
           </div>
 
-          {/* 6. Date To */}
+          {/* 8. Date To */}
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
               <Calendar className="w-3.5 h-3.5 text-slate-500" /> To Date

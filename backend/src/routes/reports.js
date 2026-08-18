@@ -3,6 +3,55 @@ const router = express.Router();
 const db = require('../db/database');
 const xlsx = require('xlsx');
 
+const MONTH_NAMES = [
+  'JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE',
+  'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER'
+];
+
+// Helper: Extract Month from device attributes, certificate dates, or created dates
+function getDeviceMonth(device, attrs = {}) {
+  // 1. Direct MONTH attribute in spreadsheet
+  const monthKey = Object.keys(attrs).find(k => /^month$/i.test(k));
+  if (monthKey && attrs[monthKey]) {
+    const str = String(attrs[monthKey]).toUpperCase().trim();
+    if (MONTH_NAMES.includes(str)) return str;
+    const match = MONTH_NAMES.find(m => m.startsWith(str) || str.startsWith(m));
+    if (match) return match;
+  }
+
+  // 2. Extract from CERTIFICATE ISSUED DATE / STOCK PLACE DATE / INSTALLATION DATE
+  const dateKeys = [
+    'CERTIFICATE ISSUED DATE', 'Certificate Issued Date', 'STOCK PLACE DATE',
+    'Stock Place Date', 'INSTALLATION DATE', 'Installation Date', 'Date', 'DATE'
+  ];
+  for (const k of dateKeys) {
+    if (attrs[k]) {
+      const val = attrs[k];
+      if (typeof val === 'number' || (/^\d{5}$/.test(String(val).trim()))) {
+        const num = Number(val);
+        if (num > 30000 && num < 60000) {
+          const d = new Date(Math.round((num - 25569) * 86400 * 1000));
+          return MONTH_NAMES[d.getUTCMonth()];
+        }
+      }
+      const str = String(val).trim();
+      const parts = str.split(/[-/]/);
+      if (parts.length === 3) {
+        let monthNum = null;
+        if (parts[0].length === 4) monthNum = parseInt(parts[1], 10);
+        else if (parts[2].length === 4) monthNum = parseInt(parts[1], 10);
+        if (monthNum && monthNum >= 1 && monthNum <= 12) return MONTH_NAMES[monthNum - 1];
+      }
+    }
+  }
+
+  if (device.purchase_date) {
+    const d = new Date(device.purchase_date);
+    if (!isNaN(d.getTime())) return MONTH_NAMES[d.getMonth()];
+  }
+  return '';
+}
+
 // Helper: Format Excel date serial numbers or standard date strings into clean DD-MM-YYYY
 function formatExcelDate(val) {
   if (!val) return '';
@@ -167,7 +216,7 @@ function matchInstalled(dev, attrs = {}, installedFilter) {
   return true;
 }
 
-// GET /api/reports/options - Return filter options and summary counts
+// GET /api/reports/options - Return filter options, available months, and summary counts
 router.get('/options', (req, res) => {
   try {
     const batches = db.prepare(`
@@ -185,12 +234,17 @@ router.get('/options', (req, res) => {
     `).all();
 
     const allDevices = db.prepare(`
-      SELECT d.id, d.purchase_batch_id, d.current_status, d.additional_attributes
+      SELECT d.id, d.purchase_batch_id, d.purchase_date, d.created_at, d.current_status, d.additional_attributes
       FROM devices d
     `).all();
 
     const batchPlacesMap = {};
     const placesMap = {};
+    const monthsMap = {};
+    MONTH_NAMES.forEach(m => {
+      monthsMap[m] = { month: m, total: 0, received: 0, pending: 0 };
+    });
+
     let totalInstalled = 0;
 
     allDevices.forEach(d => {
@@ -208,12 +262,24 @@ router.get('/options', (req, res) => {
         if (!batchPlacesMap[bId]) batchPlacesMap[bId] = {};
         batchPlacesMap[bId][place] = (batchPlacesMap[bId][place] || 0) + 1;
       }
+
+      // Track months and payments
+      const m = getDeviceMonth(d, attrs);
+      const payStatus = getAmountReceivedStatus(attrs);
+      const isPaid = payStatus.includes('RECEIVED') && !payStatus.includes('NOT');
+      if (m && monthsMap[m]) {
+        monthsMap[m].total++;
+        if (isPaid) monthsMap[m].received++;
+        else monthsMap[m].pending++;
+      }
     });
 
     const stockPlaces = Object.keys(placesMap).map(place => ({
       name: place,
       count: placesMap[place]
     })).sort((a, b) => b.count - a.count);
+
+    const availableMonths = Object.values(monthsMap).filter(m => m.total > 0);
 
     res.json({
       success: true,
@@ -222,6 +288,8 @@ router.get('/options', (req, res) => {
         deviceTypes,
         stockPlaces,
         batchPlacesMap,
+        availableMonths,
+        allMonths: MONTH_NAMES,
         stats: {
           totalDevices: allDevices.length,
           installedDevices: totalInstalled,
@@ -242,6 +310,8 @@ function queryFilteredDevices(query) {
     installed_filter, // 'all' | 'installed' | 'uninstalled'
     status,
     device_type_id,
+    month,
+    payment_status,
     start_date,
     end_date,
     search
@@ -308,6 +378,27 @@ function queryFilteredDevices(query) {
       return false;
     }
 
+    // Month filter
+    if (month && month !== 'ALL') {
+      const devMonth = getDeviceMonth(dev, attrs);
+      const targetMonth = month.toUpperCase().trim();
+      if (!devMonth || (!devMonth.includes(targetMonth) && !targetMonth.includes(devMonth))) {
+        return false;
+      }
+    }
+
+    // Payment Status filter
+    if (payment_status && payment_status !== 'ALL') {
+      const amountStatus = getAmountReceivedStatus(attrs);
+      const isPaid = amountStatus.includes('RECEIVED') && !amountStatus.includes('NOT');
+      const pStatus = payment_status.toUpperCase().trim();
+      if (pStatus === 'RECEIVED' || pStatus === 'PAID') {
+        if (!isPaid) return false;
+      } else if (pStatus === 'PENDING' || pStatus === 'NOT_RECEIVED' || pStatus === 'NOT RECEIVED') {
+        if (isPaid) return false;
+      }
+    }
+
     return true;
   });
 }
@@ -335,6 +426,7 @@ router.get('/preview', (req, res) => {
           total_cost: getTotalCost(attrs),
           amount_received_status: getAmountReceivedStatus(attrs),
           stock_place: getStockPlace(attrs) || '—',
+          month: getDeviceMonth(d, attrs) || '—',
           date: getDateValue(d, attrs),
           current_status: d.current_status
         };
@@ -345,15 +437,16 @@ router.get('/preview', (req, res) => {
   }
 });
 
-// GET /api/reports/export - Export Excel/CSV with support for Manager Executive Statement format
+// GET /api/reports/export - Export Excel/CSV with support for Manager Executive Statement format & Monthly Payments
 router.get('/export', (req, res) => {
-  const { type, format, purchase_batch_id, stock_place, installed_filter, report_layout } = req.query;
+  const { type, format, purchase_batch_id, device_type_id, stock_place, installed_filter, report_layout, month, payment_status } = req.query;
 
   try {
     let data = [];
     let filename = `inventory_export_${new Date().toISOString().split('T')[0]}`;
     let sheetName = 'InventoryData';
 
+    const isMonthlyPayments = type === 'monthly_payments' || Boolean(month || payment_status);
     const isManagerStatement = report_layout === 'manager' || type === 'manager_statement';
 
     if (type === 'dealers') {
@@ -389,6 +482,56 @@ router.get('/export', (req, res) => {
         JOIN device_types dt ON pb.device_type_id = dt.id
         ORDER BY pb.upload_date DESC
       `).all();
+    } else if (isMonthlyPayments) {
+      // Monthly Payments Statement Format
+      const devices = queryFilteredDevices(req.query);
+      const mLabel = month ? month.toUpperCase() : 'ALL_MONTHS';
+      const pLabel = payment_status ? (payment_status.toUpperCase() === 'RECEIVED' ? 'PAID_RECEIVED' : payment_status.toUpperCase()) : 'ALL_PAYMENTS';
+      
+      let typeLabel = '';
+      if (device_type_id) {
+        const dt = db.prepare('SELECT name FROM device_types WHERE id = ?').get(device_type_id);
+        if (dt) typeLabel = `_${dt.name}`;
+      } else if (purchase_batch_id) {
+        const pb = db.prepare('SELECT source_file, notes FROM purchase_batches WHERE id = ?').get(purchase_batch_id);
+        if (pb) typeLabel = `_${(pb.notes || pb.source_file || '').replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+      }
+
+      filename = `Monthly_Payments_${pLabel}_${mLabel}${typeLabel}_${new Date().toISOString().split('T')[0]}`;
+      sheetName = `${mLabel.substring(0, 10)} Payments`;
+
+      data = devices.map((dev, idx) => {
+        let attrs = {};
+        try { attrs = JSON.parse(dev.additional_attributes || '{}'); } catch {}
+
+        const devMonth = getDeviceMonth(dev, attrs) || mLabel;
+        const devName = getDeviceName(dev, attrs);
+        const vehNo = getVehicleNumber(dev, attrs);
+        const custName = getCustomerName(attrs);
+        const custPhone = getCustomerPhone(attrs);
+        const sims = getSimNumbers(dev, attrs);
+        const totalCost = getTotalCost(attrs);
+        const amountReceived = getAmountReceivedStatus(attrs);
+        const receivedBy = attrs['AMOUNT RECEIVED BY'] || attrs['Amount Received By'] || attrs['Received By'] || (amountReceived.includes('(') ? amountReceived.split('(')[1].replace(')', '') : '—');
+        const stockPlace = getStockPlace(attrs);
+        const dateVal = getDateValue(dev, attrs);
+
+        return {
+          'Sl No': idx + 1,
+          'Month': devMonth,
+          'IMEI Number': String(dev.imei_number),
+          'Device Model / Name': devName || dev.device_type_name || 'GPS Tracker',
+          'Vehicle Number': vehNo || (dev.current_status === 'INSTALLED' ? 'Installed' : 'N/A'),
+          'Customer Name': custName,
+          'Customer Phone': custPhone,
+          'Total Cost': totalCost,
+          'Payment Status': amountReceived,
+          'Amount Received By / Mode': receivedBy,
+          'Stock Place / Holder': stockPlace || '—',
+          'Certificate / Install Date': dateVal || '—',
+          'SIM Numbers': sims
+        };
+      });
     } else if (isManagerStatement) {
       // Manager Executive Statement format
       let queryParams = { ...req.query };
