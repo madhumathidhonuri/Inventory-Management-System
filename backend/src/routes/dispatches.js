@@ -28,8 +28,8 @@ router.post('/', (req, res) => {
       const dev = findDeviceStmt.get(imei);
       if (!dev) {
         invalidImeis.push({ imei, reason: 'IMEI not found in system' });
-      } else if (dev.current_status !== 'IN_WAREHOUSE' && dev.current_status !== 'RETURNED') {
-        invalidImeis.push({ imei, reason: `Device status is '${dev.current_status}', must be IN_WAREHOUSE` });
+      } else if (dev.current_status === 'INSTALLED') {
+        invalidImeis.push({ imei, reason: `Device is already INSTALLED in vehicle (${dev.current_holder_name || 'Customer'}). Cannot dispatch installed device.` });
       } else {
         validDevices.push(dev);
       }
@@ -58,6 +58,7 @@ router.post('/', (req, res) => {
           current_holder_type = 'DEALER',
           current_holder_id = NULL,
           current_holder_name = ?,
+          additional_attributes = ?,
           updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `);
@@ -67,12 +68,24 @@ router.post('/', (req, res) => {
       VALUES (?, ?, 'DISPATCHED', datetime('now'), ?, ?, ?, ?)
     `);
 
+    const todayDate = new Date().toISOString().split('T')[0];
+
     for (const dev of validDevices) {
       // Insert item
       insertDispatchItemStmt.run(dispatchId, dev.id, dev.imei_number);
 
-      // Update Device status
-      updateDeviceStmt.run(dealer_name, dev.id);
+      // Parse existing additional_attributes
+      let attr = {};
+      try {
+        attr = dev.additional_attributes ? JSON.parse(dev.additional_attributes) : {};
+      } catch (e) {
+        attr = {};
+      }
+      attr['STOCK PLACE'] = `${dealer_name} (${location})`;
+      attr['STOCK PLACE DATE'] = todayDate;
+
+      // Update Device status and additional attributes
+      updateDeviceStmt.run(dealer_name, JSON.stringify(attr), dev.id);
 
       // Log Audit History
       insertHistoryStmt.run(
@@ -81,7 +94,7 @@ router.post('/', (req, res) => {
         dev.current_holder_name || 'Central Warehouse',
         dealer_name,
         dispatched_by || 'Warehouse Manager',
-        `Dispatched under Dispatch #${dispatchId}`
+        `Dispatched under Dispatch #${dispatchId} to ${dealer_name} (${location})`
       );
     }
 
@@ -96,13 +109,21 @@ router.post('/', (req, res) => {
   }
 });
 
-// GET /api/dispatches - List all dispatches
+// GET /api/dispatches - List all dispatches (with optional dealer_name filter)
 router.get('/', (req, res) => {
   try {
-    const dispatches = db.prepare(`
-      SELECT * FROM dispatches
-      ORDER BY dispatch_date DESC
-    `).all();
+    const { dealer_name } = req.query;
+    let query = 'SELECT * FROM dispatches';
+    const params = [];
+
+    if (dealer_name) {
+      query += ' WHERE dealer_name LIKE ? OR location LIKE ?';
+      params.push(`%${dealer_name}%`, `%${dealer_name}%`);
+    }
+
+    query += ' ORDER BY dispatch_date DESC';
+
+    const dispatches = db.prepare(query).all(...params);
 
     res.json({ success: true, data: dispatches });
   } catch (err) {

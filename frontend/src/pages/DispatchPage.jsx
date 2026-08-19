@@ -1,20 +1,31 @@
 import React, { useState, useEffect } from 'react';
-import { Truck, Plus, Search, Barcode, Eye, RotateCcw, RefreshCw, CheckCircle2, Building2, MapPin } from 'lucide-react';
-import { fetchDispatches, fetchDispatchById, createDispatch, returnDispatchStock, fetchDealerStockSummary } from '../services/api';
+import { Truck, Plus, Search, Barcode, Eye, RotateCcw, RefreshCw, CheckCircle2, Building2, MapPin, UserCheck, Check, Layers, ArrowRight, Printer, Download, Store } from 'lucide-react';
+import { fetchDispatches, fetchDispatchById, createDispatch, returnDispatchStock, fetchDealerStockSummary, fetchUsers, fetchDevices } from '../services/api';
+import { useAuth } from '../context/AuthContext';
+import DealerDetailModal from '../components/DealerDetailModal';
 
 export default function DispatchPage({ onOpenScannerWithCallback, onOpenTraceDrawer }) {
+  const { user } = useAuth();
+  const isDealer = user?.role === 'DEALER';
+
   const [dispatches, setDispatches] = useState([]);
   const [dealerSummary, setDealerSummary] = useState([]);
+  const [dealersList, setDealersList] = useState([]);
+  const [warehouseDevices, setWarehouseDevices] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [selectedDealerModal, setSelectedDealerModal] = useState(null);
 
   // New Dispatch Form State
   const [showNewModal, setShowNewModal] = useState(false);
-  const [dealerName, setDealerName] = useState('Apex Telematics (Dealer)');
-  const [dealerContact, setDealerContact] = useState('9876543214');
-  const [location, setLocation] = useState('Bangalore Hub');
+  const [selectedDealerId, setSelectedDealerId] = useState('');
+  const [dealerName, setDealerName] = useState('Jaya Surya');
+  const [dealerContact, setDealerContact] = useState('9848012345');
+  const [location, setLocation] = useState('Kurnool');
   const [dispatchType, setDispatchType] = useState('DEALER');
-  const [remarks, setRemarks] = useState('Regular stock dispatch');
+  const [remarks, setRemarks] = useState('Stock assignment for dealer');
   const [dispatchImeisInput, setDispatchImeisInput] = useState('');
+  const [warehouseFilterType, setWarehouseFilterType] = useState('ALL');
+  const [showWarehousePicker, setShowWarehousePicker] = useState(false);
 
   // Detail Modal State
   const [selectedDispatch, setSelectedDispatch] = useState(null);
@@ -26,13 +37,50 @@ export default function DispatchPage({ onOpenScannerWithCallback, onOpenTraceDra
 
   useEffect(() => {
     loadData();
+    loadDealers();
+    loadWarehouseDevices();
   }, []);
+
+  const loadWarehouseDevices = async () => {
+    try {
+      const res = await fetchDevices({ status: 'IN_WAREHOUSE' });
+      if (res.success && Array.isArray(res.data)) {
+        const warehouseOnly = res.data.filter(d => d.current_status === 'IN_WAREHOUSE' || d.current_status === 'RETURNED');
+        setWarehouseDevices(warehouseOnly);
+      }
+    } catch (e) {
+      console.warn('Failed to load warehouse devices:', e);
+    }
+  };
+
+  const loadDealers = async () => {
+    try {
+      const res = await fetchUsers();
+      if (res.success && Array.isArray(res.data)) {
+        const dealers = res.data.filter(u => u.role === 'DEALER');
+        setDealersList(dealers);
+        if (dealers.length > 0) {
+          const d0 = dealers[0];
+          setSelectedDealerId(d0.id.toString());
+          setDealerName(d0.name);
+          setDealerContact(d0.phone || '');
+          setLocation(d0.region || 'Regional Hub');
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to load dealer users:', e);
+    }
+  };
 
   const loadData = async () => {
     setLoading(true);
     try {
+      const params = {};
+      if (isDealer && user?.name) {
+        params.dealer_name = user.name;
+      }
       const [dRes, sRes] = await Promise.all([
-        fetchDispatches(),
+        fetchDispatches(params),
         fetchDealerStockSummary()
       ]);
       if (dRes.success) setDispatches(dRes.data);
@@ -41,6 +89,22 @@ export default function DispatchPage({ onOpenScannerWithCallback, onOpenTraceDra
       console.error(err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDealerDropdownChange = (dealerId) => {
+    setSelectedDealerId(dealerId);
+    if (dealerId === '__NEW__') {
+      setDealerName('');
+      setDealerContact('');
+      setLocation('');
+      return;
+    }
+    const found = dealersList.find(d => d.id.toString() === dealerId.toString());
+    if (found) {
+      setDealerName(found.name);
+      setDealerContact(found.phone || '');
+      setLocation(found.region || 'Regional Hub');
     }
   };
 
@@ -77,6 +141,7 @@ export default function DispatchPage({ onOpenScannerWithCallback, onOpenTraceDra
         setShowNewModal(false);
         setDispatchImeisInput('');
         loadData();
+        loadWarehouseDevices();
       }
     } catch (err) {
       alert(err.message);
@@ -100,6 +165,7 @@ export default function DispatchPage({ onOpenScannerWithCallback, onOpenTraceDra
         setShowReturnModal(false);
         setReturnImeisInput('');
         loadData();
+        loadWarehouseDevices();
       }
     } catch (err) {
       alert(err.message);
@@ -155,13 +221,21 @@ export default function DispatchPage({ onOpenScannerWithCallback, onOpenTraceDra
         </h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
           {dealerSummary.map((item, idx) => (
-            <div key={idx} className="glass-panel p-3.5 rounded-xl border border-slate-200 flex items-center justify-between">
+            <div
+              key={idx}
+              onClick={() => setSelectedDealerModal(item.dealer_name)}
+              className="glass-panel p-3.5 rounded-xl border border-slate-200 hover:border-amber-400 hover:bg-amber-50/50 flex items-center justify-between transition-all cursor-pointer shadow-2xs group"
+              title={`Click to view stock breakdown, sent units, and installed vehicles for ${item.dealer_name}`}
+            >
               <div className="flex items-center space-x-3">
-                <div className="p-2 rounded-lg bg-amber-50 text-amber-600">
+                <div className="p-2 rounded-lg bg-amber-50 text-amber-600 group-hover:bg-amber-100 transition-colors">
                   <Building2 className="w-4 h-4" />
                 </div>
                 <div>
-                  <h4 className="text-xs font-bold text-slate-900">{item.dealer_name}</h4>
+                  <h4 className="text-xs font-bold text-slate-900 group-hover:text-amber-800 transition-colors flex items-center gap-1">
+                    <span>{item.dealer_name}</span>
+                    <span className="text-[10px] text-amber-600 opacity-0 group-hover:opacity-100 transition-opacity">→</span>
+                  </h4>
                   <span className="text-[11px] text-slate-500">{item.device_type_name}</span>
                 </div>
               </div>
@@ -197,8 +271,16 @@ export default function DispatchPage({ onOpenScannerWithCallback, onOpenTraceDra
               {dispatches.map((disp) => (
                 <tr key={disp.id} className="hover:bg-slate-50 transition-colors">
                   <td className="p-3.5 font-mono text-amber-700 font-bold">#DSP-{disp.id}</td>
-                  <td className="p-3.5 text-slate-600">{disp.dispatch_date}</td>
-                  <td className="p-3.5 font-bold text-slate-900">{disp.dealer_name}</td>
+                  <td className="p-3.5 text-slate-600 font-mono text-[11px]">{disp.dispatch_date}</td>
+                  <td className="p-3.5 font-bold text-slate-900">
+                    <button
+                      onClick={() => setSelectedDealerModal(disp.dealer_name)}
+                      className="hover:text-amber-700 hover:underline font-bold text-left cursor-pointer"
+                      title={`Click to view dealer dossier for ${disp.dealer_name}`}
+                    >
+                      {disp.dealer_name}
+                    </button>
+                  </td>
                   <td className="p-3.5 text-slate-500">{disp.location}</td>
                   <td className="p-3.5 text-center font-mono font-bold text-slate-800">{disp.device_count}</td>
                   <td className="p-3.5">
@@ -226,17 +308,40 @@ export default function DispatchPage({ onOpenScannerWithCallback, onOpenTraceDra
         <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-lg p-6 space-y-4 shadow-2xl">
             <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-              <Truck className="w-5 h-5 text-amber-600" /> Create Dispatch Record
+              <Truck className="w-5 h-5 text-amber-600" /> Dispatch Stock to Dealer
             </h3>
+
+            {/* Quick Dealer Account Selection */}
+            {dealersList.length > 0 && (
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Select Registered Dealer Account
+                </label>
+                <select
+                  value={selectedDealerId}
+                  onChange={(e) => handleDealerDropdownChange(e.target.value)}
+                  className="w-full bg-blue-50/60 border border-blue-200 rounded-xl p-2 text-xs text-blue-950 font-semibold focus:outline-none focus:border-blue-500"
+                >
+                  {dealersList.map(d => (
+                    <option key={d.id} value={d.id}>
+                      🏪 {d.name} — {d.region || 'Branch'} ({d.phone || d.email})
+                    </option>
+                  ))}
+                  <option value="__NEW__">➕ Type Other / Custom Dealer Manually</option>
+                </select>
+              </div>
+            )}
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Dealer / Recipient Name</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Dealer / Recipient Name *</label>
                 <input
                   type="text"
+                  required
+                  placeholder="e.g. Jaya Surya"
                   value={dealerName}
                   onChange={(e) => setDealerName(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs text-slate-900"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs text-slate-900 font-semibold"
                 />
               </div>
 
@@ -244,6 +349,7 @@ export default function DispatchPage({ onOpenScannerWithCallback, onOpenTraceDra
                 <label className="block text-xs font-bold text-slate-700 mb-1">Dealer Phone Contact</label>
                 <input
                   type="text"
+                  placeholder="e.g. 9848012345"
                   value={dealerContact}
                   onChange={(e) => setDealerContact(e.target.value)}
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs text-slate-900 font-mono"
@@ -251,20 +357,102 @@ export default function DispatchPage({ onOpenScannerWithCallback, onOpenTraceDra
               </div>
             </div>
 
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Dispatch Destination / Location</label>
-              <input
-                type="text"
-                value={location}
-                onChange={(e) => setLocation(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs text-slate-900"
-              />
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Destination Location / City *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Kurnool, Bangalore"
+                  value={location}
+                  onChange={(e) => setLocation(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs text-slate-900 font-semibold"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Dispatch Type</label>
+                <select
+                  value={dispatchType}
+                  onChange={(e) => setDispatchType(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs text-slate-900"
+                >
+                  <option value="DEALER">Dealer / Partner</option>
+                  <option value="SALES_PERSON">Sales Executive</option>
+                  <option value="OTHER">Branch / Other</option>
+                </select>
+              </div>
             </div>
+
+            {/* Available Warehouse Stock Quick Helper */}
+            {warehouseDevices.length > 0 && (
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                <div className="flex items-center justify-between text-xs font-bold text-slate-700">
+                  <span className="flex items-center gap-1.5">
+                    <Layers className="w-3.5 h-3.5 text-blue-600" />
+                    Available in Central Warehouse ({warehouseDevices.length} units)
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowWarehousePicker(!showWarehousePicker)}
+                    className="text-blue-600 hover:text-blue-800 text-[11px] font-semibold underline"
+                  >
+                    {showWarehousePicker ? 'Hide Picker' : 'Quick Pick Units'}
+                  </button>
+                </div>
+
+                {showWarehousePicker && (
+                  <div className="pt-2 border-t border-slate-200 space-y-2">
+                    <div className="flex flex-wrap gap-1.5">
+                      {['ALL', 'VAMOSYS', 'VOLTY', 'TRACKNOW'].map(cat => (
+                        <button
+                          key={cat}
+                          type="button"
+                          onClick={() => setWarehouseFilterType(cat)}
+                          className={`px-2 py-0.5 rounded-lg text-[10px] font-bold ${
+                            warehouseFilterType === cat
+                              ? 'bg-blue-600 text-white'
+                              : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
+                          }`}
+                        >
+                          {cat}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="flex flex-wrap gap-1">
+                      {[5, 10, 20, 50].map(qty => (
+                        <button
+                          key={qty}
+                          type="button"
+                          onClick={() => {
+                            const filtered = warehouseFilterType === 'ALL'
+                              ? warehouseDevices
+                              : warehouseDevices.filter(d => (d.device_type_name || '').toUpperCase().includes(warehouseFilterType));
+                            const imeisToAdd = filtered.slice(0, qty).map(d => d.imei_number);
+                            setDispatchImeisInput(prev => {
+                              const existing = prev.split(/[\n, ]+/).filter(Boolean);
+                              const combined = Array.from(new Set([...existing, ...imeisToAdd]));
+                              return combined.join('\n');
+                            });
+                          }}
+                          className="px-2 py-1 bg-white hover:bg-blue-50 text-blue-700 border border-blue-200 rounded-md text-[10px] font-bold transition-colors"
+                        >
+                          + Pick {qty} {warehouseFilterType !== 'ALL' ? warehouseFilterType : 'Units'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Scanned IMEIs List Box */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-700">Scanned Devices ({dispatchImeisInput.split(/[\n, ]+/).filter(Boolean).length})</span>
+                <span className="text-xs font-bold text-slate-700">
+                  Assigned Devices ({dispatchImeisInput.split(/[\n, ]+/).filter(Boolean).length} IMEIs)
+                </span>
                 <button
                   type="button"
                   onClick={handleOpenScannerForDispatch}
@@ -288,7 +476,7 @@ export default function DispatchPage({ onOpenScannerWithCallback, onOpenTraceDra
               <button
                 onClick={handleCreateDispatch}
                 disabled={loading || dispatchImeisInput.split(/[\n, ]+/).filter(Boolean).length === 0}
-                className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold rounded-xl flex items-center gap-1.5 shadow-xs"
+                className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold rounded-xl flex items-center gap-1.5 shadow-xs cursor-pointer"
               >
                 Confirm Dispatch ({dispatchImeisInput.split(/[\n, ]+/).filter(Boolean).length} Units)
               </button>
@@ -302,14 +490,26 @@ export default function DispatchPage({ onOpenScannerWithCallback, onOpenTraceDra
         <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-lg p-6 space-y-4 shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-200 pb-3">
-              <h3 className="text-base font-bold text-slate-900">Dispatch #{selectedDispatch.id} Details</h3>
-              <button onClick={() => setSelectedDispatch(null)} className="text-slate-400 hover:text-slate-700">✕</button>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Dispatch Voucher #{selectedDispatch.id}</h3>
+                <span className="text-[11px] text-slate-500">Official Stock Movement Record</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => window.print()}
+                  className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg flex items-center gap-1"
+                >
+                  <Printer className="w-3.5 h-3.5" /> Print
+                </button>
+                <button onClick={() => setSelectedDispatch(null)} className="text-slate-400 hover:text-slate-700">✕</button>
+              </div>
             </div>
 
-            <div className="text-xs space-y-1 text-slate-600">
-              <p>Dealer: <strong className="text-slate-900">{selectedDispatch.dealer_name}</strong></p>
-              <p>Location: {selectedDispatch.location}</p>
-              <p>Dispatch Date: {selectedDispatch.dispatch_date}</p>
+            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 grid grid-cols-2 gap-2 text-xs text-slate-600">
+              <p>Dealer / Recipient: <strong className="text-slate-900">{selectedDispatch.dealer_name}</strong></p>
+              <p>Location: <strong className="text-slate-900">{selectedDispatch.location}</strong></p>
+              <p>Contact Phone: <strong className="text-slate-900">{selectedDispatch.dealer_contact || 'N/A'}</strong></p>
+              <p>Date: <strong className="text-slate-900">{selectedDispatch.dispatch_date}</strong></p>
             </div>
 
             <div className="max-h-[220px] overflow-y-auto border border-slate-200 rounded-xl p-2 space-y-1 bg-slate-50">
@@ -355,6 +555,14 @@ export default function DispatchPage({ onOpenScannerWithCallback, onOpenTraceDra
           </div>
         </div>
       )}
+
+      {/* Dealer Stock & Performance Detail Dossier Modal */}
+      <DealerDetailModal
+        isOpen={Boolean(selectedDealerModal)}
+        onClose={() => setSelectedDealerModal(null)}
+        dealerName={selectedDealerModal}
+        onOpenDeviceCard={onOpenTraceDrawer}
+      />
 
     </div>
   );

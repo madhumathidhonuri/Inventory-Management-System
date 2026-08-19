@@ -37,8 +37,13 @@ import {
   Table
 } from 'lucide-react';
 import { fetchStats, fetchPurchaseBatches, fetchDeviceTypes } from '../services/api';
+import { useAuth } from '../context/AuthContext';
+import DealerDetailModal from '../components/DealerDetailModal';
 
 export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
+  const { user } = useAuth();
+  const isDealer = user?.role === 'DEALER';
+
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState(null);
   const [error, setError] = useState(null);
@@ -47,6 +52,7 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
   const [selectedDeviceTypeId, setSelectedDeviceTypeId] = useState('');
   const [selectedBatchId, setSelectedBatchId] = useState('');
   const [locationFilter, setLocationFilter] = useState('');
+  const [selectedDealerModal, setSelectedDealerModal] = useState(null);
 
   // Monthly Payment Excel Export Modal States
   const [isMonthlyExportModalOpen, setIsMonthlyExportModalOpen] = useState(false);
@@ -189,6 +195,9 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
     setError(null);
     try {
       const params = {};
+      if (isDealer && user?.name) {
+        params.dealer_name = user.name;
+      }
       if (selectedDeviceTypeId) params.device_type_id = selectedDeviceTypeId;
       if (selectedBatchId) params.purchase_batch_id = selectedBatchId;
       if (locationFilter) params.stock_place = locationFilter;
@@ -209,7 +218,7 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
     return (
       <div className="flex items-center justify-center min-h-[400px] text-slate-500 text-xs">
         <RefreshCw className="w-5 h-5 animate-spin mr-2 text-blue-600" />
-        Loading executive dashboard metrics...
+        Loading {isDealer ? 'dealer stock workspace...' : 'executive dashboard metrics...'}
       </div>
     );
   }
@@ -234,7 +243,7 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
   const inWarehouse = statusCounts?.IN_WAREHOUSE || 0;
   const withDealer = statusCounts?.WITH_DEALER || 0;
   const installed = statusCounts?.INSTALLED || 0;
-  const inStockCount = (inWarehouse + withDealer) || (totalDevices - installed);
+  const inStockCount = isDealer ? (statusCounts?.WITH_DEALER || totalDevices - installed) : ((inWarehouse + withDealer) || (totalDevices - installed));
   const totalCustomers = totals?.customers || 0;
 
   const getEventBadge = (eventType) => {
@@ -259,46 +268,86 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
       {/* Top Welcome Header & Quick Action Buttons */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs">
         <div>
-          <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
-            <Activity className="w-5 h-5 text-purple-600" /> Executive Operations Dashboard
-          </h2>
-          <p className="text-xs text-slate-500">
-            Real-time overview of inventory stock, dealer dispatches, vehicle installations, and monthly payment collection.
-          </p>
+          {isDealer ? (
+            <div>
+              <div className="flex items-center gap-2 mb-1.5">
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-200">
+                  Dealer Partner Portal
+                </span>
+                <span className="text-xs font-semibold text-slate-500">
+                  {user?.region ? `${user.region} Region` : 'Authorized Branch'}
+                </span>
+              </div>
+              <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+                <Boxes className="w-5 h-5 text-blue-600" /> Welcome, {user?.name || 'Dealer Partner'}
+              </h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Live dashboard of your assigned inventory in {user?.region || 'your region'}. Total allocated stock: <strong className="text-blue-700">{totalDevices} units</strong>.
+              </p>
+            </div>
+          ) : (
+            <div>
+              <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+                <Activity className="w-5 h-5 text-purple-600" /> Executive Operations Dashboard
+              </h2>
+              <p className="text-xs text-slate-500">
+                Real-time overview of inventory stock, dealer dispatches, vehicle installations, and monthly payment collection.
+              </p>
+            </div>
+          )}
         </div>
 
-        {/* Quick Manager Action Shortcuts */}
+        {/* Quick Action Shortcuts */}
         <div className="flex flex-wrap items-center gap-2">
-          <a
-            href="/api/reports/export-daily-distribution"
-            download
-            className="px-3.5 py-2 bg-blue-700 hover:bg-blue-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
-            title="Download Excel spreadsheet of the Daily Master Stock Distribution Matrix across all locations"
-          >
-            <FileSpreadsheet className="w-3.5 h-3.5" /> Daily Report (Excel)
-          </a>
+          {isDealer ? (
+            <>
+              <button
+                onClick={() => onNavigateTab('inventory')}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+              >
+                <Boxes className="w-3.5 h-3.5" /> View My Stock ({totalDevices})
+              </button>
+              <button
+                onClick={() => onNavigateTab('installations')}
+                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" /> Record Vehicle Installation
+              </button>
+            </>
+          ) : (
+            <>
+              <a
+                href="/api/reports/export-daily-distribution"
+                download
+                className="px-3.5 py-2 bg-blue-700 hover:bg-blue-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                title="Download Excel spreadsheet of the Daily Master Stock Distribution Matrix across all locations"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" /> Daily Report (Excel)
+              </a>
 
-          <button
-            onClick={() => handleOpenMonthlyExportModal('AUGUST')}
-            className="px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
-            title="Download Excel statement of payments received in August, July, or any month"
-          >
-            <Receipt className="w-3.5 h-3.5 text-emerald-600" /> Download Monthly Payments
-          </button>
+              <button
+                onClick={() => handleOpenMonthlyExportModal('AUGUST')}
+                className="px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                title="Download Excel statement of payments received in August, July, or any month"
+              >
+                <Receipt className="w-3.5 h-3.5 text-emerald-600" /> Download Monthly Payments
+              </button>
 
-          <button
-            onClick={() => onNavigateTab('installations')}
-            className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
-          >
-            <Plus className="w-3.5 h-3.5" /> New Install
-          </button>
+              <button
+                onClick={() => onNavigateTab('installations')}
+                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" /> New Install
+              </button>
 
-          <button
-            onClick={() => onNavigateTab('reports')}
-            className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
-          >
-            <Table className="w-3.5 h-3.5 text-slate-600" /> Reports Hub
-          </button>
+              <button
+                onClick={() => onNavigateTab('reports')}
+                className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+              >
+                <Table className="w-3.5 h-3.5 text-slate-600" /> Reports Hub
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -615,12 +664,17 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
               dealerAllocations.map((d, i) => (
                 <div
                   key={i}
-                  className="p-3 bg-slate-50 hover:bg-indigo-50/50 rounded-xl border border-slate-200/80 flex items-center justify-between gap-3 text-xs transition-colors"
+                  onClick={() => setSelectedDealerModal(d.dealer)}
+                  className="p-3.5 bg-slate-50 hover:bg-indigo-50/80 hover:border-indigo-300 rounded-xl border border-slate-200/80 flex items-center justify-between gap-3 text-xs transition-all cursor-pointer shadow-2xs group"
+                  title={`Click to view complete stock dossier, sent devices, and installation stats for ${d.dealer}`}
                 >
-                  <div className="space-y-0.5">
-                    <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                  <div className="space-y-1">
+                    <div className="font-bold text-slate-900 group-hover:text-indigo-700 flex items-center gap-1.5 transition-colors">
                       <span className="w-2 h-2 rounded-full bg-indigo-600" />
                       <span>{d.dealer}</span>
+                      <span className="px-1.5 py-0.2 rounded text-[9px] font-semibold bg-indigo-100 text-indigo-700 opacity-0 group-hover:opacity-100 transition-opacity">
+                        View Dossier →
+                      </span>
                     </div>
                     <div className="text-[11px] text-slate-500 flex items-center gap-3">
                       <span>Installed: <strong className="text-emerald-700 font-mono">{d.installed}</strong></span>
@@ -628,11 +682,12 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2.5">
                     <div className="text-right">
                       <span className="font-mono font-bold text-indigo-700 text-sm">{d.total}</span>
                       <div className="text-[10px] text-slate-400">Total Units</div>
                     </div>
+                    <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-indigo-600 transition-colors" />
                   </div>
                 </div>
               ))
@@ -1103,6 +1158,14 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
           </div>
         </div>
       )}
+
+      {/* Dealer Stock & Performance Detail Dossier Modal */}
+      <DealerDetailModal
+        isOpen={Boolean(selectedDealerModal)}
+        onClose={() => setSelectedDealerModal(null)}
+        dealerName={selectedDealerModal}
+        onOpenDeviceCard={onOpenTraceDrawer}
+      />
 
     </div>
   );

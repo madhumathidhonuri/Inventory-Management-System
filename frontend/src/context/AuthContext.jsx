@@ -5,7 +5,8 @@ const AuthContext = createContext();
 export const ROLES = {
   SUPER_ADMIN: { key: 'SUPER_ADMIN', label: 'Super Admin (Owner)', color: 'bg-purple-100 text-purple-800 border-purple-300' },
   ADMIN_TEAM: { key: 'ADMIN_TEAM', label: 'Admin Team (Vehicle & Certificate)', color: 'bg-amber-100 text-amber-850 border-amber-300' },
-  SALES_TEAM: { key: 'SALES_TEAM', label: 'Sales Team (Cost & Payment)', color: 'bg-emerald-100 text-emerald-800 border-emerald-300' }
+  SALES_TEAM: { key: 'SALES_TEAM', label: 'Sales Team (Cost & Payment)', color: 'bg-emerald-100 text-emerald-800 border-emerald-300' },
+  DEALER: { key: 'DEALER', label: 'Dealer / Partner Portal', color: 'bg-blue-100 text-blue-800 border-blue-300' }
 };
 
 export const DEFAULT_ROLE_COLUMNS = {
@@ -32,13 +33,24 @@ export const DEFAULT_ROLE_COLUMNS = {
     'Amount Received',
     'Amount Received By',
     'Sale Price'
+  ],
+  DEALER: [
+    'Vehicle Number',
+    'Customer Name',
+    'Customer Contact',
+    'Certificate Issued Date',
+    'Stock Place Date',
+    'SIM Number',
+    'Status',
+    'Remarks'
   ]
 };
 
 export const SAMPLE_USERS = [
   { id: 1, name: 'Super Admin (Owner)', role: 'SUPER_ADMIN', email: 'owner@fueltracks.in', password: 'admin', allowed_columns: [], desc: 'Master access to all modules, financial reporting, system settings, and complete deletion rights.' },
   { id: 2, name: 'Operations Admin Team', role: 'ADMIN_TEAM', email: 'admin@fueltracks.in', password: 'admin', allowed_columns: DEFAULT_ROLE_COLUMNS.ADMIN_TEAM, desc: 'Access to Vehicle Number, Chassis, Engine, Customer Name, and Certificate Issued Date data entry. Core hardware IMEI/SIM and deletion options are locked.' },
-  { id: 3, name: 'Sales Commercial Team', role: 'SALES_TEAM', email: 'sales@fueltracks.in', password: 'sales', allowed_columns: DEFAULT_ROLE_COLUMNS.SALES_TEAM, desc: 'Access to Cost, Tax, Total Cost, Installation Charges, and Payment Received status entry. Vehicle numbers and technical hardware fields are locked.' }
+  { id: 3, name: 'Sales Commercial Team', role: 'SALES_TEAM', email: 'sales@fueltracks.in', password: 'sales', allowed_columns: DEFAULT_ROLE_COLUMNS.SALES_TEAM, desc: 'Access to Cost, Tax, Total Cost, Installation Charges, and Payment Received status entry. Vehicle numbers and technical hardware fields are locked.' },
+  { id: 4, name: 'Jaya Surya', role: 'DEALER', region: 'Kurnool', email: 'jayasurya@fueltracks.in', password: 'dealer', allowed_columns: DEFAULT_ROLE_COLUMNS.DEALER, desc: 'Dealer account for Kurnool. Sees only stock assigned to Jaya Surya (50 Vamo, 20 Volty, 5 Tracknow).' }
 ];
 
 // Helper to determine if a specific role or user can edit a given field
@@ -64,7 +76,19 @@ export function canUserEditField(userOrRole, fieldName) {
     });
   }
 
-  // Otherwise fall back to role default permission matrices
+  // Fall back to role default permission matrices
+  if (roleKey === 'DEALER') {
+    const allowedDealerPatterns = [
+      /vehicle.*num|vehicle|veh_no|reg_no/i,
+      /customer.*name|cust.*name/i,
+      /phone|contact|mobile/i,
+      /certificate.*date|issued.*date/i,
+      /status/i,
+      /remarks/i
+    ];
+    return allowedDealerPatterns.some(p => p.test(targetField));
+  }
+
   if (roleKey === 'ADMIN_TEAM' || roleKey === 'WAREHOUSE_MANAGER' || roleKey === 'INSTALLER') {
     const allowedAdminPatterns = [
       /vehicle.*num|vehicle|veh_no|reg_no/i,
@@ -146,15 +170,18 @@ export function AuthProvider({ children }) {
     const cleanPass = String(password || '').trim();
 
     const userMatch = allUsers.find(
-      u => (u.email && u.email.toLowerCase() === cleanEmail) || (u.phone && u.phone.toLowerCase() === cleanEmail)
+      u => (u.email && u.email.toLowerCase() === cleanEmail) || 
+           (u.phone && u.phone.toLowerCase() === cleanEmail) ||
+           (u.name && u.name.toLowerCase() === cleanEmail)
     );
 
     if (
       userMatch &&
       (userMatch.password === cleanPass ||
-       (userMatch.role === 'SUPER_ADMIN' && (cleanPass === 'admin123' || cleanPass === '123456')) ||
-       (userMatch.role === 'ADMIN_TEAM' && (cleanPass === 'admin123' || cleanPass === '123456')) ||
-       (userMatch.role === 'SALES_TEAM' && (cleanPass === 'sales123' || cleanPass === '123456')))
+       (userMatch.role === 'SUPER_ADMIN' && (cleanPass === 'admin123' || cleanPass === '123456' || cleanPass === 'admin')) ||
+       (userMatch.role === 'ADMIN_TEAM' && (cleanPass === 'admin123' || cleanPass === '123456' || cleanPass === 'admin')) ||
+       (userMatch.role === 'SALES_TEAM' && (cleanPass === 'sales123' || cleanPass === '123456' || cleanPass === 'sales')) ||
+       (userMatch.role === 'DEALER' && (cleanPass === 'dealer' || cleanPass === '123456' || cleanPass === 'admin')))
     ) {
       setCurrentUser(userMatch);
       setIsAuthenticated(true);

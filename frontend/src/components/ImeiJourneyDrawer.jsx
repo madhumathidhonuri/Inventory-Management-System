@@ -108,94 +108,118 @@ export default function ImeiJourneyDrawer({ isOpen, onClose, initialImei = '' })
             </div>
           )}
 
-          {deviceData && (
-            <>
-              {/* Summary Card */}
-              <div className="glass-panel rounded-xl p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="font-mono text-base font-bold text-blue-700 tracking-wider">
-                    {deviceData.device.imei_number}
-                  </span>
-                  <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${getStatusBadge(deviceData.device.current_status)}`}>
-                    {deviceData.device.current_status}
-                  </span>
-                </div>
+          {deviceData && (() => {
+            const dev = deviceData.device || deviceData;
+            const history = deviceData.journey_history || deviceData.history || [];
+            const attrs = dev.additional_attributes || {};
+            const extraEntries = Object.entries(attrs);
 
-                <div className="grid grid-cols-2 gap-3 text-xs pt-2 border-t border-slate-100">
-                  <div>
-                    <span className="text-slate-400 block">Device Type</span>
-                    <span className="text-slate-800 font-medium">{deviceData.device.device_type_name}</span>
+            return (
+              <>
+                {/* Summary Card */}
+                <div className="glass-panel rounded-xl p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono text-base font-bold text-blue-700 tracking-wider">
+                      {dev.imei_number}
+                    </span>
+                    <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${getStatusBadge(dev.current_status)}`}>
+                      {dev.current_status}
+                    </span>
                   </div>
-                  <div>
-                    <span className="text-slate-400 block">SIM Number</span>
-                    <span className="text-slate-800 font-mono">{deviceData.device.sim_number || 'N/A'}</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-400 block">Current Holder</span>
-                    <span className="text-emerald-700 font-semibold">{deviceData.device.current_holder_name}</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-400 block">Vendor</span>
-                    <span className="text-slate-800 font-medium">{deviceData.device.vendor_name}</span>
-                  </div>
-                </div>
-              </div>
 
-              {/* Linked Installation Details if Installed */}
-              {deviceData.installation && (
-                <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl space-y-2">
-                  <h3 className="text-xs font-bold text-emerald-800 uppercase tracking-wider flex items-center gap-1.5">
-                    <Wrench className="w-4 h-4" /> Active Vehicle Installation
-                  </h3>
-                  <div className="grid grid-cols-2 gap-2 text-xs text-slate-700">
-                    <div><span className="text-slate-500">Customer:</span> <strong className="text-slate-900">{deviceData.installation.customer_name}</strong></div>
-                    <div><span className="text-slate-500">Phone:</span> <span className="font-mono text-emerald-800 font-medium">{deviceData.installation.customer_phone}</span></div>
-                    <div><span className="text-slate-500">Vehicle:</span> <strong className="text-amber-700 font-mono">{deviceData.installation.vehicle_number}</strong> ({deviceData.installation.vehicle_type})</div>
-                    <div><span className="text-slate-500">Installed Date:</span> {deviceData.installation.installation_date}</div>
-                    <div><span className="text-slate-500">Installer:</span> {deviceData.installation.installed_by}</div>
-                    <div><span className="text-slate-500">Warranty End:</span> {deviceData.installation.warranty_end_date || 'N/A'}</div>
-                  </div>
-                </div>
-              )}
-
-              {/* Chronological Audit Timeline */}
-              <div>
-                <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4 flex items-center gap-2">
-                  <Clock className="w-4 h-4 text-blue-600" /> Chronological Traceability Timeline ({deviceData.history.length} events)
-                </h3>
-
-                <div className="relative border-l-2 border-slate-200 ml-3 space-y-6">
-                  {deviceData.history.map((evt, idx) => (
-                    <div key={idx} className="relative pl-6">
-                      <div className="absolute -left-[17px] top-0 p-1.5 rounded-full bg-white border border-slate-300 shadow-xs">
-                        {getEventIcon(evt.event_type)}
-                      </div>
-
-                      <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs space-y-1">
-                        <div className="flex items-center justify-between text-slate-500">
-                          <span className="font-bold text-slate-900 text-sm">{evt.event_type}</span>
-                          <span className="text-[11px] text-slate-500">{evt.event_date}</span>
-                        </div>
-
-                        {evt.from_holder && evt.to_holder && (
-                          <div className="flex items-center gap-1.5 text-slate-700 py-1 font-medium">
-                            <span className="text-slate-500">{evt.from_holder}</span>
-                            <ArrowRight className="w-3 h-3 text-blue-600 flex-shrink-0" />
-                            <span className="text-emerald-700 font-bold">{evt.to_holder}</span>
-                          </div>
-                        )}
-
-                        <div className="flex items-center justify-between text-slate-500 pt-1 border-t border-slate-200/60">
-                          <span className="flex items-center gap-1"><User className="w-3 h-3 text-slate-400" /> By: {evt.performed_by}</span>
-                          {evt.remarks && <span className="italic text-slate-600">{evt.remarks}</span>}
-                        </div>
-                      </div>
+                  <div className="grid grid-cols-2 gap-3 text-xs pt-2 border-t border-slate-100">
+                    <div>
+                      <span className="text-slate-400 block">Device Type</span>
+                      <span className="text-slate-800 font-medium">{dev.device_type_name}</span>
                     </div>
-                  ))}
+                    <div>
+                      <span className="text-slate-400 block">SIM Number</span>
+                      <span className="text-slate-800 font-mono">{dev.sim_number || 'N/A'}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-400 block">Stock Place / Holder</span>
+                      <span className="text-emerald-700 font-semibold">{attrs['STOCK PLACE'] || dev.current_holder_name || 'Central Warehouse'}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-400 block">Vendor / Batch</span>
+                      <span className="text-slate-800 font-medium">{dev.vendor_name || dev.source_file || 'Standard'}</span>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </>
-          )}
+
+                {/* Dynamic Excel Attributes Card */}
+                {extraEntries.length > 0 && (
+                  <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                    <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                      <Tag className="w-4 h-4 text-blue-600" /> Excel Spreadsheet Attributes ({extraEntries.length})
+                    </h3>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      {extraEntries.map(([k, v]) => (
+                        <div key={k} className="p-2 bg-white rounded-lg border border-slate-200/80">
+                          <span className="text-[10px] text-slate-400 font-bold uppercase block truncate">{k}</span>
+                          <span className="font-semibold text-slate-800 font-mono text-[11px] truncate block">{String(v || '-')}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Linked Installation Details if Installed */}
+                {deviceData.installation && (
+                  <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl space-y-2">
+                    <h3 className="text-xs font-bold text-emerald-800 uppercase tracking-wider flex items-center gap-1.5">
+                      <Wrench className="w-4 h-4" /> Active Vehicle Installation
+                    </h3>
+                    <div className="grid grid-cols-2 gap-2 text-xs text-slate-700">
+                      <div><span className="text-slate-500">Customer:</span> <strong className="text-slate-900">{deviceData.installation.customer_name}</strong></div>
+                      <div><span className="text-slate-500">Phone:</span> <span className="font-mono text-emerald-800 font-medium">{deviceData.installation.customer_phone}</span></div>
+                      <div><span className="text-slate-500">Vehicle:</span> <strong className="text-amber-700 font-mono">{deviceData.installation.vehicle_number}</strong> ({deviceData.installation.vehicle_type})</div>
+                      <div><span className="text-slate-500">Installed Date:</span> {deviceData.installation.installation_date}</div>
+                      <div><span className="text-slate-500">Installer:</span> {deviceData.installation.installed_by}</div>
+                      <div><span className="text-slate-500">Warranty End:</span> {deviceData.installation.warranty_end_date || 'N/A'}</div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Chronological Audit Timeline */}
+                <div>
+                  <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4 flex items-center gap-2">
+                    <Clock className="w-4 h-4 text-blue-600" /> Chronological Traceability Timeline ({history.length} events)
+                  </h3>
+
+                  <div className="relative border-l-2 border-slate-200 ml-3 space-y-6">
+                    {history.map((evt, idx) => (
+                      <div key={idx} className="relative pl-6">
+                        <div className="absolute -left-[17px] top-0 p-1.5 rounded-full bg-white border border-slate-300 shadow-xs">
+                          {getEventIcon(evt.event_type)}
+                        </div>
+
+                        <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs space-y-1">
+                          <div className="flex items-center justify-between text-slate-500">
+                            <span className="font-bold text-slate-900 text-sm">{evt.event_type}</span>
+                            <span className="text-[11px] text-slate-500">{evt.event_date}</span>
+                          </div>
+
+                          {evt.from_holder && evt.to_holder && (
+                            <div className="flex items-center gap-1.5 text-slate-700 py-1 font-medium">
+                              <span className="text-slate-500">{evt.from_holder}</span>
+                              <ArrowRight className="w-3 h-3 text-blue-600 flex-shrink-0" />
+                              <span className="text-emerald-700 font-bold">{evt.to_holder}</span>
+                            </div>
+                          )}
+
+                          <div className="flex items-center justify-between text-slate-500 pt-1 border-t border-slate-200/60">
+                            <span className="flex items-center gap-1"><User className="w-3 h-3 text-slate-400" /> By: {evt.performed_by}</span>
+                            {evt.remarks && <span className="italic text-slate-600">{evt.remarks}</span>}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
+            );
+          })()}
 
           {!deviceData && !loading && !error && (
             <div className="text-center py-12 text-slate-400 text-xs">

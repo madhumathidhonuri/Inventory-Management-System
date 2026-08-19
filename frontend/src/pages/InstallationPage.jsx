@@ -18,6 +18,7 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { recordInstallation, recordBulkInstallations, fetchInstallations, lookupCustomerByPhone } from '../services/api';
+import { buildCustomerCredentialsWhatsAppMessage } from '../utils/whatsapp';
 
 export default function InstallationPage({ onOpenScannerWithCallback, onOpenTraceDrawer }) {
   const [installations, setInstallations] = useState([]);
@@ -361,17 +362,26 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
 
                       {/* 1-Click WhatsApp Trigger */}
                       <td className="p-3.5 text-right sticky right-0 bg-slate-50 border-l border-slate-200">
-                        <a
-                          href={`https://api.whatsapp.com/send?phone=${String(inst.customer_contact).replace(/[^0-9]/g, '')}&text=${encodeURIComponent(
-                            `Hello ${inst.customer_name},\n\nYour GPS device (${inst.device_type_name || 'GPS Tracker'}) has been installed successfully in vehicle *${inst.vehicle_number}*.\n\n📱 *Device IMEI*: ${inst.imei_number}\n📅 *Installation Date*: ${inst.installation_date}\n\n🔐 *GPS Software Login Credentials*:\n- *Username / ID*: ${inst.software_user_id || 'Your registered phone'}\n- *Password*: ${inst.software_password || 'Provided separately'}\n\nThank you for choosing FuelTracks! For 24/7 support, contact us.`
-                          )}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          title="Send installation details & software login to customer via WhatsApp"
-                          className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-[11px] font-bold inline-flex items-center gap-1 shadow-2xs transition-colors"
-                        >
-                          <span>💬</span> Send Login
-                        </a>
+                        {(() => {
+                          const wa = buildCustomerCredentialsWhatsAppMessage({
+                            phone: inst.customer_contact,
+                            customerName: inst.customer_name,
+                            userId: inst.software_user_id,
+                            password: inst.software_password,
+                            vehicleNumber: inst.vehicle_number
+                          });
+                          return (
+                            <a
+                              href={wa.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title={`Send official Volty Track credentials to ${inst.customer_contact}`}
+                              className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-[11px] font-bold inline-flex items-center gap-1 shadow-2xs transition-colors cursor-pointer"
+                            >
+                              <span>💬</span> Send Login
+                            </a>
+                          );
+                        })()}
                       </td>
 
                     </tr>

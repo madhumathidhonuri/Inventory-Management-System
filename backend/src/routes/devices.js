@@ -5,7 +5,7 @@ const db = require('../db/database');
 // GET devices list with search & filter
 router.get('/', (req, res) => {
   try {
-    const { status, device_type_id, purchase_batch_id, holder_type, holder_name, search } = req.query;
+    const { status, current_status, device_type_id, purchase_batch_id, holder_type, holder_name, dealer_name, search } = req.query;
     let query = `
       SELECT d.*, dt.name as device_type_name, dt.category as device_type_category
       FROM devices d
@@ -14,9 +14,10 @@ router.get('/', (req, res) => {
     `;
     const params = [];
 
-    if (status) {
+    const activeStatus = status || current_status;
+    if (activeStatus) {
       query += ` AND d.current_status = ?`;
-      params.push(status);
+      params.push(activeStatus);
     }
     if (device_type_id) {
       query += ` AND d.device_type_id = ?`;
@@ -30,13 +31,16 @@ router.get('/', (req, res) => {
       query += ` AND d.current_holder_type = ?`;
       params.push(holder_type);
     }
-    if (holder_name) {
+    if (dealer_name) {
+      query += ` AND (d.current_holder_name LIKE ? OR d.additional_attributes LIKE ?)`;
+      params.push(`%${dealer_name}%`, `%${dealer_name}%`);
+    } else if (holder_name) {
       query += ` AND d.current_holder_name LIKE ?`;
       params.push(`%${holder_name}%`);
     }
     if (search) {
-      query += ` AND (d.imei_number LIKE ? OR d.sim_number LIKE ? OR d.vendor_name LIKE ? OR d.current_holder_name LIKE ?)`;
-      params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
+      query += ` AND (d.imei_number LIKE ? OR d.sim_number LIKE ? OR d.vendor_name LIKE ? OR d.current_holder_name LIKE ? OR d.additional_attributes LIKE ?)`;
+      params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
     }
 
     query += ` ORDER BY d.updated_at DESC`;
@@ -172,12 +176,27 @@ router.get('/:imei', (req, res) => {
       ORDER BY event_date DESC
     `).all(device.id, imei);
 
+    let installation = null;
+    try {
+      installation = db.prepare(`
+        SELECT i.*, c.name as customer_name, c.phone as customer_phone, c.address as customer_address
+        FROM installations i
+        LEFT JOIN customers c ON i.customer_id = c.id
+        WHERE i.device_id = ? OR i.imei_number = ?
+        ORDER BY i.id DESC LIMIT 1
+      `).get(device.id, imei);
+    } catch (e) {
+      installation = null;
+    }
+
     res.json({
       success: true,
       data: {
         ...device,
         additional_attributes: JSON.parse(device.additional_attributes || '{}'),
-        journey_history: history
+        journey_history: history,
+        history: history,
+        installation: installation || null
       }
     });
   } catch (err) {

@@ -142,6 +142,17 @@ export default function UserManagementPage() {
       setSelectedColumns(DEFAULT_ROLE_COLUMNS.ADMIN_TEAM);
     } else if (newRole === 'SALES_TEAM') {
       setSelectedColumns(DEFAULT_ROLE_COLUMNS.SALES_TEAM);
+    } else if (newRole === 'DEALER') {
+      setSelectedColumns(DEFAULT_ROLE_COLUMNS.DEALER || [
+        'Vehicle Number',
+        'Customer Name',
+        'Customer Contact',
+        'Certificate Issued Date',
+        'Stock Place Date',
+        'SIM Number',
+        'Status',
+        'Remarks'
+      ]);
     } else if (newRole === 'SUPER_ADMIN') {
       // Super Admin gets all columns
       const allCols = STANDARD_COLUMN_GROUPS.flatMap(g => g.columns);
@@ -314,6 +325,7 @@ export default function UserManagementPage() {
               <tbody className="divide-y divide-slate-100 bg-white">
                 {users.map((u) => {
                   const roleMeta = ROLES[u.role] || ROLES.SUPER_ADMIN;
+                  const isDealer = u.role === 'DEALER';
                   const isSales = u.role === 'SALES_TEAM' || u.role === 'SALES_MANAGER';
                   const isAdmin = u.role === 'ADMIN_TEAM' || u.role === 'WAREHOUSE_MANAGER';
                   const isOwner = u.role === 'SUPER_ADMIN';
@@ -328,7 +340,9 @@ export default function UserManagementPage() {
                       <td className="p-3.5 font-bold text-slate-900">
                         <div className="flex items-center gap-2.5">
                           <div className={`w-8 h-8 rounded-xl flex items-center justify-center text-xs font-bold ${
-                            isSales
+                            isDealer
+                              ? 'bg-blue-100 text-blue-800'
+                              : isSales
                               ? 'bg-emerald-100 text-emerald-800'
                               : isAdmin
                               ? 'bg-amber-100 text-amber-900'
@@ -338,7 +352,9 @@ export default function UserManagementPage() {
                           </div>
                           <div>
                             <div className="text-slate-900 font-semibold">{u.name}</div>
-                            <div className="text-[11px] font-normal text-slate-400">{u.region || 'All India'}</div>
+                            <div className="text-[11px] font-normal text-slate-400">
+                              {isDealer ? `📍 Dealer: ${u.region || 'Branch'}` : (u.region || 'All India')}
+                            </div>
                           </div>
                         </div>
                       </td>
@@ -346,13 +362,15 @@ export default function UserManagementPage() {
                       {/* Role Badge */}
                       <td className="p-3.5 whitespace-nowrap">
                         <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider inline-flex items-center gap-1.5 ${
-                          isSales
+                          isDealer
+                            ? 'bg-blue-100 text-blue-800 border border-blue-200'
+                            : isSales
                             ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
                             : isAdmin
                             ? 'bg-amber-100 text-amber-900 border border-amber-200'
                             : 'bg-purple-100 text-purple-800 border border-purple-200'
                         }`}>
-                          {isSales ? '💼' : isAdmin ? '🛠️' : '👑'} {roleMeta.label}
+                          {isDealer ? '🏪' : isSales ? '💼' : isAdmin ? '🛠️' : '👑'} {isDealer ? 'Dealer / Partner' : roleMeta.label}
                         </span>
                       </td>
 
@@ -490,10 +508,21 @@ export default function UserManagementPage() {
                   >
                     <option value="ADMIN_TEAM">Admin Team (Vehicle & Certificate Entry)</option>
                     <option value="SALES_TEAM">Sales Team (Cost & Payment Collection)</option>
+                    <option value="DEALER">Dealer / Partner (Scoped Stock Portal)</option>
                     <option value="SUPER_ADMIN">Super Admin (Master Full Access)</option>
                   </select>
                 </div>
               </div>
+
+              {/* Dealer Portal Scoping Info Banner */}
+              {role === 'DEALER' && (
+                <div className="p-3 bg-blue-50 border border-blue-200 rounded-2xl flex items-start gap-2.5 text-xs text-blue-900">
+                  <Building className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+                  <div>
+                    <strong className="font-bold">Dealer Account Isolation:</strong> When this dealer logs in, they will only see and manage stock assigned to <span className="font-semibold text-blue-800">"{name || 'their dealer name'}"</span> or location <span className="font-semibold text-blue-800">"{region || 'their region'}"</span> (e.g. Jaya Surya in Kurnool).
+                  </div>
+                </div>
+              )}
 
               {/* Row 2: Email & Password */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -502,7 +531,7 @@ export default function UserManagementPage() {
                   <input
                     type="text"
                     required
-                    placeholder="e.g. ramesh@fueltracks.in"
+                    placeholder={role === 'DEALER' ? 'e.g. jayasurya@fueltracks.in' : 'e.g. ramesh@fueltracks.in'}
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-900 font-medium focus:outline-none focus:border-slate-800 focus:bg-white"
@@ -545,10 +574,10 @@ export default function UserManagementPage() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Assigned Region / Branch</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Assigned Dealer Region / City *</label>
                   <input
                     type="text"
-                    placeholder="e.g. Chennai, Hyderabad, All India"
+                    placeholder="e.g. Kurnool, Hyderabad, Bangalore"
                     value={region}
                     onChange={(e) => setRegion(e.target.value)}
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-900 focus:outline-none focus:border-slate-800 focus:bg-white"

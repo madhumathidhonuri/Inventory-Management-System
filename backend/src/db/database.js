@@ -165,6 +165,9 @@ function initDatabase() {
   try { db.exec("ALTER TABLE installations ADD COLUMN payment_status TEXT DEFAULT 'PENDING';"); } catch (e) {}
   try { db.exec("ALTER TABLE users ADD COLUMN password TEXT DEFAULT '123456';"); } catch (e) {}
   try { db.exec("ALTER TABLE users ADD COLUMN allowed_columns TEXT DEFAULT '[]';"); } catch (e) {}
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_devices_holder_name ON devices(current_holder_name);"); } catch (e) {}
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_devices_status ON devices(current_status);"); } catch (e) {}
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_dispatches_dealer ON dispatches(dealer_name);"); } catch (e) {}
 }
 
 initDatabase();

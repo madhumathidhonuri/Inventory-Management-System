@@ -3,12 +3,14 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import Header from './components/Header';
 import Sidebar from './components/Sidebar';
 import ImeiJourneyDrawer from './components/ImeiJourneyDrawer';
+import DeviceDetailCardModal from './components/DeviceDetailCardModal';
 import BarcodeScannerModal from './components/BarcodeScannerModal';
 
 import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
 import InventoryPage from './pages/InventoryPage';
 import PurchaseUploadPage from './pages/PurchaseUploadPage';
+import DispatchPage from './pages/DispatchPage';
 import InstallationPage from './pages/InstallationPage';
 import DeviceTypesPage from './pages/DeviceTypesPage';
 import ReportsPage from './pages/ReportsPage';
@@ -79,6 +81,8 @@ function MainLayout() {
         );
       case 'upload':
         return <PurchaseUploadPage onUploadSuccess={() => setActiveTab('inventory')} />;
+      case 'dispatches':
+        return <DispatchPage onOpenScannerWithCallback={openScannerWithCallback} onOpenTraceDrawer={openTraceDrawer} />;
       case 'installations':
         return <InstallationPage onOpenScannerWithCallback={openScannerWithCallback} onOpenTraceDrawer={openTraceDrawer} />;
       case 'types':
@@ -116,11 +120,11 @@ function MainLayout() {
 
       </div>
 
-      {/* Global IMEI Journey Trace Drawer */}
-      <ImeiJourneyDrawer
+      {/* Global Device Specification & Detail Card Modal */}
+      <DeviceDetailCardModal
         isOpen={traceDrawerOpen}
         onClose={() => setTraceDrawerOpen(false)}
-        initialImei={traceImei}
+        imei={traceImei}
       />
 
       {/* Global Barcode Camera Scanner Modal */}

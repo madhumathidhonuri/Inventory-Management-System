@@ -7,6 +7,12 @@ export async function fetchStats(params = {}) {
   return res.json();
 }
 
+export async function fetchDealerSummary(dealerName) {
+  const res = await fetch(`${API_BASE}/dashboard/dealer-summary?dealer_name=${encodeURIComponent(dealerName)}`);
+  if (!res.ok) throw new Error(`Failed to fetch dealer summary for '${dealerName}'`);
+  return res.json();
+}
+
 export async function fetchDevices(params = {}) {
   const query = new URLSearchParams(params).toString();
   const res = await fetch(`${API_BASE}/devices?${query}`);
@@ -161,8 +167,9 @@ export async function deletePurchaseBatch(id) {
   return fallbackData;
 }
 
-export async function fetchDispatches() {
-  const res = await fetch(`${API_BASE}/dispatches`);
+export async function fetchDispatches(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  const res = await fetch(`${API_BASE}/dispatches?${query}`);
   if (!res.ok) throw new Error('Failed to fetch dispatches');
   return res.json();
 }

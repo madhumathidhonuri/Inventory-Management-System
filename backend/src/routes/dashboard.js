@@ -4,7 +4,7 @@ const db = require('../db/database');
 
 // GET /api/dashboard/stats - Executive Dashboard statistics & metrics
 router.get('/stats', (req, res) => {
-  const { purchase_batch_id, device_type_id, vendor_name, stock_place } = req.query;
+  const { purchase_batch_id, device_type_id, vendor_name, stock_place, dealer_name } = req.query;
 
   try {
     // 1. Build initial device filter clauses
@@ -22,6 +22,10 @@ router.get('/stats', (req, res) => {
     if (vendor_name) {
       devWhere.push('vendor_name = ?');
       devParams.push(vendor_name);
+    }
+    if (dealer_name) {
+      devWhere.push('(current_holder_name LIKE ? OR additional_attributes LIKE ?)');
+      devParams.push(`%${dealer_name}%`, `%${dealer_name}%`);
     }
 
     const devWhereSql = devWhere.length > 0 ? `WHERE ${devWhere.join(' AND ')}` : '';
@@ -59,6 +63,10 @@ router.get('/stats', (req, res) => {
     if (vendor_name) {
       filterClauses.push('d.vendor_name = ?');
       queryParams.push(vendor_name);
+    }
+    if (dealer_name) {
+      filterClauses.push('(d.current_holder_name LIKE ? OR d.additional_attributes LIKE ?)');
+      queryParams.push(`%${dealer_name}%`, `%${dealer_name}%`);
     }
     if (stock_place && placeKey) {
       filterClauses.push(`json_extract(d.additional_attributes, '$.' || ?) = ?`);
@@ -391,6 +399,161 @@ router.get('/stats', (req, res) => {
           customers: totalCustomers,
           dispatched_to_dealers: totalDispatched
         }
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/dashboard/dealer-summary - Full drill-down dossier for a specific dealer
+router.get('/dealer-summary', (req, res) => {
+  const { dealer_name } = req.query;
+  if (!dealer_name) {
+    return res.status(400).json({ success: false, error: 'dealer_name query param is required' });
+  }
+
+  try {
+    const cleanName = dealer_name.trim();
+
+    // 1. Get Dealer user profile if registered
+    const user = db.prepare(`
+      SELECT id, name, phone, email, role, region, created_at
+      FROM users
+      WHERE role = 'DEALER' AND (name LIKE ? OR region LIKE ?)
+      LIMIT 1
+    `).get(`%${cleanName}%`, `%${cleanName}%`);
+
+    // 2. Get All devices assigned to or with this dealer
+    const devicesRaw = db.prepare(`
+      SELECT d.*, dt.name as device_type_name, dt.category as device_type_category
+      FROM devices d
+      JOIN device_types dt ON d.device_type_id = dt.id
+      WHERE (d.current_holder_name LIKE ? OR d.additional_attributes LIKE ?)
+      ORDER BY d.updated_at DESC
+    `).all(`%${cleanName}%`, `%${cleanName}%`);
+
+    let totalSent = 0;
+    let installedCount = 0;
+    let inStockCount = 0;
+    let faultyCount = 0;
+    let paymentReceivedAmount = 0;
+    let paymentPendingAmount = 0;
+    let paymentReceivedCount = 0;
+    let paymentPendingCount = 0;
+
+    const modelMap = {};
+
+    const getAttrVal = (obj, ...names) => {
+      for (const n of names) {
+        if (obj[n] !== undefined && obj[n] !== null && String(obj[n]).trim() !== '') {
+          return String(obj[n]).trim();
+        }
+      }
+      const cleanNames = names.map(n => n.toLowerCase().replace(/[^a-z0-9]/g, ''));
+      for (const [k, v] of Object.entries(obj)) {
+        const cleanK = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (cleanNames.includes(cleanK) && v !== undefined && v !== null && String(v).trim() !== '') {
+          return String(v).trim();
+        }
+      }
+      return '-';
+    };
+
+    const formattedDevices = devicesRaw.map(dev => {
+      let attrs = {};
+      try { attrs = JSON.parse(dev.additional_attributes || '{}'); } catch {}
+
+      const vehNo = getAttrVal(attrs, 'VEHICLE NUMBER', 'Vehicle Number', 'VEHICLE NO', 'Vehicle No', 'REG NO', 'Reg No', 'vehicle_number', 'Vehicle', 'VEHICLE');
+      const custName = getAttrVal(attrs, 'CUSTOMER NAME', 'Customer Name', 'CERTIFICATE ISSUED TO', 'Certificate Issued To', 'Customer', 'customer_name');
+      const custPhone = getAttrVal(attrs, 'CUSTOMER PHONE NUMBER', 'Customer Phone Number', 'Primary Mobile', 'PRIMARY MOBILE', 'Phone', 'phone_number', 'Mobile', 'Contact');
+      const instDate = getAttrVal(attrs, 'INSTALLATION DATE', 'Installation Date', 'CERTIFICATE ISSUED DATE', 'Certificate Issued Date', 'DATE', 'Date');
+      const payVal = getAttrVal(attrs, 'AMOUNT RECEIVED', 'Amount Received', 'Payment Status', 'PAYMENT STATUS', 'Payment').toUpperCase();
+      
+      const isInstalled = vehNo !== '-' || dev.current_status === 'INSTALLED';
+      const isPaid = payVal.includes('REC') || payVal.includes('PAID');
+      const salePrice = Number(attrs['Sale Price'] || attrs['SALE PRICE'] || dev.purchase_price || 0);
+
+      totalSent++;
+      if (dev.current_status === 'FAULTY') {
+        faultyCount++;
+      } else if (isInstalled) {
+        installedCount++;
+        if (isPaid) {
+          paymentReceivedAmount += salePrice;
+          paymentReceivedCount++;
+        } else {
+          paymentPendingAmount += salePrice;
+          paymentPendingCount++;
+        }
+      } else {
+        inStockCount++;
+      }
+
+      // Group by model
+      const mName = dev.device_type_name || 'Other';
+      if (!modelMap[mName]) {
+        modelMap[mName] = {
+          model: mName,
+          category: dev.device_type_category || 'GPS',
+          total: 0,
+          installed: 0,
+          in_stock: 0
+        };
+      }
+      modelMap[mName].total++;
+      if (isInstalled) {
+        modelMap[mName].installed++;
+      } else {
+        modelMap[mName].in_stock++;
+      }
+
+      return {
+        id: dev.id,
+        imei_number: dev.imei_number,
+        device_type_name: dev.device_type_name,
+        device_type_category: dev.device_type_category,
+        current_status: isInstalled ? 'INSTALLED' : (dev.current_status === 'FAULTY' ? 'FAULTY' : 'WITH_DEALER'),
+        current_holder_name: dev.current_holder_name,
+        vehicle_number: vehNo,
+        customer_name: custName,
+        customer_phone: custPhone,
+        payment_status: isPaid ? 'RECEIVED' : (isInstalled ? 'PENDING' : '-'),
+        installation_date: instDate,
+        additional_attributes: attrs
+      };
+    });
+
+    // 3. Get Dispatches to this dealer
+    const dispatches = db.prepare(`
+      SELECT * FROM dispatches
+      WHERE dealer_name LIKE ? OR location LIKE ?
+      ORDER BY id DESC
+    `).all(`%${cleanName}%`, `%${cleanName}%`);
+
+    res.json({
+      success: true,
+      data: {
+        dealer: {
+          name: user ? user.name : cleanName,
+          phone: user ? user.phone : (dispatches[0]?.dealer_contact || '-'),
+          email: user ? user.email : '-',
+          region: user ? user.region : (dispatches[0]?.location || cleanName)
+        },
+        kpis: {
+          total_sent: totalSent,
+          with_dealer: inStockCount,
+          installed: installedCount,
+          faulty: faultyCount,
+          install_rate: totalSent > 0 ? Math.round((installedCount / totalSent) * 100) : 0,
+          payment_received_amount: paymentReceivedAmount,
+          payment_pending_amount: paymentPendingAmount,
+          payment_received_count: paymentReceivedCount,
+          payment_pending_count: paymentPendingCount
+        },
+        models: Object.values(modelMap).sort((a, b) => b.total - a.total),
+        devices: formattedDevices,
+        dispatches
       }
     });
   } catch (err) {

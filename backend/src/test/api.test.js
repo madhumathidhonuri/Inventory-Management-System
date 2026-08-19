@@ -41,20 +41,21 @@ async function runTests() {
     console.log('✓ Dashboard Stats API:', stats.body.success ? 'PASSED' : 'FAILED', `Total Devices: ${stats.body.data.totals.devices}`);
 
     // 3. IMEI Journey Trace Audit Log
-    const testImei = '864920050019115';
+    const devList = await makeRequest('/api/devices?limit=1');
+    const testImei = devList.body?.data?.[0]?.imei_number || '86501000001';
     const trace = await makeRequest(`/api/devices/${testImei}`);
     const historyLength = trace.body?.data?.history?.length ?? 0;
-    console.log('✓ IMEI Journey Trace Audit Log:', trace.body?.success ? 'PASSED' : 'FAILED', `Events count: ${historyLength}`);
+    console.log('✓ IMEI Journey Trace Audit Log:', (trace.body?.success && historyLength > 0) ? 'PASSED' : 'FAILED', `Events count for ${testImei}: ${historyLength}`);
 
     // 4. Installation Auto Customer Match
     const instPayload = {
-      imei_number: '864920050019102',
-      customer_phone: '9811223344', // Existing customer Anand Kumar
-      customer_name: 'Anand Kumar',
-      vehicle_number: 'KA-05-EV-9900',
-      vehicle_type: 'SUV',
+      imei_number: testImei,
+      customer_phone: '9848011223',
+      customer_name: 'Rayalaseema Transport',
+      vehicle_number: 'AP-21-TX-9901',
+      vehicle_type: 'Truck',
       sale_price: 5800,
-      installed_by: 'Test Installer'
+      installed_by: 'Jaya Surya'
     };
     const instResult = await makeRequest('/api/installations', 'POST', instPayload);
     console.log('✓ Installation Single Action & Customer Auto-Match:', instResult.body.success ? 'PASSED' : 'FAILED', `Installation ID: ${instResult.body.data?.installationId}`);

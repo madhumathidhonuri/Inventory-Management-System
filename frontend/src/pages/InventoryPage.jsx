@@ -48,10 +48,13 @@ import {
   bulkTransferDevices,
   fetchAuditLogs
 } from '../services/api';
+import DeviceDetailCardModal from '../components/DeviceDetailCardModal';
+import { buildCustomerCredentialsWhatsAppMessage } from '../utils/whatsapp';
 
 export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClearInitialFilter }) {
   const { user } = useAuth();
   const isSuperAdmin = user?.role === 'SUPER_ADMIN';
+  const isDealer = user?.role === 'DEALER';
 
   const [devices, setDevices] = useState([]);
   const [deviceTypes, setDeviceTypes] = useState([]);
@@ -61,6 +64,10 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
   const [statusFilter, setStatusFilter] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
   const [batchFilter, setBatchFilter] = useState('');
+
+  // Device Detail Specification Card Modal State
+  const [detailCardImei, setDetailCardImei] = useState(null);
+  const [isDetailCardOpen, setIsDetailCardOpen] = useState(false);
 
   // Multi-Select & Batch Stock Movement State
   const [selectedDeviceIds, setSelectedDeviceIds] = useState(new Set());
@@ -189,6 +196,9 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
     setLoading(true);
     try {
       const params = {};
+      if (isDealer && user?.name) {
+        params.dealer_name = user.name;
+      }
       if (statusFilter) params.status = statusFilter;
       if (typeFilter) params.device_type_id = typeFilter;
       if (batchFilter) params.purchase_batch_id = batchFilter;
@@ -956,19 +966,22 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
   // Handle WhatsApp Quick Share
   const handleShareWhatsApp = (dev) => {
     const attrs = dev.additional_attributes || {};
-    const phone = attrs['CUSTOMER PHONE NUMBER'] || attrs['Phone'] || attrs['Contact'] || '';
-    const cleanPhone = String(phone).replace(/[^0-9]/g, '');
-    const custName = attrs['CUSTOMER NAME'] || attrs['CERTIFICATE ISSUED TO'] || attrs['Name'] || 'Customer';
+    const phone = attrs['CUSTOMER PHONE NUMBER'] || attrs['Primary Mobile'] || attrs['PRIMARY MOBILE'] || attrs['Phone'] || attrs['Contact'] || attrs['phone_number'] || '';
+    const custName = attrs['CUSTOMER NAME'] || attrs['Customer Name'] || attrs['CERTIFICATE ISSUED TO'] || attrs['Name'] || 'Customer';
     const vehKey = Object.keys(attrs).find(k => /vehicle|veh_no|reg_no/i.test(k));
-    const vehNo = vehKey && attrs[vehKey] ? String(attrs[vehKey]).trim() : 'Vehicle';
-    const devType = dev.device_type_name || 'GPS Tracker';
-    const date = attrs['CERTIFICATE ISSUED DATE'] || attrs['DATE'] || dev.purchase_date || '';
+    const vehNo = vehKey && attrs[vehKey] ? String(attrs[vehKey]).trim() : '';
+    const userId = attrs['Software User ID'] || attrs['USER ID'] || attrs['User ID'] || '';
+    const pass = attrs['Software Password'] || attrs['PASSWORD'] || attrs['Password'] || '123456';
 
-    const msg = `Dear ${custName}, your FuelTracks GPS Device (${devType}) has been installed in vehicle ${vehNo}. IMEI: ${dev.imei_number}. Date: ${date}. Thank you for choosing FuelTracks!`;
-    const url = cleanPhone
-      ? `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(msg)}`
-      : `https://api.whatsapp.com/send?text=${encodeURIComponent(msg)}`;
-    window.open(url, '_blank');
+    const wa = buildCustomerCredentialsWhatsAppMessage({
+      phone,
+      customerName: custName,
+      userId,
+      password: pass,
+      vehicleNumber: vehNo
+    });
+
+    window.open(wa.url, '_blank');
   };
 
   // Handle 1-Click Payment Status Flip
@@ -1024,21 +1037,43 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
       {/* Header & Main Controls */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs">
         <div>
-          <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-            <Boxes className="w-5 h-5 text-blue-600" /> Dynamic Stock Inventory Grid
-          </h2>
-          <p className="text-xs text-slate-500">Live view of all IMEI stock with complete Excel column preservation & dynamic inline editing</p>
+          {isDealer ? (
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-200">
+                  Dealer Partner Stock
+                </span>
+                <span className="text-xs font-medium text-slate-500">
+                  {user?.region ? `${user.region} Region` : 'Branch Stock'}
+                </span>
+              </div>
+              <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                <Boxes className="w-5 h-5 text-blue-600" /> Stock Inventory for {user?.name || 'Dealer'}
+              </h2>
+              <p className="text-xs text-slate-500">
+                Displaying only the <strong className="text-blue-700 font-semibold">{filteredDevices.length} devices</strong> currently in your stock and assigned to your dealership.
+              </p>
+            </div>
+          ) : (
+            <div>
+              <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                <Boxes className="w-5 h-5 text-blue-600" /> Dynamic Stock Inventory Grid
+              </h2>
+              <p className="text-xs text-slate-500">Live view of all IMEI stock with complete Excel column preservation & dynamic inline editing</p>
+            </div>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {/* Dispatch to Dealer Button */}
-          <button
-            onClick={() => setIsBulkAssignModalOpen(true)}
-            className="px-3.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold rounded-xl border border-indigo-200 flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
-            title="Bulk dispatch scanned devices to dealer and update stock place with date"
-          >
-            <Truck className="w-4 h-4 text-indigo-600" /> Dispatch to Dealer
-          </button>
+          {!isDealer && (
+            <button
+              onClick={() => setIsBulkAssignModalOpen(true)}
+              className="px-3.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold rounded-xl border border-indigo-200 flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
+              title="Bulk dispatch scanned devices to dealer and update stock place with date"
+            >
+              <Truck className="w-4 h-4 text-indigo-600" /> Dispatch to Dealer
+            </button>
+          )}
 
           {isSuperAdmin && (
             <button
@@ -1487,10 +1522,15 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
                       <td className="p-3.5 font-mono text-purple-700 font-bold">
                         <div className="flex items-center gap-1.5">
                           <button
-                            onClick={() => onOpenTraceDrawer(dev.imei_number)}
-                            className="hover:underline font-bold"
+                            type="button"
+                            onClick={() => {
+                              setDetailCardImei(dev.imei_number);
+                              setIsDetailCardOpen(true);
+                            }}
+                            className="hover:underline font-bold text-purple-700 hover:text-purple-900 cursor-pointer flex items-center gap-1 text-left"
+                            title="Click to view complete Device Specification Card & Lifecycle History"
                           >
-                            {dev.imei_number}
+                            <span>{dev.imei_number}</span>
                           </button>
                           {isRecentlyUpdated && (
                             <span className="px-1.5 py-0.2 rounded-full bg-emerald-100 text-emerald-800 text-[9px] font-bold uppercase tracking-wider">
@@ -1583,6 +1623,19 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
                           </div>
                         ) : (
                           <>
+                            {/* Device Specification Card Modal Button */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setDetailCardImei(dev.imei_number);
+                                setIsDetailCardOpen(true);
+                              }}
+                              title="View Full Device Specification & Passport Card"
+                              className="p-1.5 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </button>
+
                             {/* WhatsApp Direct Share Button */}
                             <button
                               onClick={() => handleShareWhatsApp(dev)}
@@ -2623,6 +2676,16 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
           </div>
         </div>
       )}
+
+      {/* Device Specification & Lifecycle Passport Card Modal */}
+      <DeviceDetailCardModal
+        isOpen={isDetailCardOpen}
+        onClose={() => {
+          setIsDetailCardOpen(false);
+          setDetailCardImei(null);
+        }}
+        imei={detailCardImei}
+      />
 
     </div>
   );
