@@ -153,6 +153,53 @@ router.get('/audit-logs', (req, res) => {
   }
 });
 
+// GET /api/devices/dealers-summary - Group devices count by Stock Place / Dealer
+router.get('/dealers-summary', (req, res) => {
+  try {
+    const devices = db.prepare('SELECT id, current_status, current_holder_name, additional_attributes, updated_at FROM devices').all();
+    const dealerMap = {};
+
+    for (const d of devices) {
+      let attrs = {};
+      try { attrs = JSON.parse(d.additional_attributes || '{}'); } catch {}
+
+      const placeKey = Object.keys(attrs).find(k => /stock.*place/i.test(k));
+      const place = (placeKey && attrs[placeKey] ? String(attrs[placeKey]).trim() : d.current_holder_name || 'Unassigned').trim();
+
+      const dateKey = Object.keys(attrs).find(k => /stock.*place.*date|date/i.test(k));
+      const dateVal = dateKey && attrs[dateKey] ? String(attrs[dateKey]).trim() : '';
+
+      const vehKey = Object.keys(attrs).find(k => /vehicle|veh_no|reg_no/i.test(k));
+      const isInstalled = Boolean(vehKey && attrs[vehKey]) || d.current_status === 'INSTALLED';
+
+      if (!dealerMap[place]) {
+        dealerMap[place] = {
+          stock_place: place,
+          total_count: 0,
+          installed_count: 0,
+          in_stock_count: 0,
+          latest_date: dateVal
+        };
+      }
+
+      dealerMap[place].total_count++;
+      if (isInstalled) {
+        dealerMap[place].installed_count++;
+      } else {
+        dealerMap[place].in_stock_count++;
+      }
+      if (dateVal && (!dealerMap[place].latest_date || dateVal > dealerMap[place].latest_date)) {
+        dealerMap[place].latest_date = dateVal;
+      }
+    }
+
+    const summaryList = Object.values(dealerMap).sort((a, b) => b.total_count - a.total_count);
+    res.json({ success: true, count: summaryList.length, data: summaryList });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // GET single device by IMEI with complete journey / audit history timeline
 router.get('/:imei', (req, res) => {
   const { imei } = req.params;
@@ -279,6 +326,69 @@ router.put('/:id', (req, res) => {
       data: {
         ...updated,
         additional_attributes: JSON.parse(updated.additional_attributes || '{}')
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// PATCH update payment status & mode in 1 click
+router.patch('/:id/quick-payment', (req, res) => {
+  const { id } = req.params;
+  const { payment_status, payment_mode, amount_received, performed_by } = req.body;
+
+  try {
+    const device = db.prepare('SELECT * FROM devices WHERE id = ?').get(id);
+    if (!device) {
+      return res.status(404).json({ success: false, error: 'Device not found' });
+    }
+
+    let attrs = {};
+    try { attrs = JSON.parse(device.additional_attributes || '{}'); } catch {}
+
+    const isPaid = String(payment_status || '').toUpperCase() === 'RECEIVED';
+    attrs['AMOUNT RECEIVED'] = isPaid ? 'RECEIVED' : 'PENDING';
+    attrs['PAYMENT STATUS'] = isPaid ? 'RECEIVED' : 'PENDING';
+
+    if (isPaid) {
+      if (payment_mode) attrs['AMOUNT RECEIVED BY'] = String(payment_mode).trim();
+      if (amount_received !== undefined && amount_received !== null && !isNaN(Number(amount_received))) {
+        attrs['COST'] = Number(amount_received);
+        attrs['TOTAL COST'] = Number(amount_received);
+      }
+    } else {
+      delete attrs['AMOUNT RECEIVED BY'];
+    }
+
+    const updatedAttrsStr = JSON.stringify(attrs);
+
+    db.prepare(`
+      UPDATE devices
+      SET additional_attributes = ?,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(updatedAttrsStr, id);
+
+    // Record History Audit
+    const remarks = isPaid
+      ? `Payment marked RECEIVED${payment_mode ? ` via ${payment_mode}` : ''}`
+      : 'Payment marked PENDING';
+
+    db.prepare(`
+      INSERT INTO device_history (device_id, imei_number, event_type, event_date, from_holder, to_holder, performed_by, remarks)
+      VALUES (?, ?, 'PAYMENT_UPDATED', datetime('now'), ?, ?, ?, ?)
+    `).run(id, device.imei_number, device.current_holder_name || 'Dealer/Customer', device.current_holder_name || 'Dealer/Customer', performed_by || 'Staff', remarks);
+
+    res.json({
+      success: true,
+      message: 'Payment updated successfully',
+      data: {
+        id: device.id,
+        imei_number: device.imei_number,
+        payment_status: isPaid ? 'RECEIVED' : 'PENDING',
+        payment_mode: attrs['AMOUNT RECEIVED BY'] || '',
+        additional_attributes: attrs
       }
     });
   } catch (err) {
@@ -613,53 +723,6 @@ router.post('/bulk-assign-dealer', (req, res) => {
       missing_imeis: missingImeis,
       message: `Successfully allocated ${updatedDevices.length} device(s) to "${cleanPlace}" on ${cleanDate}`
     });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// GET /api/devices/dealers-summary - Group devices count by Stock Place / Dealer
-router.get('/dealers-summary', (req, res) => {
-  try {
-    const devices = db.prepare('SELECT id, current_status, current_holder_name, additional_attributes, updated_at FROM devices').all();
-    const dealerMap = {};
-
-    for (const d of devices) {
-      let attrs = {};
-      try { attrs = JSON.parse(d.additional_attributes || '{}'); } catch {}
-
-      const placeKey = Object.keys(attrs).find(k => /stock.*place/i.test(k));
-      const place = (placeKey && attrs[placeKey] ? String(attrs[placeKey]).trim() : d.current_holder_name || 'Unassigned').trim();
-
-      const dateKey = Object.keys(attrs).find(k => /stock.*place.*date|date/i.test(k));
-      const dateVal = dateKey && attrs[dateKey] ? String(attrs[dateKey]).trim() : '';
-
-      const vehKey = Object.keys(attrs).find(k => /vehicle|veh_no|reg_no/i.test(k));
-      const isInstalled = Boolean(vehKey && attrs[vehKey]) || d.current_status === 'INSTALLED';
-
-      if (!dealerMap[place]) {
-        dealerMap[place] = {
-          stock_place: place,
-          total_count: 0,
-          installed_count: 0,
-          in_stock_count: 0,
-          latest_date: dateVal
-        };
-      }
-
-      dealerMap[place].total_count++;
-      if (isInstalled) {
-        dealerMap[place].installed_count++;
-      } else {
-        dealerMap[place].in_stock_count++;
-      }
-      if (dateVal && (!dealerMap[place].latest_date || dateVal > dealerMap[place].latest_date)) {
-        dealerMap[place].latest_date = dateVal;
-      }
-    }
-
-    const summaryList = Object.values(dealerMap).sort((a, b) => b.total_count - a.total_count);
-    res.json({ success: true, count: summaryList.length, data: summaryList });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }

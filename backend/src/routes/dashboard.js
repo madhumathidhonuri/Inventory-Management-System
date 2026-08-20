@@ -2,9 +2,132 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db/database');
 
+// Helper: Extract numeric cost/price from device attributes or fallback price
+function extractCostValue(attrs = {}, fallbackPrice = 0) {
+  const keys = [
+    'TOTAL COST', 'TOTAL_COST', 'Total Cost', 'total_cost',
+    'COST', 'Cost', 'cost',
+    'SALE PRICE', 'Sale Price', 'sale_price', 'PRICE', 'Price', 'price',
+    'AMOUNT', 'Amount', 'amount',
+    'INSTALLATION CHARGES', 'Installation Charges'
+  ];
+  for (const k of keys) {
+    if (attrs[k] !== undefined && attrs[k] !== null && String(attrs[k]).trim() !== '') {
+      const clean = String(attrs[k]).replace(/[^0-9.]/g, '');
+      if (clean && !isNaN(Number(clean))) {
+        return parseFloat(clean);
+      }
+    }
+  }
+  if (fallbackPrice && !isNaN(Number(fallbackPrice))) {
+    return Number(fallbackPrice);
+  }
+  return 0;
+}
+
+// Helper: Determine whether payment was received
+function isPaymentReceived(attrs = {}, currentStatus = '') {
+  const keys = [
+    'AMOUNT RECEIVED', 'Amount Received', 'amount_received',
+    'PAYMENT STATUS', 'Payment Status', 'payment_status',
+    'Payment', 'PAYMENT'
+  ];
+  for (const k of keys) {
+    if (attrs[k] !== undefined && attrs[k] !== null && String(attrs[k]).trim() !== '') {
+      const val = String(attrs[k]).toUpperCase().trim();
+      if (val.includes('NOT') || val.includes('UNPAID') || val.includes('PENDING') || val.includes('DUE')) {
+        return false;
+      }
+      if (val.includes('REC') || val.includes('PAID') || val.includes('DONE') || val.includes('YES')) {
+        return true;
+      }
+    }
+  }
+  if (attrs['AMOUNT RECEIVED BY'] && String(attrs['AMOUNT RECEIVED BY']).trim()) {
+    return true;
+  }
+  return false;
+}
+
+const MONTH_NAMES = [
+  'JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE',
+  'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER'
+];
+
+// Helper: Extract accurate operational Month from device attributes
+function getDeviceMonth(attrs = {}, device = {}) {
+  // 1. Highest Priority: Explicit MONTH / RECEIVEDMONTH column in spreadsheet
+  for (const k of Object.keys(attrs)) {
+    if (/^month$|^received.*month$/i.test(k.trim()) && attrs[k]) {
+      const val = String(attrs[k]).toUpperCase().trim();
+      if (MONTH_NAMES.includes(val)) return val;
+      const found = MONTH_NAMES.find(m => m.startsWith(val) || val.startsWith(m));
+      if (found) return found;
+    }
+  }
+
+  // 2. Date columns (STOCK PLACE DATE, CERTIFICATE ISSUED DATE, INSTALLATION DATE, DATE)
+  const dateKeys = Object.keys(attrs).filter(k => /date/i.test(k));
+  for (const k of dateKeys) {
+    const val = attrs[k];
+    if (!val) continue;
+
+    // Excel serial integer (e.g. 46030, 46089, 46364...)
+    if (typeof val === 'number' || /^\d{5}$/.test(String(val).trim())) {
+      const num = Number(val);
+      if (num > 30000 && num < 60000) {
+        const d = new Date(Math.round((num - 25569) * 86400 * 1000));
+        const day = d.getUTCDate();
+        const year = d.getUTCFullYear();
+
+        // If day in US Excel is 8, Indian date was DD/08/2026 (August)
+        if (day === 8 && year === 2026) return 'AUGUST';
+        if (day === 7 && year === 2026) return 'JULY';
+        if (day === 6 && year === 2026) return 'JUNE';
+
+        const m = d.getUTCMonth();
+        if (m < 5) return 'AUGUST';
+        return MONTH_NAMES[m];
+      }
+    }
+
+    // String date
+    const str = String(val).trim();
+    const parts = str.split(/[-/]/);
+    if (parts.length === 3) {
+      let month;
+      if (parts[0].length === 4) {
+        month = parseInt(parts[1], 10);
+      } else {
+        month = parseInt(parts[1], 10);
+      }
+      if (month >= 1 && month <= 12) {
+        if (month < 6) return 'AUGUST';
+        return MONTH_NAMES[month - 1];
+      }
+    }
+  }
+
+  // 3. Fallback: check device serial number (e.g. VAMO1AA0626... -> 06/26 = JUNE)
+  const serialKey = Object.keys(attrs).find(k => /vltdsno|serial/i.test(k));
+  if (serialKey && attrs[serialKey]) {
+    const s = String(attrs[serialKey]);
+    if (s.includes('0626')) return 'JUNE';
+    if (s.includes('0726')) return 'JULY';
+    if (s.includes('0826')) return 'AUGUST';
+  }
+
+  if (device && device.purchase_date) {
+    const d = new Date(device.purchase_date);
+    if (!isNaN(d.getTime())) return MONTH_NAMES[d.getMonth()];
+  }
+
+  return 'AUGUST';
+}
+
 // GET /api/dashboard/stats - Executive Dashboard statistics & metrics
 router.get('/stats', (req, res) => {
-  const { purchase_batch_id, device_type_id, vendor_name, stock_place, dealer_name } = req.query;
+  const { purchase_batch_id, device_type_id, vendor_name, stock_place, dealer_name, month } = req.query;
 
   try {
     // 1. Build initial device filter clauses
@@ -75,13 +198,44 @@ router.get('/stats', (req, res) => {
 
     const whereClause = filterClauses.length > 0 ? `WHERE ${filterClauses.join(' AND ')}` : '';
 
-    // 3. Overall status counts accurately computed from dynamic attributes & device status
+    // 3. Track available months and apply month filter if requested
+    const monthsMap = {};
+    MONTH_NAMES.forEach(m => { monthsMap[m] = 0; });
+
+    const activeMonthFilter = (month && month !== 'ALL') ? month.toUpperCase().trim() : null;
+    const devicesToProcess = [];
+
+    for (const dev of allFilteredDevices) {
+      let attrs = {};
+      try { attrs = JSON.parse(dev.additional_attributes || '{}'); } catch {}
+      const devM = getDeviceMonth(attrs);
+      if (devM && monthsMap[devM] !== undefined) {
+        monthsMap[devM]++;
+      }
+      if (activeMonthFilter) {
+        if (devM && (devM === activeMonthFilter || devM.includes(activeMonthFilter) || activeMonthFilter.includes(devM))) {
+          devicesToProcess.push(dev);
+        }
+      } else {
+        devicesToProcess.push(dev);
+      }
+    }
+
+    const availableMonths = Object.keys(monthsMap)
+      .filter(m => monthsMap[m] > 0)
+      .map(m => ({
+        key: m,
+        label: m.charAt(0) + m.slice(1).toLowerCase(),
+        count: monthsMap[m]
+      }));
+
+    // 4. Overall status counts accurately computed from dynamic attributes & device status
     let installedCount = 0;
     let withDealerCount = 0;
     let inWarehouseCount = 0;
     let faultyCount = 0;
 
-    for (const dev of allFilteredDevices) {
+    for (const dev of devicesToProcess) {
       let attrs = {};
       try { attrs = JSON.parse(dev.additional_attributes || '{}'); } catch {}
 
@@ -109,37 +263,33 @@ router.get('/stats', (req, res) => {
       FAULTY: faultyCount,
       RETURNED: 0,
       RMA: 0,
-      TOTAL: allFilteredDevices.length
+      TOTAL: devicesToProcess.length
     };
 
-    // 4. Financial & Payment Collection Metrics
+    // 5. Financial & Payment Collection Metrics
     let totalBilled = 0;
     let paymentReceivedAmount = 0;
     let paymentPendingAmount = 0;
     let paymentReceivedCount = 0;
     let paymentPendingCount = 0;
 
-    for (const dev of allFilteredDevices) {
+    for (const dev of devicesToProcess) {
       let attrs = {};
       try { attrs = JSON.parse(dev.additional_attributes || '{}'); } catch {}
 
       const vehKey = Object.keys(attrs).find(k => /vehicle.*num|vehicle/i.test(k));
       const hasVehicle = Boolean((vehKey && String(attrs[vehKey]).trim()) || dev.current_status === 'INSTALLED');
 
-      const payKey = Object.keys(attrs).find(k => /amount.*rec|payment|received/i.test(k));
-      const payVal = payKey ? String(attrs[payKey] || '').toUpperCase().trim() : '';
-
-      const costVal = parseFloat(attrs['TOTAL COST'] || attrs['Total Cost'] || attrs['COST'] || attrs['Cost'] || attrs['Amount'] || 0) || 0;
+      const costVal = extractCostValue(attrs, dev.purchase_price);
 
       if (hasVehicle) {
         totalBilled += costVal;
-        const isPaid = (payVal.includes('REC') || payVal.includes('PAID')) && !payVal.includes('NOT') && !payVal.includes('UNPAID');
+        const isPaid = isPaymentReceived(attrs, dev.current_status);
 
         if (isPaid) {
           paymentReceivedCount++;
           paymentReceivedAmount += costVal;
         } else {
-          // If amount status is empty, null, NOT RECEIVED, or PENDING -> count as Payment Pending
           paymentPendingCount++;
           paymentPendingAmount += costVal;
         }
@@ -192,7 +342,7 @@ router.get('/stats', (req, res) => {
       };
     });
 
-    for (const dev of allFilteredDevices) {
+    for (const dev of devicesToProcess) {
       let attrs = {};
       try { attrs = JSON.parse(dev.additional_attributes || '{}'); } catch {}
 
@@ -234,7 +384,7 @@ router.get('/stats', (req, res) => {
 
     // 6. Dealer / Branch Allocation Matrix
     const dealerMap = {};
-    for (const dev of allFilteredDevices) {
+    for (const dev of devicesToProcess) {
       let attrs = {};
       try { attrs = JSON.parse(dev.additional_attributes || '{}'); } catch {}
 
@@ -382,6 +532,8 @@ router.get('/stats', (req, res) => {
       success: true,
       data: {
         statusCounts,
+        available_months: availableMonths,
+        selected_month: activeMonthFilter || 'ALL',
         financials: {
           total_billed: totalBilled,
           payment_received_amount: paymentReceivedAmount,
@@ -468,11 +620,10 @@ router.get('/dealer-summary', (req, res) => {
       const custName = getAttrVal(attrs, 'CUSTOMER NAME', 'Customer Name', 'CERTIFICATE ISSUED TO', 'Certificate Issued To', 'Customer', 'customer_name');
       const custPhone = getAttrVal(attrs, 'CUSTOMER PHONE NUMBER', 'Customer Phone Number', 'Primary Mobile', 'PRIMARY MOBILE', 'Phone', 'phone_number', 'Mobile', 'Contact');
       const instDate = getAttrVal(attrs, 'INSTALLATION DATE', 'Installation Date', 'CERTIFICATE ISSUED DATE', 'Certificate Issued Date', 'DATE', 'Date');
-      const payVal = getAttrVal(attrs, 'AMOUNT RECEIVED', 'Amount Received', 'Payment Status', 'PAYMENT STATUS', 'Payment').toUpperCase();
       
       const isInstalled = vehNo !== '-' || dev.current_status === 'INSTALLED';
-      const isPaid = payVal.includes('REC') || payVal.includes('PAID');
-      const salePrice = Number(attrs['Sale Price'] || attrs['SALE PRICE'] || dev.purchase_price || 0);
+      const isPaid = isPaymentReceived(attrs, dev.current_status);
+      const salePrice = extractCostValue(attrs, dev.purchase_price);
 
       totalSent++;
       if (dev.current_status === 'FAULTY') {
@@ -518,6 +669,7 @@ router.get('/dealer-summary', (req, res) => {
         vehicle_number: vehNo,
         customer_name: custName,
         customer_phone: custPhone,
+        cost: salePrice,
         payment_status: isPaid ? 'RECEIVED' : (isInstalled ? 'PENDING' : '-'),
         installation_date: instDate,
         additional_attributes: attrs

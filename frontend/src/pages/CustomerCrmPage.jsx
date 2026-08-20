@@ -20,6 +20,9 @@ import {
   X
 } from 'lucide-react';
 import { fetchCustomers, fetchCustomerById, updateCustomer, deleteCustomer } from '../services/api';
+import FitmentReceiptModal from '../components/FitmentReceiptModal';
+import ConsolidatedReminderModal from '../components/ConsolidatedReminderModal';
+import { buildPaymentDueReminderWhatsAppMessage } from '../utils/whatsapp';
 
 export default function CustomerCrmPage({ onOpenTraceDrawer }) {
   const [customers, setCustomers] = useState([]);
@@ -28,6 +31,8 @@ export default function CustomerCrmPage({ onOpenTraceDrawer }) {
   const [selectedCustomerId, setSelectedCustomerId] = useState(null);
   const [selectedCustomerData, setSelectedCustomerData] = useState(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  const [selectedReceiptDevice, setSelectedReceiptDevice] = useState(null);
+  const [consolidatedModalData, setConsolidatedModalData] = useState(null);
 
   // Edit Customer Modal State
   const [editingCustomer, setEditingCustomer] = useState(null);
@@ -336,6 +341,68 @@ export default function CustomerCrmPage({ onOpenTraceDrawer }) {
                 </div>
               </div>
 
+              {/* Consolidated Fleet Payment Reminder & Confirmation Action Hub */}
+              {(() => {
+                const pendingList = (selectedCustomerData.installations || []).filter(i => {
+                  const s = String(i.payment_status || '').toUpperCase();
+                  return !s.includes('REC') && !s.includes('PAID');
+                });
+                const sumPending = pendingList.reduce((acc, i) => acc + (parseFloat(i.sale_price) || 4956), 0);
+
+                return (
+                  <div className="p-4 bg-linear-to-r from-amber-500/10 via-amber-500/5 to-transparent border border-amber-300 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
+                    <div className="space-y-0.5">
+                      <div className="flex items-center gap-2 text-amber-950 font-bold text-xs">
+                        <span className="text-base">🔔</span>
+                        <span>
+                          {pendingList.length > 0
+                            ? `Payment Due on ${pendingList.length} Vehicle(s) — Total: ₹${sumPending.toLocaleString('en-IN')}`
+                            : 'All Fleet Vehicles Paid & Active'}
+                        </span>
+                        {pendingList.length > 0 && (
+                          <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-200 font-mono font-bold text-[10px]">
+                            {pendingList.length} Pending
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-amber-800">
+                        {pendingList.length > 0
+                          ? 'Send 1 single WhatsApp message with itemized vehicle list, Base Cost & GST breakdown.'
+                          : 'Send 1-Click consolidated payment receipt & compliance certificate confirmation.'}
+                      </p>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      {pendingList.length > 0 && (
+                        <button
+                          onClick={() => setConsolidatedModalData({
+                            customerName: selectedCustomerData.customer.name,
+                            phone: selectedCustomerData.customer.phone_number,
+                            vehicles: pendingList,
+                            mode: 'REMINDER'
+                          })}
+                          className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
+                        >
+                          <span>🔔 1-Click Fleet Due Reminder</span>
+                        </button>
+                      )}
+
+                      <button
+                        onClick={() => setConsolidatedModalData({
+                          customerName: selectedCustomerData.customer.name,
+                          phone: selectedCustomerData.customer.phone_number,
+                          vehicles: selectedCustomerData.installations,
+                          mode: 'CONFIRMATION'
+                        })}
+                        className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
+                      >
+                        <span>🧾 Payment Confirmation</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* Vehicle Fleet Cards */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
@@ -374,7 +441,7 @@ export default function CustomerCrmPage({ onOpenTraceDrawer }) {
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-3 self-end sm:self-auto">
+                          <div className="flex items-center gap-2 self-end sm:self-auto">
                             <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
                               isPaid ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'
                             }`}>
@@ -385,6 +452,26 @@ export default function CustomerCrmPage({ onOpenTraceDrawer }) {
                               <div className="text-slate-900 font-bold">₹{inst.sale_price || 0}</div>
                             </div>
 
+                            <button
+                              type="button"
+                              onClick={() => setSelectedReceiptDevice({
+                                imei_number: inst.imei_number,
+                                device_type_name: inst.device_type_name,
+                                vehicle_number: inst.vehicle_number,
+                                customer_name: selectedCustomerData.customer.name,
+                                customer_phone: selectedCustomerData.customer.phone_number,
+                                cost: inst.sale_price,
+                                payment_status: inst.payment_status || 'RECEIVED',
+                                installation_date: inst.installation_date,
+                                software_user_id: selectedCustomerData.customer.software_user_id,
+                                software_password: selectedCustomerData.customer.software_password
+                              })}
+                              className="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-xl text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                              title="Generate Official AIS-140 Fitment Slip & Payment Receipt"
+                            >
+                              <span>🧾 Receipt</span>
+                            </button>
+
                             <a
                               href={`https://api.whatsapp.com/send?phone=${String(selectedCustomerData.customer.phone_number).replace(/[^0-9]/g, '')}&text=${encodeURIComponent(
                                 `Dear ${selectedCustomerData.customer.name}, your GPS device (${inst.device_type_name}) is active in vehicle *${inst.vehicle_number}*.\n\nIMEI: ${inst.imei_number}\nDate: ${inst.installation_date}\nThank you!`
@@ -392,9 +479,9 @@ export default function CustomerCrmPage({ onOpenTraceDrawer }) {
                               target="_blank"
                               rel="noopener noreferrer"
                               title="Share vehicle installation note on WhatsApp"
-                              className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-xl text-xs font-bold flex items-center gap-1 transition-colors"
+                              className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-xl text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
                             >
-                              <span>💬</span> Share
+                              <span>💬 Share</span>
                             </a>
                           </div>
                         </div>
@@ -549,6 +636,24 @@ export default function CustomerCrmPage({ onOpenTraceDrawer }) {
           </div>
         </div>
       )}
+
+      {/* Official AIS-140 Fitment Slip & Payment Receipt Modal */}
+      <FitmentReceiptModal
+        isOpen={Boolean(selectedReceiptDevice)}
+        onClose={() => setSelectedReceiptDevice(null)}
+        deviceData={selectedReceiptDevice}
+      />
+
+      {/* Consolidated Fleet Payment Reminder & Confirmation Modal */}
+      <ConsolidatedReminderModal
+        isOpen={Boolean(consolidatedModalData)}
+        onClose={() => setConsolidatedModalData(null)}
+        initialCustomerName={consolidatedModalData?.customerName || ''}
+        initialPhone={consolidatedModalData?.phone || ''}
+        initialVehicles={consolidatedModalData?.vehicles || []}
+        initialMode={consolidatedModalData?.mode || 'REMINDER'}
+        stockPlace="FuelTracks Central"
+      />
 
     </div>
   );

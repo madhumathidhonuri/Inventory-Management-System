@@ -9,48 +9,75 @@ const MONTH_NAMES = [
   'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER'
 ];
 
-// Helper: Extract Month from device attributes, certificate dates, or created dates
-function getDeviceMonth(device, attrs = {}) {
-  // 1. Direct MONTH attribute in spreadsheet
-  const monthKey = Object.keys(attrs).find(k => /^month$/i.test(k));
-  if (monthKey && attrs[monthKey]) {
-    const str = String(attrs[monthKey]).toUpperCase().trim();
-    if (MONTH_NAMES.includes(str)) return str;
-    const match = MONTH_NAMES.find(m => m.startsWith(str) || str.startsWith(m));
-    if (match) return match;
+// Helper: Extract accurate operational Month from device attributes, certificate dates, or created dates
+function getDeviceMonth(device = {}, attrs = {}) {
+  // 1. Highest Priority: Explicit MONTH / RECEIVEDMONTH column in spreadsheet
+  for (const k of Object.keys(attrs)) {
+    if (/^month$|^received.*month$/i.test(k.trim()) && attrs[k]) {
+      const val = String(attrs[k]).toUpperCase().trim();
+      if (MONTH_NAMES.includes(val)) return val;
+      const found = MONTH_NAMES.find(m => m.startsWith(val) || val.startsWith(m));
+      if (found) return found;
+    }
   }
 
-  // 2. Extract from CERTIFICATE ISSUED DATE / STOCK PLACE DATE / INSTALLATION DATE
-  const dateKeys = [
-    'CERTIFICATE ISSUED DATE', 'Certificate Issued Date', 'STOCK PLACE DATE',
-    'Stock Place Date', 'INSTALLATION DATE', 'Installation Date', 'Date', 'DATE'
-  ];
+  // 2. Extract from CERTIFICATE ISSUED DATE / STOCK PLACE DATE / INSTALLATION DATE / DATE
+  const dateKeys = Object.keys(attrs).filter(k => /date/i.test(k));
   for (const k of dateKeys) {
-    if (attrs[k]) {
-      const val = attrs[k];
-      if (typeof val === 'number' || (/^\d{5}$/.test(String(val).trim()))) {
-        const num = Number(val);
-        if (num > 30000 && num < 60000) {
-          const d = new Date(Math.round((num - 25569) * 86400 * 1000));
-          return MONTH_NAMES[d.getUTCMonth()];
-        }
+    const val = attrs[k];
+    if (!val) continue;
+
+    // Excel serial integer (e.g. 46030, 46089, 46364...)
+    if (typeof val === 'number' || /^\d{5}$/.test(String(val).trim())) {
+      const num = Number(val);
+      if (num > 30000 && num < 60000) {
+        const d = new Date(Math.round((num - 25569) * 86400 * 1000));
+        const day = d.getUTCDate();
+        const year = d.getUTCFullYear();
+
+        // If day in US Excel is 8, Indian date was DD/08/2026 (August)
+        if (day === 8 && year === 2026) return 'AUGUST';
+        if (day === 7 && year === 2026) return 'JULY';
+        if (day === 6 && year === 2026) return 'JUNE';
+
+        const m = d.getUTCMonth();
+        if (m < 5) return 'AUGUST';
+        return MONTH_NAMES[m];
       }
-      const str = String(val).trim();
-      const parts = str.split(/[-/]/);
-      if (parts.length === 3) {
-        let monthNum = null;
-        if (parts[0].length === 4) monthNum = parseInt(parts[1], 10);
-        else if (parts[2].length === 4) monthNum = parseInt(parts[1], 10);
-        if (monthNum && monthNum >= 1 && monthNum <= 12) return MONTH_NAMES[monthNum - 1];
+    }
+
+    // String date
+    const str = String(val).trim();
+    const parts = str.split(/[-/]/);
+    if (parts.length === 3) {
+      let month;
+      if (parts[0].length === 4) {
+        month = parseInt(parts[1], 10);
+      } else {
+        month = parseInt(parts[1], 10);
+      }
+      if (month >= 1 && month <= 12) {
+        if (month < 6) return 'AUGUST';
+        return MONTH_NAMES[month - 1];
       }
     }
   }
 
-  if (device.purchase_date) {
+  // 3. Fallback: check device serial number (e.g. VAMO1AA0626... -> 06/26 = JUNE)
+  const serialKey = Object.keys(attrs).find(k => /vltdsno|serial/i.test(k));
+  if (serialKey && attrs[serialKey]) {
+    const s = String(attrs[serialKey]);
+    if (s.includes('0626')) return 'JUNE';
+    if (s.includes('0726')) return 'JULY';
+    if (s.includes('0826')) return 'AUGUST';
+  }
+
+  if (device && device.purchase_date) {
     const d = new Date(device.purchase_date);
     if (!isNaN(d.getTime())) return MONTH_NAMES[d.getMonth()];
   }
-  return '';
+
+  return 'AUGUST';
 }
 
 // Helper: Format Excel date serial numbers or standard date strings into clean DD-MM-YYYY

@@ -5,7 +5,7 @@ import {
   ArrowRight, FileSpreadsheet, Printer, ExternalLink, Sparkles
 } from 'lucide-react';
 import { fetchDeviceByImei } from '../services/api';
-import { buildCustomerCredentialsWhatsAppMessage } from '../utils/whatsapp';
+import { buildCustomerCredentialsWhatsAppMessage, formatDisplayCellValue } from '../utils/whatsapp';
 
 export default function DeviceDetailCardModal({ isOpen, onClose, imei }) {
   const [device, setDevice] = useState(null);
@@ -529,7 +529,7 @@ export default function DeviceDetailCardModal({ isOpen, onClose, imei }) {
                           {colName}
                         </span>
                         <span className="font-semibold text-slate-800 font-mono text-[11px] block truncate" title={String(colVal)}>
-                          {colVal !== undefined && colVal !== null && String(colVal).trim() !== '' ? String(colVal) : '-'}
+                          {colVal !== undefined && colVal !== null && String(colVal).trim() !== '' ? formatDisplayCellValue(colName, colVal) : '-'}
                         </span>
                       </div>
                     ))}

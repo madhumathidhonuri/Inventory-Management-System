@@ -2,10 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { 
   X, Store, MapPin, Phone, Mail, Boxes, Wrench, Clock, CheckCircle2, 
   AlertCircle, ChevronRight, Search, Download, ExternalLink, QrCode, 
-  CreditCard, ArrowRight, Truck, RefreshCw, Send
+  CreditCard, ArrowRight, Truck, RefreshCw, Send, Check, Receipt
 } from 'lucide-react';
-import { fetchDealerSummary } from '../services/api';
-import { buildCustomerCredentialsWhatsAppMessage } from '../utils/whatsapp';
+import { fetchDealerSummary, updateQuickPayment } from '../services/api';
+import { buildCustomerCredentialsWhatsAppMessage, buildPaymentDueReminderWhatsAppMessage } from '../utils/whatsapp';
+import FitmentReceiptModal from './FitmentReceiptModal';
+import ConsolidatedReminderModal from './ConsolidatedReminderModal';
 
 export default function DealerDetailModal({ isOpen, onClose, dealerName, onOpenDeviceCard }) {
   const [data, setData] = useState(null);
@@ -14,6 +16,10 @@ export default function DealerDetailModal({ isOpen, onClose, dealerName, onOpenD
   const [activeTab, setActiveTab] = useState('devices'); // 'devices' | 'models' | 'dispatches'
   const [statusFilter, setStatusFilter] = useState('ALL'); // 'ALL' | 'WITH_DEALER' | 'INSTALLED'
   const [searchQuery, setSearchQuery] = useState('');
+  const [activePaymentMenuId, setActivePaymentMenuId] = useState(null);
+  const [selectedReceiptDevice, setSelectedReceiptDevice] = useState(null);
+  const [updatingPaymentId, setUpdatingPaymentId] = useState(null);
+  const [consolidatedModalData, setConsolidatedModalData] = useState(null);
 
   useEffect(() => {
     if (isOpen && dealerName) {
@@ -82,7 +88,7 @@ export default function DealerDetailModal({ isOpen, onClose, dealerName, onOpenD
 
   const handleExportCsv = () => {
     if (!devices || devices.length === 0) return;
-    const headers = ['IMEI Number', 'Model', 'Status', 'Vehicle Number', 'Customer Name', 'Phone', 'Payment Status', 'Installation Date'];
+    const headers = ['IMEI Number', 'Model', 'Status', 'Vehicle Number', 'Customer Name', 'Phone', 'Payment Status', 'Amount / Cost', 'Installation Date'];
     const rows = devices.map(d => [
       `"${d.imei_number}"`,
       `"${d.device_type_name || ''}"`,
@@ -91,6 +97,7 @@ export default function DealerDetailModal({ isOpen, onClose, dealerName, onOpenD
       `"${extractCustName(d)}"`,
       `"${extractCustPhone(d)}"`,
       `"${d.payment_status || '-'}"`,
+      `"${d.cost ? `₹${d.cost}` : '-'}"`,
       `"${d.installation_date || '-'}"`
     ]);
 
@@ -102,6 +109,57 @@ export default function DealerDetailModal({ isOpen, onClose, dealerName, onOpenD
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  const handleQuickPayment = async (devId, status, mode = '') => {
+    setUpdatingPaymentId(devId);
+    try {
+      const res = await updateQuickPayment(devId, {
+        payment_status: status,
+        payment_mode: mode
+      });
+      if (res.success) {
+        await loadSummary(dealerName);
+      }
+    } catch (err) {
+      alert(`Failed to update payment: ${err.message}`);
+    } finally {
+      setUpdatingPaymentId(null);
+      setActivePaymentMenuId(null);
+    }
+  };
+
+  const handleSendPaymentReminder = (device) => {
+    const custPhone = extractCustPhone(device);
+    const custName = extractCustName(device);
+    const cleanDigits = String(custPhone || '').replace(/[^0-9]/g, '');
+    const valid10Phone = cleanDigits.length >= 10 ? cleanDigits.slice(-10) : '';
+    
+    let listToRemind = [device];
+
+    // If device has customer phone number, group ALL other pending devices matching the EXACT SAME PHONE NUMBER
+    if (valid10Phone) {
+      const samePhonePending = devices.filter(d => {
+        const isPaid = String(d.payment_status || '').toUpperCase().includes('REC');
+        if (isPaid) return false;
+        const dPhone = extractCustPhone(d);
+        const dDigits = String(dPhone || '').replace(/[^0-9]/g, '');
+        const d10 = dDigits.length >= 10 ? dDigits.slice(-10) : '';
+        return d10 === valid10Phone;
+      });
+
+      if (samePhonePending.length > 0) {
+        listToRemind = samePhonePending;
+      }
+    }
+
+    setConsolidatedModalData({
+      customerName: custName !== 'Fuelview' && custName !== 'Customer' ? custName : (valid10Phone ? `Customer (${valid10Phone})` : 'Customer'),
+      phone: valid10Phone || custPhone || '',
+      vehicles: listToRemind,
+      mode: 'REMINDER',
+      stockPlace: dealerName
+    });
   };
 
   const handleWhatsAppDealer = () => {
@@ -403,27 +461,113 @@ export default function DealerDetailModal({ isOpen, onClose, dealerName, onOpenD
                                   <div className="text-[10px] text-slate-400 font-mono">{extractCustPhone(d)}</div>
                                 </td>
 
-                                <td className="p-3">
-                                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                                    d.payment_status === 'RECEIVED'
-                                      ? 'bg-emerald-100 text-emerald-800'
-                                      : d.payment_status === 'PENDING'
-                                      ? 'bg-amber-100 text-amber-800'
-                                      : 'text-slate-400'
-                                  }`}>
-                                    {d.payment_status}
-                                  </span>
+                                <td className="p-3 relative">
+                                  <div className="flex flex-col gap-1 items-start">
+                                    <div className="flex items-center gap-1.5">
+                                      <button
+                                        type="button"
+                                        onClick={() => setActivePaymentMenuId(activePaymentMenuId === d.id ? null : d.id)}
+                                        className={`px-2 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer border ${
+                                          d.payment_status === 'RECEIVED'
+                                            ? 'bg-emerald-100 text-emerald-800 border-emerald-300 hover:bg-emerald-200'
+                                            : d.payment_status === 'PENDING'
+                                            ? 'bg-amber-100 text-amber-900 border-amber-300 hover:bg-amber-200'
+                                            : 'bg-slate-100 text-slate-600 border-slate-200'
+                                        }`}
+                                        title="Click to toggle or record payment mode"
+                                      >
+                                        {updatingPaymentId === d.id ? (
+                                          <RefreshCw className="w-2.5 h-2.5 animate-spin" />
+                                        ) : d.payment_status === 'RECEIVED' ? (
+                                          <Check className="w-2.5 h-2.5" />
+                                        ) : (
+                                          <Clock className="w-2.5 h-2.5" />
+                                        )}
+                                        <span>{d.payment_status}</span>
+                                      </button>
+
+                                      {/* WhatsApp payment due reminder for pending units */}
+                                      {d.payment_status !== 'RECEIVED' && extractCustPhone(d) !== '-' && (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleSendPaymentReminder(d)}
+                                          className="p-1 rounded-md bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[10px] font-bold border border-emerald-200 transition-colors cursor-pointer flex items-center gap-0.5"
+                                          title="Send Payment Due Reminder on WhatsApp"
+                                        >
+                                          <span>💬 Remind</span>
+                                        </button>
+                                      )}
+                                    </div>
+
+                                    {d.cost > 0 && (
+                                      <span className="text-[11px] font-mono font-semibold text-slate-700">
+                                        ₹{d.cost.toLocaleString('en-IN')}
+                                      </span>
+                                    )}
+
+                                    {/* Quick Payment Status Popover */}
+                                    {activePaymentMenuId === d.id && (
+                                      <div className="absolute left-0 top-12 z-30 w-52 bg-white border border-slate-200 rounded-xl shadow-xl p-1.5 space-y-1 animate-in fade-in duration-150">
+                                        <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400 px-2 py-1">
+                                          Update Payment Status
+                                        </div>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleQuickPayment(d.id, 'RECEIVED', 'PhonePe / GPay')}
+                                          className="w-full text-left px-2 py-1.5 rounded-lg text-xs font-semibold text-emerald-800 hover:bg-emerald-50 flex items-center justify-between cursor-pointer"
+                                        >
+                                          <span>✅ Paid (PhonePe / GPay)</span>
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleQuickPayment(d.id, 'RECEIVED', 'Bank Transfer')}
+                                          className="w-full text-left px-2 py-1.5 rounded-lg text-xs font-semibold text-emerald-800 hover:bg-emerald-50 flex items-center justify-between cursor-pointer"
+                                        >
+                                          <span>🏦 Paid (Bank Transfer)</span>
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleQuickPayment(d.id, 'RECEIVED', 'Cash')}
+                                          className="w-full text-left px-2 py-1.5 rounded-lg text-xs font-semibold text-emerald-800 hover:bg-emerald-50 flex items-center justify-between cursor-pointer"
+                                        >
+                                          <span>💵 Paid (Cash)</span>
+                                        </button>
+                                        <div className="border-t border-slate-100 my-0.5" />
+                                        <button
+                                          type="button"
+                                          onClick={() => handleQuickPayment(d.id, 'PENDING', '')}
+                                          className="w-full text-left px-2 py-1.5 rounded-lg text-xs font-semibold text-amber-800 hover:bg-amber-50 flex items-center justify-between cursor-pointer"
+                                        >
+                                          <span>⏳ Mark Pending</span>
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
                                 </td>
 
                                 <td className="p-3 text-right">
-                                  <button
-                                    onClick={() => onOpenDeviceCard && onOpenDeviceCard(d.imei_number)}
-                                    className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold inline-flex items-center gap-1 transition-colors cursor-pointer"
-                                    title="View Device Passport Card"
-                                  >
-                                    <span>Details</span>
-                                    <ChevronRight className="w-3 h-3" />
-                                  </button>
+                                  <div className="flex items-center justify-end gap-1.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => setSelectedReceiptDevice({
+                                        ...d,
+                                        stock_place: dealer.name || dealerName
+                                      })}
+                                      className="px-2 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[11px] font-bold border border-indigo-200 transition-colors cursor-pointer flex items-center gap-1"
+                                      title="Generate Official Fitment & Payment Receipt"
+                                    >
+                                      <span>🧾 Receipt</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => onOpenDeviceCard && onOpenDeviceCard(d.imei_number)}
+                                      className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold inline-flex items-center gap-1 transition-colors cursor-pointer"
+                                      title="View Device Passport Card"
+                                    >
+                                      <span>Details</span>
+                                      <ChevronRight className="w-3 h-3" />
+                                    </button>
+                                  </div>
                                 </td>
                               </tr>
                             ))}
@@ -481,6 +625,24 @@ export default function DealerDetailModal({ isOpen, onClose, dealerName, onOpenD
         </div>
 
       </div>
+
+      {/* Official Fitment Slip & Payment Receipt Modal */}
+      <FitmentReceiptModal
+        isOpen={Boolean(selectedReceiptDevice)}
+        onClose={() => setSelectedReceiptDevice(null)}
+        deviceData={selectedReceiptDevice}
+      />
+
+      {/* Consolidated Multi-Vehicle Payment Reminder & Confirmation Modal */}
+      <ConsolidatedReminderModal
+        isOpen={Boolean(consolidatedModalData)}
+        onClose={() => setConsolidatedModalData(null)}
+        initialCustomerName={consolidatedModalData?.customerName || ''}
+        initialPhone={consolidatedModalData?.phone || ''}
+        initialVehicles={consolidatedModalData?.vehicles || []}
+        initialMode={consolidatedModalData?.mode || 'REMINDER'}
+        stockPlace={dealerName || 'FuelTracks Central'}
+      />
     </div>
   );
 }

@@ -28,7 +28,8 @@ import {
   Car,
   CreditCard,
   Layers,
-  Zap
+  Zap,
+  ChevronDown
 } from 'lucide-react';
 import { useAuth, canUserEditField } from '../context/AuthContext';
 import {
@@ -46,10 +47,14 @@ import {
   fetchDealersSummary,
   bulkAssignDealer,
   bulkTransferDevices,
-  fetchAuditLogs
+  fetchAuditLogs,
+  updateQuickPayment
 } from '../services/api';
 import DeviceDetailCardModal from '../components/DeviceDetailCardModal';
-import { buildCustomerCredentialsWhatsAppMessage } from '../utils/whatsapp';
+import FitmentReceiptModal from '../components/FitmentReceiptModal';
+import ConsolidatedReminderModal from '../components/ConsolidatedReminderModal';
+import GoogleFormIntegrationModal from '../components/GoogleFormIntegrationModal';
+import { buildCustomerCredentialsWhatsAppMessage, buildPaymentDueReminderWhatsAppMessage, formatINR, formatDisplayCellValue } from '../utils/whatsapp';
 
 export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClearInitialFilter }) {
   const { user } = useAuth();
@@ -64,10 +69,16 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
   const [statusFilter, setStatusFilter] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
   const [batchFilter, setBatchFilter] = useState('');
+  const [columnPreset, setColumnPreset] = useState('ALL'); // 'ALL' | 'COMMERCIAL' | 'TECHNICAL' | 'DEALER'
+  const [selectedReceiptDevice, setSelectedReceiptDevice] = useState(null);
+  const [activePaymentMenuId, setActivePaymentMenuId] = useState(null);
+  const [consolidatedReminderModalData, setConsolidatedReminderModalData] = useState(null);
+  const [isDealersExpanded, setIsDealersExpanded] = useState(false);
 
   // Device Detail Specification Card Modal State
   const [detailCardImei, setDetailCardImei] = useState(null);
   const [isDetailCardOpen, setIsDetailCardOpen] = useState(false);
+  const [isGoogleFormModalOpen, setIsGoogleFormModalOpen] = useState(false);
 
   // Multi-Select & Batch Stock Movement State
   const [selectedDeviceIds, setSelectedDeviceIds] = useState(new Set());
@@ -246,6 +257,27 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
 
     return Array.from(keysSet);
   }, [typeFilter, deviceTypes, devices]);
+
+  // Dynamic Column Preset Filtering
+  const displayedColumns = useMemo(() => {
+    if (columnPreset === 'ALL') return customColumns;
+    if (columnPreset === 'COMMERCIAL') {
+      return customColumns.filter(col => 
+        /cost|price|amount|paid|rec|payment|tax|gst|invoice|bill|month|customer|party|vehicle|reg/i.test(col)
+      );
+    }
+    if (columnPreset === 'TECHNICAL') {
+      return customColumns.filter(col => 
+        /sim|iccid|firmware|model|hardware|cert|valid|expiry|box|batch|status/i.test(col)
+      );
+    }
+    if (columnPreset === 'DEALER') {
+      return customColumns.filter(col => 
+        /stock|place|dealer|location|sales|manager|person|state|rto|branch/i.test(col)
+      );
+    }
+    return customColumns;
+  }, [customColumns, columnPreset]);
 
   const activeDeviceTypeId = useMemo(() => {
     if (typeFilter) return parseInt(typeFilter);
@@ -1006,6 +1038,145 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
     }
   };
 
+  // Robust Payment, Customer & GST Extraction across VAMOSYS, VOLTY, TRACKNOW & custom sheets
+  const getDevicePaymentInfo = (dev) => {
+    const attrs = dev.additional_attributes || {};
+    const keys = Object.keys(attrs);
+
+    // 1. Payment status
+    let payVal = '';
+    for (const k of keys) {
+      if (/amount.*rec|payment.*status|^payment$|^status$/i.test(k.trim()) && attrs[k]) {
+        payVal = String(attrs[k]).trim().toUpperCase();
+        break;
+      }
+    }
+    const isPaid = (payVal.includes('REC') || payVal.includes('PAID')) && !payVal.includes('NOT') && !payVal.includes('UNPAID') && !payVal.includes('PENDING');
+
+    // 2. Vehicle number
+    let vehNo = dev.vehicle_number && dev.vehicle_number !== '-' ? String(dev.vehicle_number).trim() : '';
+    if (!vehNo) {
+      for (const k of keys) {
+        if (/vehicle|veh_no|reg_no|veh.*number/i.test(k.trim()) && attrs[k]) {
+          vehNo = String(attrs[k]).trim();
+          break;
+        }
+      }
+    }
+    const isInstalled = Boolean(vehNo) || dev.current_status === 'INSTALLED';
+    const isPending = isInstalled && !isPaid;
+
+    // 3. Customer Phone
+    let phone = '';
+    for (const k of keys) {
+      if (/phone|mobile|contact/i.test(k.trim()) && attrs[k]) {
+        phone = String(attrs[k]).trim();
+        break;
+      }
+    }
+
+    // 4. Customer Name
+    let custName = dev.customer_name && dev.customer_name !== '-' && !/fuelview/i.test(dev.customer_name) ? String(dev.customer_name).trim() : '';
+    if (!custName) {
+      for (const k of keys) {
+        if (/customer.*name|cert.*issued.*to|party.*name/i.test(k.trim()) && attrs[k] && !/fuelview/i.test(String(attrs[k]))) {
+          custName = String(attrs[k]).trim();
+          break;
+        }
+      }
+    }
+    if (!custName) custName = 'Customer';
+
+    // 5. Cost, GST & Total Cost
+    let baseCost = 0;
+    let totalCost = 0;
+    let gst = 0;
+
+    for (const k of keys) {
+      const kTrim = k.trim().toUpperCase();
+      if (/^COST$/i.test(kTrim) && attrs[k]) {
+        const num = parseFloat(String(attrs[k]).replace(/[^0-9.]/g, ''));
+        if (!isNaN(num) && num > 0) baseCost = num;
+      } else if (/^TOTAL.*COST$|^SALE.*PRICE$|^AMOUNT$/i.test(kTrim) && attrs[k]) {
+        const num = parseFloat(String(attrs[k]).replace(/[^0-9.]/g, ''));
+        if (!isNaN(num) && num > 0) totalCost = num;
+      } else if (/^GST$|^GST.*AMOUNT$/i.test(kTrim) && attrs[k]) {
+        const num = parseFloat(String(attrs[k]).replace(/[^0-9.]/g, ''));
+        if (!isNaN(num) && num > 0) gst = num;
+      }
+    }
+
+    if (!gst && totalCost > baseCost && baseCost > 0) {
+      gst = totalCost - baseCost;
+    } else if (!totalCost && baseCost > 0) {
+      totalCost = baseCost + gst;
+    } else if (!baseCost && totalCost > 0) {
+      baseCost = totalCost;
+    }
+
+    if (!totalCost) {
+      totalCost = dev.purchase_price || 4956;
+      baseCost = 4200;
+      gst = 756;
+    }
+
+    // 6. Stock Place
+    let stockPlace = dev.current_holder_name || '';
+    for (const k of keys) {
+      if (/stock.*place|place|location/i.test(k.trim()) && attrs[k]) {
+        stockPlace = String(attrs[k]).trim();
+        break;
+      }
+    }
+
+    return {
+      isPaid,
+      isPending,
+      isInstalled,
+      vehNo,
+      phone,
+      custName,
+      baseCost,
+      gst,
+      totalCost,
+      cost: totalCost,
+      stockPlace,
+      payVal: payVal || (isPaid ? 'RECEIVED' : isInstalled ? 'PENDING' : 'IN_STOCK')
+    };
+  };
+
+  // 1-Click Consolidated Payment Due Reminder Trigger (Grouped strictly by Customer Phone Number)
+  const handleSendReminderForDevice = (dev) => {
+    const info = getDevicePaymentInfo(dev);
+    const cleanDigits = String(info.phone || '').replace(/[^0-9]/g, '');
+    const valid10Phone = cleanDigits.length >= 10 ? cleanDigits.slice(-10) : '';
+
+    let vehiclesToRemind = [dev];
+
+    // If device has customer phone number, group ALL other pending vehicles matching the EXACT SAME PHONE NUMBER
+    if (valid10Phone) {
+      const samePhonePending = devices.filter(d => {
+        const dInfo = getDevicePaymentInfo(d);
+        if (!dInfo.isPending) return false;
+        const dDigits = String(dInfo.phone || '').replace(/[^0-9]/g, '');
+        const d10Phone = dDigits.length >= 10 ? dDigits.slice(-10) : '';
+        return d10Phone === valid10Phone;
+      });
+
+      if (samePhonePending.length > 0) {
+        vehiclesToRemind = samePhonePending;
+      }
+    }
+
+    setConsolidatedReminderModalData({
+      customerName: info.custName !== 'Customer' ? info.custName : (valid10Phone ? `Customer (${valid10Phone})` : 'Customer'),
+      phone: valid10Phone || info.phone || '',
+      vehicles: vehiclesToRemind,
+      mode: 'REMINDER',
+      stockPlace: info.stockPlace
+    });
+  };
+
   // Start Inline Editing for a row
   const handleStartInlineEdit = (dev) => {
     setInlineEditId(dev.id);
@@ -1065,6 +1236,14 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => setIsGoogleFormModalOpen(true)}
+            className="px-3.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-bold rounded-xl border border-emerald-300 flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
+            title="Connect Google Forms & Live Google Sheet Sync for Field Technicians & Dealers"
+          >
+            <span className="text-sm">⚡</span> Google Form Sync
+          </button>
+
           {!isDealer && (
             <button
               onClick={() => setIsBulkAssignModalOpen(true)}
@@ -1150,52 +1329,6 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
           </button>
         )}
       </div>
-
-      {/* Dealer / Stock Place Allocations Summary Bar */}
-      {dealersSummary.length > 0 && (
-        <div className="bg-slate-100/80 p-3 rounded-2xl border border-slate-200 space-y-2">
-          <div className="flex items-center justify-between text-[11px] font-bold text-slate-500 uppercase tracking-wider px-1">
-            <span className="flex items-center gap-1.5 text-indigo-900">
-              <Building className="w-3.5 h-3.5 text-indigo-600" /> Stock Allocations per Dealer / Branch
-            </span>
-            <span className="text-slate-400 font-normal">Click any location pill to filter</span>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-1.5">
-            <button
-              onClick={() => setDealerFilter('')}
-              className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
-                !dealerFilter
-                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
-                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-              }`}
-            >
-              All Locations ({devices.length})
-            </button>
-
-            {dealersSummary.map((d, idx) => (
-              <button
-                key={idx}
-                onClick={() => setDealerFilter(dealerFilter === d.stock_place ? '' : d.stock_place)}
-                className={`px-2.5 py-1 rounded-xl text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 border ${
-                  dealerFilter === d.stock_place
-                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
-                    : 'bg-white text-slate-700 border-slate-200 hover:bg-indigo-50/60'
-                }`}
-                title={`Total: ${d.total_count} | In Stock: ${d.in_stock_count} | Installed: ${d.installed_count} ${d.latest_date ? `| Sent: ${d.latest_date}` : ''}`}
-              >
-                <MapPin className={`w-3 h-3 ${dealerFilter === d.stock_place ? 'text-white' : 'text-indigo-600'}`} />
-                <span className="truncate max-w-[180px]">{d.stock_place}</span>
-                <span className={`px-1.5 py-0.2 rounded-md text-[10px] font-bold ${
-                  dealerFilter === d.stock_place ? 'bg-white/20 text-white' : 'bg-indigo-50 text-indigo-700'
-                }`}>
-                  {d.total_count}
-                </span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* Advanced Filter & Search Toolbar */}
       <div className="glass-panel p-4 rounded-2xl space-y-3 shadow-2xs">
@@ -1428,6 +1561,45 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
         </div>
       )}
 
+      {/* Smart Column Visibility Preset Selector */}
+      <div className="flex flex-wrap items-center justify-between gap-2.5 bg-white p-3 rounded-2xl border border-slate-200 shadow-2xs">
+        <div className="flex items-center gap-2 text-xs font-bold text-slate-800">
+          <Eye className="w-4 h-4 text-purple-600" />
+          <span>Column Visibility Presets:</span>
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5">
+          {[
+            { id: 'ALL', label: 'All Columns', count: customColumns.length },
+            { id: 'COMMERCIAL', label: '💰 Commercial & Billing', desc: 'Costs, Payments, Customers' },
+            { id: 'TECHNICAL', label: '⚙️ Technical & Hardware', desc: 'IMEI, SIM, ICCID, Models' },
+            { id: 'DEALER', label: '🏬 Dealer & Stock Place', desc: 'Locations, Sales, RTO' }
+          ].map(p => {
+            const isSelected = columnPreset === p.id;
+            return (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => setColumnPreset(p.id)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 border ${
+                  isSelected
+                    ? 'bg-purple-600 text-white border-purple-600 shadow-2xs ring-2 ring-purple-200'
+                    : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-purple-50 hover:border-purple-300'
+                }`}
+              >
+                <span>{p.label}</span>
+                {p.count !== undefined && (
+                  <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${
+                    isSelected ? 'bg-purple-700 text-white' : 'bg-slate-200 text-slate-600'
+                  }`}>
+                    {p.count}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       {/* Devices Dynamic Spreadsheet Grid Table */}
       <div className="glass-panel rounded-2xl overflow-hidden">
         {loading ? (
@@ -1458,7 +1630,7 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
                   <th className="p-3.5 font-bold">Device Type</th>
 
                   {/* Excel Sheet Columns */}
-                  {customColumns.map((col) => (
+                  {displayedColumns.map((col) => (
                     <th key={col} className="p-3.5 font-bold border-l border-slate-200/80 bg-slate-100/50 text-slate-800 group">
                       <div className="flex items-center justify-between gap-2">
                         <span>{col}</span>
@@ -1490,10 +1662,9 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
                   const isInlineEditing = inlineEditId === dev.id;
                   const isRecentlyUpdated = highlightImeis.has(dev.imei_number);
                   const isSelected = selectedDeviceIds.has(dev.id);
-                  const attrs = dev.additional_attributes || {};
-                  const payVal = String(attrs['AMOUNT RECEIVED'] || attrs['Amount Received'] || '').toUpperCase();
-                  const isPending = payVal.includes('NOT') || payVal.includes('UNPAID') || payVal.includes('PENDING');
-                  const isPaid = payVal.includes('REC') || payVal.includes('PAID');
+                  const info = getDevicePaymentInfo(dev);
+                  const isPending = info.isPending;
+                  const isPaid = info.isPaid;
 
                   return (
                     <tr
@@ -1544,7 +1715,7 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
                       <td className="p-3.5 text-slate-800 font-medium">{dev.device_type_name}</td>
 
                       {/* Dynamic Custom Attributes Cells */}
-                      {customColumns.map((col) => {
+                      {displayedColumns.map((col) => {
                         const canEditCol = canUserEditField(user, col);
                         const cellVal = isInlineEditing
                           ? (inlineDraftAttrs[col] !== undefined ? inlineDraftAttrs[col] : '')
@@ -1594,7 +1765,7 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
                                 </span>
                               )
                             ) : (
-                              <span>{cellVal}</span>
+                              <span>{formatDisplayCellValue(col, cellVal)}</span>
                             )}
                           </td>
                         );
@@ -1623,6 +1794,36 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
                           </div>
                         ) : (
                           <>
+                            {/* Official Fitment & Payment Receipt */}
+                            <button
+                              type="button"
+                              onClick={() => setSelectedReceiptDevice({
+                                ...dev,
+                                customer_name: info.custName,
+                                customer_phone: info.phone,
+                                vehicle_number: info.vehNo,
+                                cost: info.cost,
+                                payment_status: info.payVal,
+                                stock_place: info.stockPlace
+                              })}
+                              title="Generate Official AIS-140 Fitment Slip & Payment Receipt"
+                              className="p-1.5 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"
+                            >
+                              <span className="text-xs">🧾</span>
+                            </button>
+
+                            {/* 1-Click WhatsApp Payment Due Reminder Button (Universal across VAMO, VOLTY, TRACKNOW) */}
+                            {isPending && (
+                              <button
+                                type="button"
+                                onClick={() => handleSendReminderForDevice(dev)}
+                                title={`Send 1-Click WhatsApp Payment Due Reminder to ${info.custName || 'Customer'}`}
+                                className="p-1.5 text-amber-600 hover:bg-amber-50 rounded-lg transition-colors cursor-pointer"
+                              >
+                                <span className="text-xs">🔔</span>
+                              </button>
+                            )}
+
                             {/* Device Specification Card Modal Button */}
                             <button
                               type="button"
@@ -1636,10 +1837,10 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
                               <Eye className="w-4 h-4" />
                             </button>
 
-                            {/* WhatsApp Direct Share Button */}
+                            {/* WhatsApp Direct Share Credentials */}
                             <button
                               onClick={() => handleShareWhatsApp(dev)}
-                              title="Share Details via WhatsApp"
+                              title="Share GPS Credentials via WhatsApp"
                               className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer inline-flex items-center"
                             >
                               <span className="text-sm">💬</span>
@@ -2677,6 +2878,77 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
         </div>
       )}
 
+      {/* Floating Multi-Select Action Bar with 1-Click Consolidated WhatsApp Reminder */}
+      {selectedDeviceIds.size > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-slate-900 text-white px-5 py-3 rounded-2xl shadow-2xl flex flex-wrap items-center gap-3 border border-slate-700 animate-in slide-in-from-bottom-5 duration-200">
+          <div className="flex items-center gap-2 text-xs font-bold">
+            <span className="w-6 h-6 rounded-full bg-purple-600 text-white flex items-center justify-center font-mono text-[11px]">
+              {selectedDeviceIds.size}
+            </span>
+            <span>Selected</span>
+          </div>
+
+          <div className="h-4 w-px bg-slate-700 hidden sm:block" />
+
+          {/* 1-Click Consolidated WhatsApp Payment Due Reminder */}
+          <button
+            onClick={() => {
+              const selectedList = devices.filter(d => selectedDeviceIds.has(d.id));
+              const firstCust = selectedList[0] ? getDevicePaymentInfo(selectedList[0]) : {};
+              setConsolidatedReminderModalData({
+                customerName: firstCust.custName || 'Customer Fleet',
+                phone: firstCust.phone || '',
+                vehicles: selectedList,
+                mode: 'REMINDER',
+                stockPlace: firstCust.stockPlace || 'FuelTracks Central'
+              });
+            }}
+            className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-black rounded-xl flex items-center gap-1.5 shadow-md transition-all cursor-pointer"
+            title="Send 1 Single Consolidated WhatsApp Payment Reminder for all selected vehicles"
+          >
+            <span>🔔</span>
+            <span>1-Click Fleet Reminder ({selectedDeviceIds.size} Vehs)</span>
+          </button>
+
+          {/* 1-Click Consolidated Payment Confirmation Receipt */}
+          <button
+            onClick={() => {
+              const selectedList = devices.filter(d => selectedDeviceIds.has(d.id));
+              const firstCust = selectedList[0] ? getDevicePaymentInfo(selectedList[0]) : {};
+              setConsolidatedReminderModalData({
+                customerName: firstCust.custName || 'Customer Fleet',
+                phone: firstCust.phone || '',
+                vehicles: selectedList,
+                mode: 'CONFIRMATION',
+                stockPlace: firstCust.stockPlace || 'FuelTracks Central'
+              });
+            }}
+            className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-md transition-all cursor-pointer"
+            title="Send 1 Consolidated Payment Confirmation for all selected vehicles"
+          >
+            <span>🧾</span>
+            <span>Payment Confirmation</span>
+          </button>
+
+          {/* Stock Transfer Button */}
+          <button
+            onClick={() => setIsBulkTransferModalOpen(true)}
+            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl flex items-center gap-1 transition-all cursor-pointer border border-slate-600"
+          >
+            <Building className="w-3.5 h-3.5" /> Transfer Stock
+          </button>
+
+          {/* Clear selection */}
+          <button
+            onClick={() => setSelectedDeviceIds(new Set())}
+            className="p-1.5 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
+            title="Clear Selection"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {/* Device Specification & Lifecycle Passport Card Modal */}
       <DeviceDetailCardModal
         isOpen={isDetailCardOpen}
@@ -2685,6 +2957,34 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
           setDetailCardImei(null);
         }}
         imei={detailCardImei}
+      />
+
+      {/* Official AIS-140 Fitment Slip & Payment Receipt Modal */}
+      <FitmentReceiptModal
+        isOpen={Boolean(selectedReceiptDevice)}
+        onClose={() => setSelectedReceiptDevice(null)}
+        deviceData={selectedReceiptDevice}
+      />
+
+      {/* Consolidated Multi-Vehicle Payment Reminder & Confirmation Modal */}
+      <ConsolidatedReminderModal
+        isOpen={Boolean(consolidatedReminderModalData)}
+        onClose={() => setConsolidatedReminderModalData(null)}
+        initialCustomerName={consolidatedReminderModalData?.customerName || ''}
+        initialPhone={consolidatedReminderModalData?.phone || ''}
+        initialVehicles={consolidatedReminderModalData?.vehicles || []}
+        initialMode={consolidatedReminderModalData?.mode || 'REMINDER'}
+        stockPlace={consolidatedReminderModalData?.stockPlace || 'FuelTracks Central'}
+      />
+
+      {/* Google Forms & Field Technician Live Sync Modal */}
+      <GoogleFormIntegrationModal
+        isOpen={isGoogleFormModalOpen}
+        onClose={() => setIsGoogleFormModalOpen(false)}
+        onRefreshInventory={() => {
+          loadData();
+          loadDealersSummary();
+        }}
       />
 
     </div>

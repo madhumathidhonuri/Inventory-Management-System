@@ -32,6 +32,7 @@ app.use('/api/customers', require('./routes/customers'));
 app.use('/api/dashboard', require('./routes/dashboard'));
 app.use('/api/users', require('./routes/users'));
 app.use('/api/reports', require('./routes/reports'));
+app.use('/api/integrations', require('./routes/integrations'));
 
 // Serve static React frontend bundle in production
 const frontendDistPath = path.join(__dirname, '../../frontend/dist');

@@ -39,6 +39,8 @@ import {
 import { fetchStats, fetchPurchaseBatches, fetchDeviceTypes } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import DealerDetailModal from '../components/DealerDetailModal';
+import FitmentReceiptModal from '../components/FitmentReceiptModal';
+import { buildPaymentDueReminderWhatsAppMessage } from '../utils/whatsapp';
 
 export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
   const { user } = useAuth();
@@ -52,7 +54,9 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
   const [selectedDeviceTypeId, setSelectedDeviceTypeId] = useState('');
   const [selectedBatchId, setSelectedBatchId] = useState('');
   const [locationFilter, setLocationFilter] = useState('');
+  const [selectedMonth, setSelectedMonth] = useState('ALL');
   const [selectedDealerModal, setSelectedDealerModal] = useState(null);
+  const [selectedReceiptDevice, setSelectedReceiptDevice] = useState(null);
 
   // Monthly Payment Excel Export Modal States
   const [isMonthlyExportModalOpen, setIsMonthlyExportModalOpen] = useState(false);
@@ -170,7 +174,7 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
   // Reload stats when filter values change
   useEffect(() => {
     loadData();
-  }, [selectedDeviceTypeId, selectedBatchId, locationFilter]);
+  }, [selectedDeviceTypeId, selectedBatchId, locationFilter, selectedMonth]);
 
   const selectedTypeObj = useMemo(() => {
     if (!selectedDeviceTypeId) return null;
@@ -182,12 +186,13 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
     return batches.find(b => b.id.toString() === selectedBatchId.toString()) || null;
   }, [selectedBatchId, batches]);
 
-  const isFiltered = Boolean(selectedDeviceTypeId || selectedBatchId || locationFilter);
+  const isFiltered = Boolean(selectedDeviceTypeId || selectedBatchId || locationFilter || selectedMonth !== 'ALL');
 
   const handleResetFilters = () => {
     setSelectedDeviceTypeId('');
     setSelectedBatchId('');
     setLocationFilter('');
+    setSelectedMonth('ALL');
   };
 
   const loadData = async () => {
@@ -201,6 +206,7 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
       if (selectedDeviceTypeId) params.device_type_id = selectedDeviceTypeId;
       if (selectedBatchId) params.purchase_batch_id = selectedBatchId;
       if (locationFilter) params.stock_place = locationFilter;
+      if (selectedMonth && selectedMonth !== 'ALL') params.month = selectedMonth;
       const res = await fetchStats(params);
       if (res.success) {
         setStats(res.data);
@@ -410,9 +416,32 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
             })}
           </div>
 
-          {/* Specific Upload List / Excel Batch Dropdown Selector */}
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-600">
+          {/* Clean Month & Upload Batch Dropdowns */}
+          <div className="flex flex-wrap items-center gap-2">
+            
+            {/* 1. Month Filter Dropdown */}
+            <div className={`flex items-center gap-1.5 border rounded-xl px-3 py-1.5 text-xs transition-colors shadow-2xs ${
+              selectedMonth !== 'ALL'
+                ? 'bg-indigo-50 border-indigo-300 text-indigo-900 font-bold'
+                : 'bg-slate-50 border-slate-200 text-slate-700 hover:border-slate-300'
+            }`}>
+              <Calendar className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+              <select
+                value={selectedMonth}
+                onChange={(e) => setSelectedMonth(e.target.value)}
+                className="bg-transparent text-xs font-bold text-slate-800 focus:outline-none cursor-pointer"
+              >
+                <option value="ALL">📅 All Months / All Time</option>
+                {(stats?.available_months || []).map(m => (
+                  <option key={m.key} value={m.key}>
+                    {m.label} ({m.count} records)
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* 2. Specific Upload List / Excel Batch Dropdown */}
+            <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 hover:border-slate-300 rounded-xl px-3 py-1.5 text-xs text-slate-700 shadow-2xs">
               <FileSpreadsheet className="w-3.5 h-3.5 text-slate-500 shrink-0" />
               <select
                 value={selectedBatchId}
@@ -422,9 +451,9 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
                     setSelectedDeviceTypeId('');
                   }
                 }}
-                className="bg-transparent text-xs font-medium text-slate-800 focus:outline-none max-w-[240px] truncate cursor-pointer"
+                className="bg-transparent text-xs font-medium text-slate-800 focus:outline-none max-w-[200px] truncate cursor-pointer"
               >
-                <option value="">Specific Upload Batch / Sheet...</option>
+                <option value="">All Upload Sheets...</option>
                 {batches.map(b => (
                   <option key={b.id} value={b.id}>
                     {b.notes ? `${b.notes} (${b.source_file || 'Excel'})` : b.source_file}
@@ -432,6 +461,7 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
                 ))}
               </select>
             </div>
+
           </div>
         </div>
 
@@ -443,11 +473,12 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
               <span>
                 Viewing Dashboard for:{' '}
                 <strong className="font-bold text-purple-900">
+                  {selectedMonth !== 'ALL' ? `Month of ${selectedMonth}` : ''}
                   {selectedBatchObj
-                    ? `Upload List "${selectedBatchObj.notes || selectedBatchObj.source_file}"`
+                    ? ` (Upload List "${selectedBatchObj.notes || selectedBatchObj.source_file}")`
                     : selectedTypeObj
-                    ? `Device List / Model "${selectedTypeObj.name}"`
-                    : 'Custom Filter'}
+                    ? ` (Device List "${selectedTypeObj.name}")`
+                    : ''}
                 </strong>
                 {locationFilter ? ` at ${locationFilter}` : ''}
               </span>
@@ -943,18 +974,54 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
                         </div>
                       </td>
 
-                      {/* Commercials */}
+                      {/* Commercials & Receipt Action */}
                       <td className="p-3 text-right">
                         <div className="font-bold text-slate-900">
                           {act.cost && act.cost !== '-' ? `₹${act.cost}` : '-'}
                         </div>
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                          String(act.payment_status).toUpperCase().includes('REC') || String(act.payment_status).toUpperCase().includes('PAID')
-                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                            : 'bg-red-50 text-red-700 border border-red-200'
-                        }`}>
-                          {act.payment_status || 'PENDING'}
-                        </span>
+                        <div className="flex items-center justify-end gap-1.5 mt-1">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                            String(act.payment_status).toUpperCase().includes('REC') || String(act.payment_status).toUpperCase().includes('PAID')
+                              ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                              : 'bg-red-50 text-red-700 border border-red-200'
+                          }`}>
+                            {act.payment_status || 'PENDING'}
+                          </span>
+
+                          {(!String(act.payment_status).toUpperCase().includes('REC') && !String(act.payment_status).toUpperCase().includes('PAID')) && (
+                            <button
+                              onClick={() => {
+                                let phone = act.customer_phone || act.phone_number || '';
+                                if (!phone) {
+                                  const inputPhone = prompt(`Customer phone number is not found for vehicle "${act.vehicle_number || act.imei_number}".\n\nPlease enter the customer phone number:`);
+                                  if (!inputPhone) return;
+                                  phone = inputPhone.trim();
+                                }
+                                const { url } = buildPaymentDueReminderWhatsAppMessage({
+                                  phone,
+                                  customerName: act.customer_name || 'Customer',
+                                  vehicleNumber: act.vehicle_number || '',
+                                  amount: act.cost && act.cost !== '-' ? act.cost : 5000,
+                                  imei: act.imei_number,
+                                  stockPlace: act.stock_place || ''
+                                });
+                                window.open(url, '_blank');
+                              }}
+                              className="px-2 py-0.5 rounded-md bg-amber-50 hover:bg-amber-100 text-amber-700 text-[10px] font-bold border border-amber-200 transition-colors cursor-pointer flex items-center gap-1"
+                              title="Send 1-Click WhatsApp Payment Due Reminder"
+                            >
+                              <span>🔔</span> Remind
+                            </button>
+                          )}
+
+                          <button
+                            onClick={() => setSelectedReceiptDevice(act)}
+                            className="px-2 py-0.5 rounded-md bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[10px] font-bold border border-indigo-200 transition-colors cursor-pointer flex items-center gap-1"
+                            title="Generate Official Fitment & Payment Receipt"
+                          >
+                            <span>🧾</span> Receipt
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -993,86 +1060,49 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
 
             <div className="space-y-4">
               
-              {/* 1. Device / List Selector */}
-              <div className="space-y-2">
+              {/* 1. Device List / Batch Filter */}
+              <div className="space-y-1.5">
                 <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
                   <Layers className="w-3.5 h-3.5 text-purple-600" />
-                  <span>1. Select Device List / Model</span>
+                  <span>1. Select Device List / Batch (Optional)</span>
                 </label>
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <button
-                    onClick={() => { setExportTypeId(''); setExportBatchId(''); }}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
-                      !exportTypeId && !exportBatchId
-                        ? 'bg-purple-600 text-white border-purple-600 shadow-2xs'
-                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
-                    }`}
-                  >
-                    All Fleet
-                  </button>
-                  {deviceTypes.map(dt => (
-                    <button
-                      key={dt.id}
-                      onClick={() => { setExportTypeId(dt.id.toString()); setExportBatchId(''); }}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
-                        exportTypeId === dt.id.toString() && !exportBatchId
-                          ? 'bg-purple-600 text-white border-purple-600 shadow-2xs'
-                          : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-purple-50'
-                      }`}
-                    >
-                      {dt.name}
-                    </button>
+                <select
+                  value={exportBatchId}
+                  onChange={(e) => setExportBatchId(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-200"
+                >
+                  <option value="">All Upload Lists & Master Batches</option>
+                  {batches.map(b => (
+                    <option key={b.id} value={b.id}>
+                      {b.notes ? `${b.notes} (${b.source_file})` : b.source_file}
+                    </option>
                   ))}
-                </div>
-
-                {batches.length > 0 && (
-                  <div className="pt-1">
-                    <select
-                      value={exportBatchId}
-                      onChange={(e) => {
-                        setExportBatchId(e.target.value);
-                        if (e.target.value) setExportTypeId('');
-                      }}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-700 focus:outline-none cursor-pointer"
-                    >
-                      <option value="">Or filter by specific upload batch...</option>
-                      {batches.map(b => (
-                        <option key={b.id} value={b.id}>
-                          {b.notes ? `${b.notes} (${b.source_file || 'Excel'})` : b.source_file}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
+                </select>
               </div>
 
               {/* 2. Month Selector */}
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
-                  <span className="flex items-center gap-1.5">
-                    <Calendar className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>2. Select Payment Month</span>
-                  </span>
-                  <span className="text-[11px] font-normal text-slate-400">e.g. August, July, June</span>
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                  <Calendar className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>2. Select Payment Month</span>
                 </label>
-                <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5">
+                <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
                   {MONTHS_LIST.map((m) => {
                     const isSelected = exportMonth === m.key;
                     return (
                       <button
                         key={m.key}
+                        type="button"
                         onClick={() => setExportMonth(m.key)}
-                        className={`p-2 rounded-xl text-xs font-bold transition-all flex flex-col items-center justify-center border cursor-pointer ${
+                        className={`p-2 rounded-xl text-xs font-bold border text-center transition-all cursor-pointer ${
                           isSelected
-                            ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs ring-2 ring-emerald-200'
-                            : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-emerald-50/70 hover:border-emerald-300'
+                            ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm ring-2 ring-emerald-200'
+                            : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-emerald-50 hover:border-emerald-300'
                         }`}
                       >
-                        <span>{m.label}</span>
+                        <div>{m.label}</div>
                         {m.badge && (
-                          <span className={`text-[9px] font-normal px-1.5 py-0.2 rounded mt-0.5 ${
-                            isSelected ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-800'
-                          }`}>
+                          <span className={`text-[9px] font-normal block ${isSelected ? 'text-emerald-100' : 'text-emerald-600'}`}>
                             {m.badge}
                           </span>
                         )}
@@ -1082,53 +1112,50 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
                 </div>
               </div>
 
-              {/* 3. Payment Status Filter */}
-              <div className="space-y-2">
+              {/* 3. Payment Status */}
+              <div className="space-y-1.5">
                 <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
                   <CreditCard className="w-3.5 h-3.5 text-blue-600" />
-                  <span>3. Payment Filter</span>
+                  <span>3. Payment Status Filter</span>
                 </label>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <div className="grid grid-cols-3 gap-2">
                   {[
-                    { id: 'RECEIVED', label: '✅ Payments Received (Paid)', desc: 'Only paid records' },
-                    { id: 'PENDING', label: '⏳ Payment Pending', desc: 'Unpaid / pending only' },
+                    { id: 'RECEIVED', label: '✅ Paid Only', desc: 'Amount Received' },
+                    { id: 'PENDING', label: '⏳ Pending Only', desc: 'Payment Due' },
                     { id: 'ALL', label: '📋 All Records in Month', desc: 'Paid + Pending' }
-                  ].map(p => (
-                    <button
-                      key={p.id}
-                      onClick={() => setExportPaymentStatus(p.id)}
-                      className={`p-2.5 rounded-xl text-left border cursor-pointer transition-all ${
-                        exportPaymentStatus === p.id
-                          ? 'bg-blue-50/80 border-blue-500 shadow-2xs ring-2 ring-blue-200 text-blue-950'
-                          : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
-                      }`}
-                    >
-                      <div className="text-xs font-bold">{p.label}</div>
-                      <div className="text-[10px] text-slate-500 mt-0.5">{p.desc}</div>
-                    </button>
-                  ))}
+                  ].map(p => {
+                    const isSelected = exportPaymentStatus === p.id;
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => setExportPaymentStatus(p.id)}
+                        className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                          isSelected
+                            ? 'bg-purple-50 text-purple-900 border-purple-400 ring-2 ring-purple-200'
+                            : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-purple-50/50'
+                        }`}
+                      >
+                        <div className="text-xs font-bold">{p.label}</div>
+                        <div className="text-[10px] text-slate-500">{p.desc}</div>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
-              {/* Summary Pill */}
-              <div className="p-3 bg-emerald-50/80 border border-emerald-200 rounded-xl text-xs text-emerald-950 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse" />
-                  <span>
-                    Downloading records for <strong>{exportMonth}</strong> (
-                    {exportPaymentStatus === 'RECEIVED' ? 'Payments Received' : exportPaymentStatus === 'PENDING' ? 'Pending Payments' : 'All Payments'}
-                    )
-                  </span>
-                </div>
-                <span className="text-[11px] font-bold text-emerald-800 bg-white/80 px-2 py-0.5 rounded-md border border-emerald-200">
-                  Excel (.xlsx)
-                </span>
+              {/* Format Info Note */}
+              <div className="p-3 bg-emerald-50/60 border border-emerald-200 rounded-xl text-xs text-emerald-900 flex items-start gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                <p>
+                  Downloading records for <strong>{exportMonth}</strong> ({exportPaymentStatus === 'RECEIVED' ? 'Paid Received only' : exportPaymentStatus === 'PENDING' ? 'Pending only' : 'All'}). The Excel sheet includes: <em>Month, IMEI, Device Model, Vehicle No, Customer Name, Phone, Total Cost, Payment Status, Amount Received By, and Stock Place</em>.
+                </p>
               </div>
 
             </div>
 
-            {/* Modal Actions */}
-            <div className="flex items-center justify-end gap-2.5 border-t border-slate-100 pt-4">
+            {/* Actions */}
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
               <button
                 type="button"
                 onClick={() => setIsMonthlyExportModalOpen(false)}
@@ -1165,6 +1192,13 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
         onClose={() => setSelectedDealerModal(null)}
         dealerName={selectedDealerModal}
         onOpenDeviceCard={onOpenTraceDrawer}
+      />
+
+      {/* Official Fitment Slip & Payment Receipt Modal */}
+      <FitmentReceiptModal
+        isOpen={Boolean(selectedReceiptDevice)}
+        onClose={() => setSelectedReceiptDevice(null)}
+        deviceData={selectedReceiptDevice}
       />
 
     </div>
