@@ -564,6 +564,7 @@ router.post('/bulk-delete', (req, res) => {
         db.prepare('DELETE FROM installations').run();
         db.prepare('DELETE FROM reminders').run();
         db.prepare('DELETE FROM devices').run();
+        db.prepare('DELETE FROM purchase_batches').run();
       } else if (purchase_batch_id) {
         const batchDevs = db.prepare('SELECT id, imei_number FROM devices WHERE purchase_batch_id = ?').all(purchase_batch_id);
         deletedCount = batchDevs.length;
@@ -585,6 +586,7 @@ router.post('/bulk-delete', (req, res) => {
           db.prepare('DELETE FROM reminders WHERE device_id = ? OR imei_number = ?').run(dev.id, dev.imei_number);
         }
         db.prepare('DELETE FROM devices WHERE device_type_id = ?').run(device_type_id);
+        db.prepare('DELETE FROM purchase_batches WHERE device_type_id = ?').run(device_type_id);
       } else if (Array.isArray(device_ids) && device_ids.length > 0) {
         for (const id of device_ids) {
           const dev = db.prepare('SELECT id, imei_number FROM devices WHERE id = ?').get(id);

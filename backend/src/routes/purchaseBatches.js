@@ -271,6 +271,7 @@ router.get('/', (req, res) => {
              (SELECT COUNT(*) FROM devices d WHERE d.purchase_batch_id = pb.id) as live_devices_count
       FROM purchase_batches pb
       JOIN device_types dt ON pb.device_type_id = dt.id
+      WHERE (SELECT COUNT(*) FROM devices d WHERE d.purchase_batch_id = pb.id) > 0
       ORDER BY pb.upload_date DESC
     `).all();
 

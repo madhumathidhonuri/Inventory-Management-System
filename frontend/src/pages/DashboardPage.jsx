@@ -186,6 +186,14 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
     return batches.find(b => b.id.toString() === selectedBatchId.toString()) || null;
   }, [selectedBatchId, batches]);
 
+  const visibleBatches = useMemo(() => {
+    return batches.filter(b => {
+      if (b.live_devices_count !== undefined && b.live_devices_count <= 0) return false;
+      if (selectedDeviceTypeId && b.device_type_id && b.device_type_id.toString() !== selectedDeviceTypeId.toString()) return false;
+      return true;
+    });
+  }, [batches, selectedDeviceTypeId]);
+
   const isFiltered = Boolean(selectedDeviceTypeId || selectedBatchId || locationFilter || selectedMonth !== 'ALL');
 
   const handleResetFilters = () => {
@@ -454,7 +462,7 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
                 className="bg-transparent text-xs font-medium text-slate-800 focus:outline-none max-w-[200px] truncate cursor-pointer"
               >
                 <option value="">All Upload Sheets...</option>
-                {batches.map(b => (
+                {visibleBatches.map(b => (
                   <option key={b.id} value={b.id}>
                     {b.notes ? `${b.notes} (${b.source_file || 'Excel'})` : b.source_file}
                   </option>

@@ -350,6 +350,14 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
     return batches.find(b => b.id.toString() === batchFilter.toString()) || null;
   }, [batchFilter, batches]);
 
+  const visibleBatches = useMemo(() => {
+    return batches.filter(b => {
+      if (b.live_devices_count !== undefined && b.live_devices_count <= 0) return false;
+      if (typeFilter && b.device_type_id && b.device_type_id.toString() !== typeFilter.toString()) return false;
+      return true;
+    });
+  }, [batches, typeFilter]);
+
   const handleDeleteBatch = async () => {
     if (!deletingBatchRecord) return;
     setDeletingLoading(true);
@@ -1499,7 +1507,7 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
                 }`}
               >
                 <option value="">All Lists</option>
-                {batches.map(b => (
+                {visibleBatches.map(b => (
                   <option key={b.id} value={b.id}>
                     {b.notes ? `${b.notes} (${b.source_file})` : b.source_file}
                   </option>
