@@ -15,6 +15,7 @@ export default function DealerDetailModal({ isOpen, onClose, dealerName, onOpenD
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState('devices'); // 'devices' | 'models' | 'dispatches'
   const [statusFilter, setStatusFilter] = useState('ALL'); // 'ALL' | 'WITH_DEALER' | 'INSTALLED'
+  const [paymentFilter, setPaymentFilter] = useState('ALL'); // 'ALL' | 'RECEIVED' | 'PENDING'
   const [searchQuery, setSearchQuery] = useState('');
   const [activePaymentMenuId, setActivePaymentMenuId] = useState(null);
   const [selectedReceiptDevice, setSelectedReceiptDevice] = useState(null);
@@ -24,6 +25,9 @@ export default function DealerDetailModal({ isOpen, onClose, dealerName, onOpenD
   useEffect(() => {
     if (isOpen && dealerName) {
       loadSummary(dealerName);
+      setStatusFilter('ALL');
+      setPaymentFilter('ALL');
+      setSearchQuery('');
     } else {
       setData(null);
       setError(null);
@@ -75,6 +79,12 @@ export default function DealerDetailModal({ isOpen, onClose, dealerName, onOpenD
 
   const filteredDevices = devices.filter(d => {
     if (statusFilter !== 'ALL' && d.current_status !== statusFilter) return false;
+
+    // Payment filter
+    const isPaid = d.payment_status === 'RECEIVED' || String(d.payment_status || '').toUpperCase().includes('REC') || String(d.payment_status || '').toUpperCase().includes('PAID');
+    if (paymentFilter === 'RECEIVED' && !isPaid) return false;
+    if (paymentFilter === 'PENDING' && isPaid) return false;
+
     const veh = extractVehicleNo(d).toLowerCase();
     const cust = extractCustName(d).toLowerCase();
     if (searchQuery.trim()) {
@@ -87,9 +97,10 @@ export default function DealerDetailModal({ isOpen, onClose, dealerName, onOpenD
   });
 
   const handleExportCsv = () => {
-    if (!devices || devices.length === 0) return;
+    const listToExport = filteredDevices.length > 0 ? filteredDevices : devices;
+    if (!listToExport || listToExport.length === 0) return;
     const headers = ['IMEI Number', 'Model', 'Status', 'Vehicle Number', 'Customer Name', 'Phone', 'Payment Status', 'Amount / Cost', 'Installation Date'];
-    const rows = devices.map(d => [
+    const rows = listToExport.map(d => [
       `"${d.imei_number}"`,
       `"${d.device_type_name || ''}"`,
       `"${d.current_status}"`,
@@ -105,7 +116,7 @@ export default function DealerDetailModal({ isOpen, onClose, dealerName, onOpenD
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement('a');
     link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `${dealer.name || 'Dealer'}_Stock_Summary_${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute('download', `${dealer.name || 'Dealer'}_Stock_Summary_${paymentFilter !== 'ALL' ? paymentFilter + '_' : ''}${new Date().toISOString().split('T')[0]}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -265,10 +276,16 @@ export default function DealerDetailModal({ isOpen, onClose, dealerName, onOpenD
                 )}
               </div>
 
-              {/* 4 CORE KPI METRIC CARDS */}
+              {/* 4 CORE KPI METRIC CARDS (INTERACTIVE FILTERS) */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 {/* 1. Total Sent */}
-                <div className="p-4 bg-white rounded-2xl border border-slate-200 shadow-2xs space-y-1">
+                <div 
+                  onClick={() => { setStatusFilter('ALL'); setPaymentFilter('ALL'); }}
+                  className={`p-4 bg-white rounded-2xl border shadow-2xs space-y-1 cursor-pointer transition-all hover:border-indigo-300 ${
+                    statusFilter === 'ALL' && paymentFilter === 'ALL' ? 'ring-2 ring-indigo-400/40 border-indigo-300' : 'border-slate-200'
+                  }`}
+                  title="Click to view all devices"
+                >
                   <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
                     <Boxes className="w-3.5 h-3.5 text-indigo-600" /> Total Sent
                   </span>
@@ -277,7 +294,13 @@ export default function DealerDetailModal({ isOpen, onClose, dealerName, onOpenD
                 </div>
 
                 {/* 2. In Stock with Dealer */}
-                <div className="p-4 bg-blue-50/60 rounded-2xl border border-blue-200 shadow-2xs space-y-1">
+                <div 
+                  onClick={() => setStatusFilter(prev => prev === 'WITH_DEALER' ? 'ALL' : 'WITH_DEALER')}
+                  className={`p-4 bg-blue-50/60 rounded-2xl border shadow-2xs space-y-1 cursor-pointer transition-all hover:border-blue-300 ${
+                    statusFilter === 'WITH_DEALER' ? 'ring-2 ring-blue-500/50 border-blue-400 bg-blue-50' : 'border-blue-200'
+                  }`}
+                  title="Click to filter In Dealer Stock devices"
+                >
                   <span className="text-[11px] font-bold text-blue-600 uppercase tracking-wider flex items-center gap-1">
                     <Store className="w-3.5 h-3.5 text-blue-600" /> In Dealer Stock
                   </span>
@@ -286,7 +309,13 @@ export default function DealerDetailModal({ isOpen, onClose, dealerName, onOpenD
                 </div>
 
                 {/* 3. Installed in Vehicles */}
-                <div className="p-4 bg-emerald-50/60 rounded-2xl border border-emerald-200 shadow-2xs space-y-1">
+                <div 
+                  onClick={() => setStatusFilter(prev => prev === 'INSTALLED' ? 'ALL' : 'INSTALLED')}
+                  className={`p-4 bg-emerald-50/60 rounded-2xl border shadow-2xs space-y-1 cursor-pointer transition-all hover:border-emerald-300 ${
+                    statusFilter === 'INSTALLED' ? 'ring-2 ring-emerald-500/50 border-emerald-400 bg-emerald-50' : 'border-emerald-200'
+                  }`}
+                  title="Click to filter Installed devices"
+                >
                   <span className="text-[11px] font-bold text-emerald-700 uppercase tracking-wider flex items-center gap-1">
                     <Wrench className="w-3.5 h-3.5 text-emerald-600" /> Installed
                   </span>
@@ -295,12 +324,39 @@ export default function DealerDetailModal({ isOpen, onClose, dealerName, onOpenD
                 </div>
 
                 {/* 4. Payment Collection */}
-                <div className="p-4 bg-purple-50/60 rounded-2xl border border-purple-200 shadow-2xs space-y-1">
+                <div className={`p-4 bg-purple-50/60 rounded-2xl border shadow-2xs space-y-1.5 transition-all ${
+                  paymentFilter !== 'ALL' ? 'ring-2 ring-purple-500/50 border-purple-400 bg-purple-50' : 'border-purple-200'
+                }`}>
                   <span className="text-[11px] font-bold text-purple-700 uppercase tracking-wider flex items-center gap-1">
                     <CreditCard className="w-3.5 h-3.5 text-purple-600" /> Collection
                   </span>
                   <div className="text-xl font-bold font-mono text-purple-950">₹{kpis.payment_received_amount ? kpis.payment_received_amount.toLocaleString('en-IN') : 0}</div>
-                  <span className="text-[10px] text-purple-700 block">{kpis.payment_received_count || 0} Paid / {kpis.payment_pending_count || 0} Pending</span>
+                  <div className="flex items-center gap-1.5 pt-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setPaymentFilter(prev => prev === 'RECEIVED' ? 'ALL' : 'RECEIVED')}
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded-md transition-all cursor-pointer ${
+                        paymentFilter === 'RECEIVED'
+                          ? 'bg-emerald-600 text-white shadow-xs'
+                          : 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
+                      }`}
+                      title="Filter Payment Received"
+                    >
+                      ✓ {kpis.payment_received_count || 0} Paid
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPaymentFilter(prev => prev === 'PENDING' ? 'ALL' : 'PENDING')}
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded-md transition-all cursor-pointer ${
+                        paymentFilter === 'PENDING'
+                          ? 'bg-amber-600 text-white shadow-xs'
+                          : 'bg-amber-100 text-amber-900 hover:bg-amber-200'
+                      }`}
+                      title="Filter Payment Pending / Not Received"
+                    >
+                      ⏳ {kpis.payment_pending_count || 0} Pending
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -348,7 +404,7 @@ export default function DealerDetailModal({ isOpen, onClose, dealerName, onOpenD
 
               {/* TABS: ALLOCATED DEVICES VS DISPATCH HISTORY */}
               <div className="space-y-3">
-                <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-2">
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => setActiveTab('devices')}
@@ -358,7 +414,7 @@ export default function DealerDetailModal({ isOpen, onClose, dealerName, onOpenD
                           : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                       }`}
                     >
-                      Allocated Devices ({devices.length})
+                      Allocated Devices ({filteredDevices.length !== devices.length ? `${filteredDevices.length} / ${devices.length}` : devices.length})
                     </button>
                     <button
                       onClick={() => setActiveTab('dispatches')}
@@ -373,7 +429,8 @@ export default function DealerDetailModal({ isOpen, onClose, dealerName, onOpenD
                   </div>
 
                   {activeTab === 'devices' && (
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {/* Search */}
                       <div className="relative">
                         <Search className="w-3.5 h-3.5 absolute left-2.5 top-2 text-slate-400" />
                         <input
@@ -381,19 +438,53 @@ export default function DealerDetailModal({ isOpen, onClose, dealerName, onOpenD
                           placeholder="Search IMEI, Vehicle, Customer..."
                           value={searchQuery}
                           onChange={(e) => setSearchQuery(e.target.value)}
-                          className="pl-8 pr-3 py-1 bg-white border border-slate-200 rounded-lg text-xs w-48 focus:outline-none focus:border-indigo-500"
+                          className="pl-8 pr-3 py-1 bg-white border border-slate-200 rounded-lg text-xs w-44 sm:w-48 focus:outline-none focus:border-indigo-500"
                         />
                       </div>
 
+                      {/* Status Filter Dropdown */}
                       <select
                         value={statusFilter}
                         onChange={(e) => setStatusFilter(e.target.value)}
-                        className="p-1 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-700"
+                        className={`px-2.5 py-1 bg-white border rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                          statusFilter !== 'ALL'
+                            ? 'border-indigo-400 bg-indigo-50/50 text-indigo-900 font-bold'
+                            : 'border-slate-200 text-slate-700 hover:border-slate-300'
+                        }`}
                       >
                         <option value="ALL">All Status</option>
-                        <option value="WITH_DEALER">In Dealer Stock</option>
-                        <option value="INSTALLED">Installed in Vehicle</option>
+                        <option value="WITH_DEALER">📦 In Dealer Stock ({kpis.with_dealer || 0})</option>
+                        <option value="INSTALLED">🚗 Installed in Vehicle ({kpis.installed || 0})</option>
                       </select>
+
+                      {/* Payment Filter Dropdown */}
+                      <select
+                        value={paymentFilter}
+                        onChange={(e) => setPaymentFilter(e.target.value)}
+                        className={`px-2.5 py-1 bg-white border rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                          paymentFilter === 'RECEIVED'
+                            ? 'border-emerald-400 bg-emerald-50/60 text-emerald-900 font-bold'
+                            : paymentFilter === 'PENDING'
+                            ? 'border-amber-400 bg-amber-50/60 text-amber-900 font-bold'
+                            : 'border-slate-200 text-slate-700 hover:border-slate-300'
+                        }`}
+                      >
+                        <option value="ALL">💳 All Payments</option>
+                        <option value="RECEIVED">✅ Payment Received ({kpis.payment_received_count || 0})</option>
+                        <option value="PENDING">⏳ Payment Not Received / Pending ({kpis.payment_pending_count || 0})</option>
+                      </select>
+
+                      {/* Clear / Reset Filter Button */}
+                      {(statusFilter !== 'ALL' || paymentFilter !== 'ALL' || searchQuery) && (
+                        <button
+                          type="button"
+                          onClick={() => { setStatusFilter('ALL'); setPaymentFilter('ALL'); setSearchQuery(''); }}
+                          className="px-2 py-1 text-[11px] font-bold text-slate-500 hover:text-red-600 bg-slate-100 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                          title="Clear all filters"
+                        >
+                          ✕ Clear
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
