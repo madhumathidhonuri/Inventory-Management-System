@@ -53,13 +53,13 @@ import {
 import DeviceDetailCardModal from '../components/DeviceDetailCardModal';
 import FitmentReceiptModal from '../components/FitmentReceiptModal';
 import ConsolidatedReminderModal from '../components/ConsolidatedReminderModal';
-import GoogleFormIntegrationModal from '../components/GoogleFormIntegrationModal';
 import { buildCustomerCredentialsWhatsAppMessage, buildPaymentDueReminderWhatsAppMessage, formatINR, formatDisplayCellValue } from '../utils/whatsapp';
 
 export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClearInitialFilter }) {
   const { user } = useAuth();
   const isSuperAdmin = user?.role === 'SUPER_ADMIN';
   const isDealer = user?.role === 'DEALER';
+  const canDelete = !isDealer; // Available to Super Admin, Operations Admin, and managerial roles
 
   const [devices, setDevices] = useState([]);
   const [deviceTypes, setDeviceTypes] = useState([]);
@@ -78,7 +78,6 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
   // Device Detail Specification Card Modal State
   const [detailCardImei, setDetailCardImei] = useState(null);
   const [isDetailCardOpen, setIsDetailCardOpen] = useState(false);
-  const [isGoogleFormModalOpen, setIsGoogleFormModalOpen] = useState(false);
 
   // Multi-Select & Batch Stock Movement State
   const [selectedDeviceIds, setSelectedDeviceIds] = useState(new Set());
@@ -128,8 +127,9 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
   });
   const [savingRow, setSavingRow] = useState(false);
 
-  // Deletion States (Super Admin)
+  // Deletion States
   const [deletingDeviceRecord, setDeletingDeviceRecord] = useState(null);
+  const [isBulkDeleteModalOpen, setIsBulkDeleteModalOpen] = useState(false);
   const [isClearListModalOpen, setIsClearListModalOpen] = useState(false);
   const [clearScope, setClearScope] = useState('ALL');
   const [selectedBatchToClear, setSelectedBatchToClear] = useState('');
@@ -422,6 +422,24 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
       }
     } catch (err) {
       alert(err.message);
+    } finally {
+      setDeletingLoading(false);
+    }
+  };
+
+  const handleBulkDeleteSelected = async () => {
+    if (selectedDeviceIds.size === 0) return;
+    setDeletingLoading(true);
+    try {
+      const res = await bulkDeleteDevices({ device_ids: Array.from(selectedDeviceIds) });
+      if (res.success) {
+        setSelectedDeviceIds(new Set());
+        setIsBulkDeleteModalOpen(false);
+        refreshDeviceTypes();
+        loadData();
+      }
+    } catch (err) {
+      alert(err.message || 'Failed to delete selected devices');
     } finally {
       setDeletingLoading(false);
     }
@@ -1244,13 +1262,6 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={() => setIsGoogleFormModalOpen(true)}
-            className="px-3.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-bold rounded-xl border border-emerald-300 flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
-            title="Connect Google Forms & Live Google Sheet Sync for Field Technicians & Dealers"
-          >
-            <span className="text-sm">⚡</span> Google Form Sync
-          </button>
 
           {!isDealer && (
             <button
@@ -1272,7 +1283,7 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
             </button>
           )}
 
-          {isSuperAdmin && (
+          {canDelete && (
             <button
               onClick={() => setIsAddColModalOpen(true)}
               className="px-3.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold rounded-xl border border-blue-200 flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
@@ -1281,7 +1292,7 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
             </button>
           )}
           
-          {isSuperAdmin && (
+          {canDelete && (
             <button
               onClick={() => { setClearScope(typeFilter ? 'FILTERED' : 'ALL'); setIsClearListModalOpen(true); }}
               className="px-3.5 py-1.5 bg-red-50 hover:bg-red-100 text-red-700 text-xs font-semibold rounded-xl border border-red-200 flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
@@ -1514,7 +1525,7 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
                 ))}
               </select>
 
-              {selectedBatchObj && isSuperAdmin && (
+              {selectedBatchObj && canDelete && (
                 <button
                   type="button"
                   onClick={() => setDeletingBatchRecord(selectedBatchObj)}
@@ -1890,11 +1901,11 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
                               <Eye className="w-4 h-4" />
                             </button>
 
-                            {/* Super Admin Single Record Delete Button */}
-                            {isSuperAdmin && (
+                            {/* Single Record Delete Button */}
+                            {canDelete && (
                               <button
                                 onClick={() => setDeletingDeviceRecord(dev)}
-                                title="Delete Record (Super Admin)"
+                                title="Delete Record"
                                 className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
                               >
                                 <Trash2 className="w-4 h-4" />
@@ -2295,21 +2306,41 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
               </div>
             )}
 
-            <div className="flex gap-2 justify-end pt-3 border-t border-slate-100">
-              <button
-                onClick={() => setEditingRowDevice(null)}
-                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium rounded-xl"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleRowSave}
-                disabled={savingRow}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl flex items-center gap-1.5 shadow-xs"
-              >
-                {savingRow ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-                Save Changes
-              </button>
+            <div className="flex items-center justify-between pt-3 border-t border-slate-100">
+              {canDelete ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const targetDev = editingRowDevice;
+                    setEditingRowDevice(null);
+                    setDeletingDeviceRecord(targetDev);
+                  }}
+                  className="px-3.5 py-2 bg-red-50 hover:bg-red-100 text-red-600 text-xs font-semibold rounded-xl flex items-center gap-1.5 border border-red-200 cursor-pointer transition-colors"
+                  title="Delete this device record"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Delete Record</span>
+                </button>
+              ) : <div />}
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingRowDevice(null)}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium rounded-xl cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRowSave}
+                  disabled={savingRow}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl flex items-center gap-1.5 shadow-xs cursor-pointer"
+                >
+                  {savingRow ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                  Save Changes
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -2758,35 +2789,93 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
         </div>
       )}
 
-      {/* Floating Multi-Select Action Bar */}
+      {/* Floating Multi-Select Action Bar with 1-Click Consolidated WhatsApp Reminder, Stock Transfer & Bulk Delete */}
       {selectedDeviceIds.size > 0 && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-slate-900/95 backdrop-blur-md text-white px-5 py-3 rounded-2xl shadow-2xl border border-slate-700 flex flex-wrap items-center gap-3 animate-in fade-in slide-in-from-bottom-5">
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="text-xs font-bold bg-purple-600 px-2.5 py-1 rounded-lg">
-              {selectedDeviceIds.size} device(s) selected
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-slate-900 text-white px-5 py-3 rounded-2xl shadow-2xl flex flex-wrap items-center gap-3 border border-slate-700 animate-in slide-in-from-bottom-5 duration-200">
+          <div className="flex items-center gap-2 text-xs font-bold">
+            <span className="w-6 h-6 rounded-full bg-purple-600 text-white flex items-center justify-center font-mono text-[11px]">
+              {selectedDeviceIds.size}
             </span>
+            <span>Selected</span>
           </div>
 
+          <div className="h-4 w-px bg-slate-700 hidden sm:block" />
+
+          {/* 1-Click Consolidated WhatsApp Payment Due Reminder */}
+          <button
+            onClick={() => {
+              const selectedList = devices.filter(d => selectedDeviceIds.has(d.id));
+              const firstCust = selectedList[0] ? getDevicePaymentInfo(selectedList[0]) : {};
+              setConsolidatedReminderModalData({
+                customerName: firstCust.custName || 'Customer Fleet',
+                phone: firstCust.phone || '',
+                vehicles: selectedList,
+                mode: 'REMINDER',
+                stockPlace: firstCust.stockPlace || 'FuelTracks Central'
+              });
+            }}
+            className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-black rounded-xl flex items-center gap-1.5 shadow-md transition-all cursor-pointer"
+            title="Send 1 Single Consolidated WhatsApp Payment Reminder for all selected vehicles"
+          >
+            <span>🔔</span>
+            <span>Fleet Reminder</span>
+          </button>
+
+          {/* 1-Click Consolidated Payment Confirmation Receipt */}
+          <button
+            onClick={() => {
+              const selectedList = devices.filter(d => selectedDeviceIds.has(d.id));
+              const firstCust = selectedList[0] ? getDevicePaymentInfo(selectedList[0]) : {};
+              setConsolidatedReminderModalData({
+                customerName: firstCust.custName || 'Customer Fleet',
+                phone: firstCust.phone || '',
+                vehicles: selectedList,
+                mode: 'CONFIRMATION',
+                stockPlace: firstCust.stockPlace || 'FuelTracks Central'
+              });
+            }}
+            className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-md transition-all cursor-pointer"
+            title="Send 1 Consolidated Payment Confirmation for all selected vehicles"
+          >
+            <span>🧾</span>
+            <span>Payment Receipt</span>
+          </button>
+
+          {/* Stock Transfer Button */}
           <button
             onClick={handleOpenBulkTransferModal}
-            className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all cursor-pointer border border-slate-600"
           >
-            <Building className="w-3.5 h-3.5" /> Transfer Stock Place
+            <Building className="w-3.5 h-3.5 text-indigo-400" /> Transfer Stock
           </button>
 
+          {/* Copy Selected IMEIs */}
           <button
             onClick={handleCopySelectedImeis}
-            className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer border border-slate-700"
+            title="Copy selected IMEIs to clipboard"
           >
-            <Copy className="w-3.5 h-3.5" /> Copy Selected IMEIs
+            <Copy className="w-3.5 h-3.5" /> Copy IMEIs
           </button>
 
+          {/* Bulk Delete Selected Devices Button */}
+          {canDelete && (
+            <button
+              onClick={() => setIsBulkDeleteModalOpen(true)}
+              className="px-3.5 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md transition-colors cursor-pointer"
+              title="Delete all selected devices from inventory"
+            >
+              <Trash2 className="w-3.5 h-3.5" /> Delete Selected ({selectedDeviceIds.size})
+            </button>
+          )}
+
+          {/* Clear selection */}
           <button
             onClick={() => setSelectedDeviceIds(new Set())}
-            className="text-xs text-slate-400 hover:text-white px-2 py-1 transition-colors cursor-pointer"
+            className="p-1.5 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
+            title="Clear Selection"
           >
-            Deselect All
+            <X className="w-4 h-4" />
           </button>
         </div>
       )}
@@ -2886,74 +2975,60 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
         </div>
       )}
 
-      {/* Floating Multi-Select Action Bar with 1-Click Consolidated WhatsApp Reminder */}
-      {selectedDeviceIds.size > 0 && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-slate-900 text-white px-5 py-3 rounded-2xl shadow-2xl flex flex-wrap items-center gap-3 border border-slate-700 animate-in slide-in-from-bottom-5 duration-200">
-          <div className="flex items-center gap-2 text-xs font-bold">
-            <span className="w-6 h-6 rounded-full bg-purple-600 text-white flex items-center justify-center font-mono text-[11px]">
-              {selectedDeviceIds.size}
-            </span>
-            <span>Selected</span>
+      {/* Bulk Delete Selected Devices Modal */}
+      {isBulkDeleteModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-md p-6 space-y-4 shadow-2xl animate-in zoom-in-95">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="text-base font-bold text-red-600 flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5 text-red-600" /> Delete Selected Devices
+              </h3>
+              <button
+                onClick={() => setIsBulkDeleteModalOpen(false)}
+                className="p-1 text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-600">
+              Are you sure you want to permanently delete these <strong className="text-red-700 font-bold font-mono">{selectedDeviceIds.size}</strong> selected device records from inventory?
+            </p>
+
+            <div className="max-h-40 overflow-y-auto p-3 bg-red-50/50 rounded-xl border border-red-100 space-y-1 text-xs font-mono text-slate-700">
+              {devices
+                .filter(d => selectedDeviceIds.has(d.id))
+                .slice(0, 10)
+                .map(d => (
+                  <div key={d.id} className="flex justify-between items-center py-0.5 border-b border-red-100/50 last:border-0">
+                    <span className="font-bold text-red-800">{d.imei_number}</span>
+                    <span className="text-[11px] text-slate-500">{d.device_type_name}</span>
+                  </div>
+                ))}
+              {selectedDeviceIds.size > 10 && (
+                <div className="text-center text-[11px] font-bold text-slate-500 pt-1">
+                  ...and {selectedDeviceIds.size - 10} more devices
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-2 justify-end pt-2">
+              <button
+                onClick={() => setIsBulkDeleteModalOpen(false)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium rounded-xl cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleBulkDeleteSelected}
+                disabled={deletingLoading}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-xs cursor-pointer"
+              >
+                {deletingLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                Confirm Delete ({selectedDeviceIds.size})
+              </button>
+            </div>
           </div>
-
-          <div className="h-4 w-px bg-slate-700 hidden sm:block" />
-
-          {/* 1-Click Consolidated WhatsApp Payment Due Reminder */}
-          <button
-            onClick={() => {
-              const selectedList = devices.filter(d => selectedDeviceIds.has(d.id));
-              const firstCust = selectedList[0] ? getDevicePaymentInfo(selectedList[0]) : {};
-              setConsolidatedReminderModalData({
-                customerName: firstCust.custName || 'Customer Fleet',
-                phone: firstCust.phone || '',
-                vehicles: selectedList,
-                mode: 'REMINDER',
-                stockPlace: firstCust.stockPlace || 'FuelTracks Central'
-              });
-            }}
-            className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-black rounded-xl flex items-center gap-1.5 shadow-md transition-all cursor-pointer"
-            title="Send 1 Single Consolidated WhatsApp Payment Reminder for all selected vehicles"
-          >
-            <span>🔔</span>
-            <span>1-Click Fleet Reminder ({selectedDeviceIds.size} Vehs)</span>
-          </button>
-
-          {/* 1-Click Consolidated Payment Confirmation Receipt */}
-          <button
-            onClick={() => {
-              const selectedList = devices.filter(d => selectedDeviceIds.has(d.id));
-              const firstCust = selectedList[0] ? getDevicePaymentInfo(selectedList[0]) : {};
-              setConsolidatedReminderModalData({
-                customerName: firstCust.custName || 'Customer Fleet',
-                phone: firstCust.phone || '',
-                vehicles: selectedList,
-                mode: 'CONFIRMATION',
-                stockPlace: firstCust.stockPlace || 'FuelTracks Central'
-              });
-            }}
-            className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-md transition-all cursor-pointer"
-            title="Send 1 Consolidated Payment Confirmation for all selected vehicles"
-          >
-            <span>🧾</span>
-            <span>Payment Confirmation</span>
-          </button>
-
-          {/* Stock Transfer Button */}
-          <button
-            onClick={() => setIsBulkTransferModalOpen(true)}
-            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl flex items-center gap-1 transition-all cursor-pointer border border-slate-600"
-          >
-            <Building className="w-3.5 h-3.5" /> Transfer Stock
-          </button>
-
-          {/* Clear selection */}
-          <button
-            onClick={() => setSelectedDeviceIds(new Set())}
-            className="p-1.5 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
-            title="Clear Selection"
-          >
-            <X className="w-4 h-4" />
-          </button>
         </div>
       )}
 
@@ -2964,6 +3039,12 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
           setIsDetailCardOpen(false);
           setDetailCardImei(null);
         }}
+        onDelete={(dev) => {
+          setIsDetailCardOpen(false);
+          setDetailCardImei(null);
+          setDeletingDeviceRecord(dev);
+        }}
+        canDelete={canDelete}
         imei={detailCardImei}
       />
 
@@ -2985,15 +3066,6 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
         stockPlace={consolidatedReminderModalData?.stockPlace || 'FuelTracks Central'}
       />
 
-      {/* Google Forms & Field Technician Live Sync Modal */}
-      <GoogleFormIntegrationModal
-        isOpen={isGoogleFormModalOpen}
-        onClose={() => setIsGoogleFormModalOpen(false)}
-        onRefreshInventory={() => {
-          loadData();
-          loadDealersSummary();
-        }}
-      />
 
     </div>
   );

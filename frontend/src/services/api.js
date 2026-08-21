@@ -382,39 +382,4 @@ export async function bulkTransferDevices(payload) {
   return data;
 }
 
-// Google Form & Sheets Live Integration APIs
-export async function fetchIntegrationLogs() {
-  const res = await fetch(`${API_BASE}/integrations/logs`);
-  if (!res.ok) throw new Error('Failed to fetch integration logs');
-  return res.json();
-}
-
-export async function fetchGoogleScriptCode() {
-  const res = await fetch(`${API_BASE}/integrations/google-script-code`);
-  if (!res.ok) throw new Error('Failed to fetch Google Apps Script code');
-  return res.json();
-}
-
-export async function submitGoogleFormTest(payload) {
-  const res = await fetch(`${API_BASE}/integrations/google-form`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
-  const data = await res.json();
-  if (!res.ok || !data.success) throw new Error(data.error || 'Failed to post Google Form submission');
-  return data;
-}
-
-export async function syncGoogleSheet(sheetUrl) {
-  const res = await fetch(`${API_BASE}/integrations/sync-google-sheet`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sheet_url: sheetUrl })
-  });
-  const data = await res.json();
-  if (!res.ok || !data.success) throw new Error(data.error || 'Failed to sync Google Sheet');
-  return data;
-}
-
 

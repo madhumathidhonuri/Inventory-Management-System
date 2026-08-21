@@ -2,12 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { 
   X, Copy, Check, QrCode, Cpu, Radio, Truck, User, Phone, 
   MapPin, Calendar, CreditCard, ShieldCheck, Wrench, Clock, 
-  ArrowRight, FileSpreadsheet, Printer, ExternalLink, Sparkles
+  ArrowRight, FileSpreadsheet, Printer, ExternalLink, Sparkles, Trash2
 } from 'lucide-react';
 import { fetchDeviceByImei } from '../services/api';
 import { buildCustomerCredentialsWhatsAppMessage, formatDisplayCellValue } from '../utils/whatsapp';
 
-export default function DeviceDetailCardModal({ isOpen, onClose, imei }) {
+export default function DeviceDetailCardModal({ isOpen, onClose, imei, onDelete, canDelete = true }) {
   const [device, setDevice] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -583,7 +583,18 @@ export default function DeviceDetailCardModal({ isOpen, onClose, imei }) {
 
         {/* Footer */}
         <div className="p-4 bg-white border-t border-slate-200 flex justify-between items-center text-xs">
-          <span className="text-slate-400">FuelTracks Telematics Identity Card</span>
+          {canDelete && onDelete && device ? (
+            <button
+              onClick={() => onDelete(device)}
+              className="px-3.5 py-2 bg-red-50 hover:bg-red-100 text-red-600 font-semibold rounded-xl cursor-pointer border border-red-200 flex items-center gap-1.5 transition-colors"
+              title="Permanently delete this device record"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-red-600" />
+              <span>Delete Device</span>
+            </button>
+          ) : (
+            <span className="text-slate-400">FuelTracks Telematics Identity Card</span>
+          )}
           <button
             onClick={onClose}
             className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl cursor-pointer shadow-xs transition-colors"
