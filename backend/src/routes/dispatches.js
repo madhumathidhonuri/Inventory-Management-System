@@ -319,22 +319,115 @@ router.post('/return', (req, res) => {
   }
 });
 
-// GET /api/dispatches/dealer-summary - Group stock by dealer & device type
-router.get('/summary/dealer-stock', (req, res) => {
+// DELETE /api/dispatches/clear-all - Delete all dispatch history records and optionally reset stock to warehouse
+router.delete('/clear-all', (req, res) => {
   try {
-    const summary = db.prepare(`
-      SELECT 
-        d.current_holder_name as dealer_name,
-        dt.name as device_type_name,
-        COUNT(d.id) as device_count
-      FROM devices d
-      JOIN device_types dt ON d.device_type_id = dt.id
-      WHERE d.current_status = 'WITH_DEALER'
-      GROUP BY d.current_holder_name, dt.name
-      ORDER BY d.current_holder_name, dt.name
-    `).all();
+    const { revert_stock = true } = req.query;
 
-    res.json({ success: true, data: summary });
+    const transaction = db.transaction(() => {
+      // 1. If requested, revert all devices held by dealers back to Central Warehouse
+      if (revert_stock === true || revert_stock === 'true') {
+        const withDealerDevs = db.prepare(`SELECT id, imei_number, additional_attributes FROM devices WHERE current_status = 'WITH_DEALER'`).all();
+        const updateDev = db.prepare(`
+          UPDATE devices
+          SET current_status = 'IN_WAREHOUSE',
+              current_holder_type = 'WAREHOUSE',
+              current_holder_name = 'Central Warehouse',
+              additional_attributes = ?,
+              updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `);
+        for (const dev of withDealerDevs) {
+          let attrs = {};
+          try { attrs = JSON.parse(dev.additional_attributes || '{}'); } catch {}
+          attrs['STOCK PLACE'] = 'Central Warehouse';
+          delete attrs['DEALER'];
+          updateDev.run(JSON.stringify(attrs), dev.id);
+        }
+      }
+
+      // 2. Clear tables
+      db.prepare(`DELETE FROM dispatch_items`).run();
+      const info = db.prepare(`DELETE FROM dispatches`).run();
+      return info;
+    });
+
+    transaction();
+    res.json({ success: true, message: 'All dispatch records cleared successfully.' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// DELETE /api/dispatches/:id - Delete a single dispatch record and optionally revert stock
+router.delete('/:id', (req, res) => {
+  const { id } = req.params;
+  const { revert_stock = true } = req.query;
+  try {
+    const dispatch = db.prepare(`SELECT * FROM dispatches WHERE id = ?`).get(id);
+    if (!dispatch) return res.status(404).json({ success: false, error: 'Dispatch not found' });
+
+    const transaction = db.transaction(() => {
+      // 1. If reverting stock, get items and reset their status back to IN_WAREHOUSE
+      if (revert_stock === true || revert_stock === 'true') {
+        const items = db.prepare(`SELECT device_id, imei_number FROM dispatch_items WHERE dispatch_id = ?`).all(id);
+        const updateDev = db.prepare(`
+          UPDATE devices
+          SET current_status = 'IN_WAREHOUSE',
+              current_holder_type = 'WAREHOUSE',
+              current_holder_name = 'Central Warehouse',
+              updated_at = CURRENT_TIMESTAMP
+          WHERE id = ? OR imei_number = ?
+        `);
+        for (const it of items) {
+          updateDev.run(it.device_id, it.imei_number);
+        }
+      }
+
+      // 2. Delete dispatch items & dispatch record
+      db.prepare(`DELETE FROM dispatch_items WHERE dispatch_id = ?`).run(id);
+      db.prepare(`DELETE FROM dispatches WHERE id = ?`).run(id);
+    });
+
+    transaction();
+    res.json({ success: true, message: `Dispatch #${id} deleted successfully.` });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/dispatches/reset-dealer-stock - Revert all stock held by a dealer back to central warehouse
+router.post('/reset-dealer-stock', (req, res) => {
+  const { dealer_name } = req.body;
+  if (!dealer_name) return res.status(400).json({ success: false, error: 'dealer_name is required' });
+
+  try {
+    const devs = db.prepare(`
+      SELECT id, additional_attributes
+      FROM devices
+      WHERE current_holder_name LIKE ? OR additional_attributes LIKE ?
+    `).all(`%${dealer_name}%`, `%"STOCK PLACE":"${dealer_name}%`);
+
+    const updateDev = db.prepare(`
+      UPDATE devices
+      SET current_status = 'IN_WAREHOUSE',
+          current_holder_type = 'WAREHOUSE',
+          current_holder_name = 'Central Warehouse',
+          additional_attributes = ?,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `);
+
+    db.transaction(() => {
+      for (const dev of devs) {
+        let attrs = {};
+        try { attrs = JSON.parse(dev.additional_attributes || '{}'); } catch {}
+        attrs['STOCK PLACE'] = 'Central Warehouse';
+        updateDev.run(JSON.stringify(attrs), dev.id);
+      }
+    })();
+
+    res.json({ success: true, count: devs.length, message: `Reverted ${devs.length} devices from ${dealer_name} back to Central Warehouse.` });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }

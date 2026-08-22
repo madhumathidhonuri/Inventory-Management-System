@@ -443,4 +443,35 @@ export async function acknowledgeDispatch(id, payload) {
   return data;
 }
 
+export async function deleteDispatch(id, params = {}) {
+  const query = new URLSearchParams(params).toString();
+  const res = await fetch(`${API_BASE}/dispatches/${id}?${query}`, {
+    method: 'DELETE'
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) throw new Error(data.error || 'Failed to delete dispatch');
+  return data;
+}
+
+export async function clearAllDispatches(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  const res = await fetch(`${API_BASE}/dispatches/clear-all?${query}`, {
+    method: 'DELETE'
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) throw new Error(data.error || 'Failed to clear dispatches');
+  return data;
+}
+
+export async function resetDealerStock(payload) {
+  const res = await fetch(`${API_BASE}/dispatches/reset-dealer-stock`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) throw new Error(data.error || 'Failed to reset dealer stock');
+  return data;
+}
+
 

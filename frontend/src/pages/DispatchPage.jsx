@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Truck, Plus, Search, Barcode, Eye, RotateCcw, RefreshCw, CheckCircle2, Building2, MapPin, UserCheck, Check, Layers, ArrowRight, Printer, Download, Store } from 'lucide-react';
-import { fetchDispatches, fetchDispatchById, createDispatch, returnDispatchStock, fetchDealerStockSummary, fetchUsers, fetchDevices } from '../services/api';
+import { Truck, Plus, Search, Barcode, Eye, RotateCcw, RefreshCw, CheckCircle2, Building2, MapPin, UserCheck, Check, Layers, ArrowRight, Printer, Download, Store, Trash2 } from 'lucide-react';
+import { fetchDispatches, fetchDispatchById, createDispatch, returnDispatchStock, fetchDealerStockSummary, fetchUsers, fetchDevices, deleteDispatch, clearAllDispatches, resetDealerStock } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import DealerDetailModal from '../components/DealerDetailModal';
 import DeliveryChallanModal from '../components/DeliveryChallanModal';
@@ -190,6 +190,52 @@ export default function DispatchPage({ onOpenScannerWithCallback, onOpenTraceDra
     }
   };
 
+  const handleDeleteSingleDispatch = async (id) => {
+    if (!window.confirm(`Are you sure you want to delete Dispatch #DSP-${id}? Devices in this dispatch will be returned to Central Warehouse.`)) {
+      return;
+    }
+    try {
+      const res = await deleteDispatch(id, { revert_stock: true });
+      if (res.success) {
+        loadData();
+        loadWarehouseDevices();
+      }
+    } catch (err) {
+      alert('Failed to delete dispatch: ' + err.message);
+    }
+  };
+
+  const handleClearAllDispatches = async () => {
+    if (!window.confirm('⚠️ Are you sure you want to DELETE ALL dispatch records? All dealer assigned devices will be reset back to Central Warehouse.')) {
+      return;
+    }
+    try {
+      const res = await clearAllDispatches({ revert_stock: true });
+      if (res.success) {
+        loadData();
+        loadWarehouseDevices();
+      }
+    } catch (err) {
+      alert('Failed to clear dispatches: ' + err.message);
+    }
+  };
+
+  const handleResetDealerHolding = async (dealerName) => {
+    if (!window.confirm(`Reset all holding stock for ${dealerName} and return units to Central Warehouse?`)) {
+      return;
+    }
+    try {
+      const res = await resetDealerStock({ dealer_name: dealerName });
+      if (res.success) {
+        alert(res.message);
+        loadData();
+        loadWarehouseDevices();
+      }
+    } catch (err) {
+      alert('Failed to reset dealer stock: ' + err.message);
+    }
+  };
+
   return (
     <div className="space-y-6">
       
@@ -202,17 +248,27 @@ export default function DispatchPage({ onOpenScannerWithCallback, onOpenTraceDra
           <p className="text-xs text-slate-500">Dispatch stock to dealers/installers, track holding levels, and process returns</p>
         </div>
 
-        <div className="flex gap-2 self-start md:self-auto">
+        <div className="flex gap-2 self-start md:self-auto items-center">
+          {dispatches.length > 0 && (
+            <button
+              onClick={handleClearAllDispatches}
+              className="px-3.5 py-2 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer"
+              title="Delete all dispatch history records and reset stock"
+            >
+              <Trash2 className="w-3.5 h-3.5" /> Clear All Dispatches
+            </button>
+          )}
+
           <button
             onClick={() => setShowReturnModal(true)}
-            className="px-3.5 py-2 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-colors"
+            className="px-3.5 py-2 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer"
           >
             <RotateCcw className="w-4 h-4" /> Process Stock Return
           </button>
 
           <button
             onClick={() => setShowNewModal(true)}
-            className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold rounded-xl shadow-xs flex items-center gap-1.5 transition-colors"
+            className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold rounded-xl shadow-xs flex items-center gap-1.5 transition-colors cursor-pointer"
           >
             <Plus className="w-4 h-4" /> New Dispatch
           </button>
@@ -244,9 +300,23 @@ export default function DispatchPage({ onOpenScannerWithCallback, onOpenTraceDra
                   <span className="text-[11px] text-slate-500">{item.device_type_name}</span>
                 </div>
               </div>
-              <span className="px-2.5 py-1 rounded-full text-xs font-mono font-bold bg-amber-50 text-amber-700 border border-amber-200">
-                {item.device_count} Units
-              </span>
+
+              <div className="flex items-center gap-2">
+                <span className="px-2.5 py-1 rounded-full text-xs font-mono font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                  {item.device_count} Units
+                </span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleResetDealerHolding(item.dealer_name);
+                  }}
+                  title={`Reset ${item.dealer_name} holding stock back to Central Warehouse`}
+                  className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
           ))}
         </div>
@@ -256,7 +326,9 @@ export default function DispatchPage({ onOpenScannerWithCallback, onOpenTraceDra
       <div className="glass-panel rounded-2xl overflow-hidden">
         <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
           <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">Dispatch Records History</h3>
-          <span className="text-xs text-slate-500">{dispatches.length} Total Dispatches</span>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-slate-500">{dispatches.length} Total Dispatches</span>
+          </div>
         </div>
 
         <div className="overflow-x-auto">
@@ -309,6 +381,13 @@ export default function DispatchPage({ onOpenScannerWithCallback, onOpenTraceDra
                       className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-medium rounded-lg transition-colors inline-flex items-center gap-1 cursor-pointer"
                     >
                       <Eye className="w-3.5 h-3.5 text-blue-600" /> View IMEIs
+                    </button>
+                    <button
+                      onClick={() => handleDeleteSingleDispatch(disp.id)}
+                      className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                      title={`Delete Dispatch #DSP-${disp.id} and revert stock`}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </td>
                 </tr>

@@ -36,7 +36,7 @@ import {
   Calendar,
   Table
 } from 'lucide-react';
-import { fetchStats, fetchPurchaseBatches, fetchDeviceTypes, fetchAgingAnalysis, fetchSimValidity } from '../services/api';
+import { fetchStats, fetchPurchaseBatches, fetchDeviceTypes, fetchAgingAnalysis, fetchSimValidity, resetDealerStock } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import DealerDetailModal from '../components/DealerDetailModal';
 import FitmentReceiptModal from '../components/FitmentReceiptModal';
@@ -324,6 +324,21 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
 
     const url = `https://wa.me/?text=${encodeURIComponent(msg)}`;
     window.open(url, '_blank');
+  };
+
+  const handleResetDealerHolding = async (dealerName) => {
+    if (!window.confirm(`Reset all holding stock for ${dealerName} and return units to Central Warehouse?`)) {
+      return;
+    }
+    try {
+      const res = await resetDealerStock({ dealer_name: dealerName });
+      if (res.success) {
+        alert(res.message);
+        loadData();
+      }
+    } catch (err) {
+      alert('Failed to reset dealer stock: ' + err.message);
+    }
   };
 
   return (
@@ -843,6 +858,17 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
                       <span className="font-mono font-bold text-indigo-700 text-sm">{d.total}</span>
                       <div className="text-[10px] text-slate-400">Total Units</div>
                     </div>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleResetDealerHolding(d.dealer);
+                      }}
+                      title={`Reset ${d.dealer} holding stock back to Central Warehouse`}
+                      className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                    </button>
                     <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-indigo-600 transition-colors" />
                   </div>
                 </div>
