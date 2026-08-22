@@ -22,7 +22,7 @@ import {
   FileSpreadsheet
 } from 'lucide-react';
 import { recordInstallation, recordBulkInstallations, fetchInstallations, lookupCustomerByPhone, getCustomerDirectoryExportUrl } from '../services/api';
-import { buildCustomerCredentialsWhatsAppMessage, buildPaymentQrWhatsAppMessage } from '../utils/whatsapp';
+import { buildCustomerCredentialsWhatsAppMessage, buildPaymentQrWhatsAppMessage, buildPaymentReceivedWhatsAppMessage } from '../utils/whatsapp';
 import PaymentQrModal from '../components/PaymentQrModal';
 
 export default function InstallationPage({ onOpenScannerWithCallback, onOpenTraceDrawer }) {
@@ -448,29 +448,54 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
                       {/* 1-Click WhatsApp Payment & Login Actions */}
                       <td className="p-3.5 text-right sticky right-0 bg-slate-50 border-l border-slate-200">
                         <div className="flex items-center justify-end gap-1.5">
-                          {/* 1-Click Option 1: WhatsApp Payment Request with UPI Link */}
-                          {(() => {
-                            const waPay = buildPaymentQrWhatsAppMessage({
-                              phone: inst.customer_contact,
-                              customerName: inst.customer_name,
-                              vehicleNumber: inst.vehicle_number,
-                              imei: inst.imei_number,
-                              amount: inst.sale_price || 0,
-                              stockPlace: inst.installation_location || 'FuelTracks Central'
-                            });
-                            return (
-                              <a
-                                href={waPay.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                title={`Send 1-Click WhatsApp Payment Request (UPI) to ${inst.customer_contact || 'Customer'}`}
-                                className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-[11px] font-bold inline-flex items-center gap-1 shadow-2xs transition-colors cursor-pointer"
-                              >
-                                <Send className="w-3 h-3" />
-                                <span>Pay (WA)</span>
-                              </a>
-                            );
-                          })()}
+                          {/* 1-Click Option 1: WhatsApp Payment Received Acknowledgement OR Payment Request */}
+                          {isPaid ? (
+                            (() => {
+                              const waRec = buildPaymentReceivedWhatsAppMessage({
+                                phone: inst.customer_contact,
+                                customerName: inst.customer_name,
+                                vehicleNumber: inst.vehicle_number,
+                                imei: inst.imei_number,
+                                amount: inst.sale_price || 0,
+                                paymentDate: inst.installation_date
+                              });
+                              return (
+                                <a
+                                  href={waRec.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  title={`Send Payment Received Acknowledgement to ${inst.customer_contact || 'Customer'}`}
+                                  className="px-2.5 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-[11px] font-bold inline-flex items-center gap-1 shadow-2xs transition-colors cursor-pointer"
+                                >
+                                  <CheckCircle2 className="w-3 h-3" />
+                                  <span>Paid (WA)</span>
+                                </a>
+                              );
+                            })()
+                          ) : (
+                            (() => {
+                              const waPay = buildPaymentQrWhatsAppMessage({
+                                phone: inst.customer_contact,
+                                customerName: inst.customer_name,
+                                vehicleNumber: inst.vehicle_number,
+                                imei: inst.imei_number,
+                                amount: inst.sale_price || 0,
+                                stockPlace: inst.installation_location || 'FuelTracks Central'
+                              });
+                              return (
+                                <a
+                                  href={waPay.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  title={`Send 1-Click WhatsApp Payment Request (UPI) to ${inst.customer_contact || 'Customer'}`}
+                                  className="px-2.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-[11px] font-bold inline-flex items-center gap-1 shadow-2xs transition-colors cursor-pointer"
+                                >
+                                  <Send className="w-3 h-3" />
+                                  <span>Pay (WA)</span>
+                                </a>
+                              );
+                            })()
+                          )}
 
                           {/* 1-Click WhatsApp GPS Credentials */}
                           {(() => {

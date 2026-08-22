@@ -479,3 +479,53 @@ Thank you for choosing *FuelTracks*!
   return { message, url, targetPhone, upiLink, dueAmount, upiId };
 }
 
+/**
+ * 1-Click WhatsApp Payment Received Confirmation Acknowledgement
+ */
+export function buildPaymentReceivedWhatsAppMessage({
+  phone = '',
+  customerName = 'Valued Customer',
+  vehicleNumber = '',
+  amount = 0,
+  imei = '',
+  paymentMode = 'UPI / Online Transfer',
+  paymentDate = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' }),
+  transactionRef = ''
+}) {
+  const cleanDigits = phone ? String(phone).replace(/[^0-9]/g, '') : '';
+  const targetPhone = cleanDigits.length === 10 ? `91${cleanDigits}` : cleanDigits;
+
+  const formattedAmount = formatINR(amount || 0);
+
+  const message = `*✅ PAYMENT RECEIVED ACKNOWLEDGEMENT*
+
+*Dear ${customerName || 'Customer'},*
+
+Greetings from *FuelTracks Technologies Pvt. Ltd.*! 🚗
+
+We have successfully received your payment towards your GPS / VLTD tracking device subscription.
+
+━━━━━━━━━━━━━━━━━━━━━━
+📋 *PAYMENT DETAILS:*
+━━━━━━━━━━━━━━━━━━━━━━
+💰 *Amount Received:* *${formattedAmount}*
+🚗 *Vehicle Number:* *${vehicleNumber || 'Registered Vehicle'}*
+🏷️ *Device IMEI:* \`${imei || 'Configured'}\`
+📅 *Payment Date:* ${paymentDate}
+💳 *Payment Mode:* ${paymentMode}${transactionRef ? `\n🔖 *Ref / Txn ID:* \`${transactionRef}\`` : ''}
+━━━━━━━━━━━━━━━━━━━━━━
+
+✅ *Your account & tracking services are active.*
+
+Thank you for your business! For 24/7 technical support or renewal inquiries, feel free to contact us.
+
+*FuelTracks Technologies Pvt. Ltd.*
+📞 Support: +91 998800234 | 🌐 www.fueltracks.in`;
+
+  const url = targetPhone
+    ? `https://api.whatsapp.com/send?phone=${targetPhone}&text=${encodeURIComponent(message)}`
+    : `https://api.whatsapp.com/send?text=${encodeURIComponent(message)}`;
+
+  return { message, url, targetPhone, formattedAmount };
+}
+
