@@ -24,8 +24,12 @@ import {
 import { recordInstallation, recordBulkInstallations, fetchInstallations, lookupCustomerByPhone, getCustomerDirectoryExportUrl } from '../services/api';
 import { buildCustomerCredentialsWhatsAppMessage, buildPaymentQrWhatsAppMessage, buildPaymentReceivedWhatsAppMessage } from '../utils/whatsapp';
 import PaymentQrModal from '../components/PaymentQrModal';
+import { useAuth } from '../context/AuthContext';
 
 export default function InstallationPage({ onOpenScannerWithCallback, onOpenTraceDrawer }) {
+  const { user } = useAuth();
+  const isDealer = user?.role === 'DEALER';
+
   const [installations, setInstallations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -276,16 +280,18 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
         </div>
 
         <div className="flex items-center gap-2 self-start md:self-auto flex-wrap">
-          <a
-            href={getCustomerDirectoryExportUrl()}
-            target="_blank"
-            rel="noreferrer"
-            className="px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer"
-            title="Download full Customer details with Aadhar, PAN, Chassis, Engine in Excel Sheet (.xlsx)"
-          >
-            <FileSpreadsheet className="w-3.5 h-3.5 text-indigo-600" />
-            <span>📥 Export Customer KYC Excel</span>
-          </a>
+          {!isDealer && (
+            <a
+              href={getCustomerDirectoryExportUrl()}
+              target="_blank"
+              rel="noreferrer"
+              className="px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer"
+              title="Download full Customer details with Aadhar, PAN, Chassis, Engine in Excel Sheet (.xlsx)"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 text-indigo-600" />
+              <span>📥 Export Customer KYC Excel</span>
+            </a>
+          )}
 
           <button
             onClick={() => { setShowBulkModal(true); setBulkResult(null); }}
