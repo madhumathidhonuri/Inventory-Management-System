@@ -341,39 +341,285 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
     }
   };
 
+  if (isDealer) {
+    return (
+      <div className="space-y-6">
+        {/* Dealer Welcome & Quick Action Header */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs">
+          <div>
+            <div className="flex items-center gap-2 mb-1.5">
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
+                🏪 Authorized Dealer Branch
+              </span>
+              <span className="text-xs font-semibold text-slate-500">
+                {user?.region ? `${user.region} Region` : 'Active Hub'}
+              </span>
+            </div>
+            <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+              <Boxes className="w-5 h-5 text-amber-600" /> Welcome, {user?.name || 'Dealer Partner'}
+            </h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Your branch workspace for stock fitment, vehicle installations, and payment confirmations. Total assigned stock: <strong className="text-amber-800">{totalDevices} units</strong>.
+            </p>
+          </div>
+
+          {/* Dealer Actions */}
+          <div className="flex flex-wrap items-center gap-2.5">
+            <button
+              onClick={() => onNavigateTab('installations')}
+              className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+            >
+              <Plus className="w-4 h-4" /> Record Vehicle Installation
+            </button>
+            <button
+              onClick={() => onNavigateTab('dispatches')}
+              className="px-3.5 py-2.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+            >
+              <Truck className="w-4 h-4 text-amber-600" /> My Dispatches & DCN ({totalDevices})
+            </button>
+            <button
+              onClick={() => onNavigateTab('inventory')}
+              className="px-3.5 py-2.5 bg-blue-50 hover:bg-blue-100 text-blue-800 border border-blue-200 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+            >
+              <Boxes className="w-4 h-4 text-blue-600" /> View My Stock
+            </button>
+          </div>
+        </div>
+
+        {/* Dealer KPI Metric Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* 1. Total Allocated Stock */}
+          <div
+            onClick={() => onNavigateTab('inventory')}
+            className="glass-panel p-4.5 rounded-2xl hover:border-amber-400 transition-all cursor-pointer group shadow-2xs"
+          >
+            <div className="flex items-center justify-between text-slate-500 mb-2">
+              <span className="text-[11px] font-bold uppercase tracking-wider">Total Allocated Stock</span>
+              <div className="p-2 rounded-xl bg-amber-50 text-amber-600 group-hover:bg-amber-600 group-hover:text-white transition-colors">
+                <Boxes className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="text-2xl font-bold font-mono text-slate-900">{totalDevices} <span className="text-xs font-normal text-slate-500">Units</span></div>
+            <div className="text-[11px] text-slate-500 mt-1 flex items-center justify-between">
+              <span>Dispatched to your branch</span>
+              <ArrowUpRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-amber-600" />
+            </div>
+          </div>
+
+          {/* 2. In-Stock Ready for Fitment */}
+          <div
+            onClick={() => onNavigateTab('inventory')}
+            className="glass-panel p-4.5 rounded-2xl hover:border-blue-400 transition-all cursor-pointer group shadow-2xs"
+          >
+            <div className="flex items-center justify-between text-slate-500 mb-2">
+              <span className="text-[11px] font-bold uppercase tracking-wider">In-Stock (Uninstalled)</span>
+              <div className="p-2 rounded-xl bg-blue-50 text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                <CheckCircle2 className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="text-2xl font-bold font-mono text-blue-900">{withDealer || inStockCount} <span className="text-xs font-normal text-slate-500">Units</span></div>
+            <div className="text-[11px] text-slate-500 mt-1 flex items-center justify-between">
+              <span>Available for vehicle fitment</span>
+              <ArrowUpRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-blue-600" />
+            </div>
+          </div>
+
+          {/* 3. Installed In Vehicles */}
+          <div
+            onClick={() => onNavigateTab('installations')}
+            className="glass-panel p-4.5 rounded-2xl hover:border-emerald-400 transition-all cursor-pointer group shadow-2xs"
+          >
+            <div className="flex items-center justify-between text-slate-500 mb-2">
+              <span className="text-[11px] font-bold uppercase tracking-wider">Installed Vehicles</span>
+              <div className="p-2 rounded-xl bg-emerald-50 text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
+                <Car className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="text-2xl font-bold font-mono text-emerald-850">{installed} <span className="text-xs font-normal text-slate-500">Vehicles</span></div>
+            <div className="text-[11px] text-slate-500 mt-1 flex items-center justify-between">
+              <span>Active on road</span>
+              <ArrowUpRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-emerald-600" />
+            </div>
+          </div>
+
+          {/* 4. Payment Collected */}
+          <div
+            onClick={() => onNavigateTab('installations')}
+            className="glass-panel p-4.5 rounded-2xl hover:border-emerald-400 transition-all cursor-pointer group shadow-2xs"
+          >
+            <div className="flex items-center justify-between text-slate-500 mb-2">
+              <span className="text-[11px] font-bold uppercase tracking-wider">Payment Received</span>
+              <div className="p-2 rounded-xl bg-emerald-50 text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
+                <DollarSign className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="text-2xl font-bold font-mono text-emerald-900">
+              ₹{(financials?.payment_received_amount || 0).toLocaleString()}
+            </div>
+            <div className="text-[11px] text-slate-500 mt-1 flex items-center justify-between">
+              <span>{financials?.payment_received_count || 0} Paid • {financials?.payment_pending_count || 0} Pending</span>
+              <ArrowUpRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-emerald-600" />
+            </div>
+          </div>
+        </div>
+
+        {/* Dealer Stock Model Breakdown & Recent Installations */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Left: Dealer Stock Model Breakdown */}
+          <div className="glass-panel p-5 rounded-2xl space-y-4 shadow-2xs">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2 text-slate-900 font-bold text-sm">
+                <Layers className="w-4 h-4 text-amber-600" />
+                <span>My Stock Models</span>
+              </div>
+              <span className="text-xs text-slate-400 font-mono font-bold">{totalDevices} Units</span>
+            </div>
+
+            <div className="space-y-3">
+              {typeCounts.length === 0 ? (
+                <div className="text-center py-6 text-xs text-slate-400">
+                  No active device models assigned yet.
+                </div>
+              ) : (
+                typeCounts.map((t) => (
+                  <div key={t.id} className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                    <div className="flex items-center justify-between text-xs">
+                      <div className="font-bold text-slate-900 flex items-center gap-2">
+                        <span>{t.device_type}</span>
+                        <span className="px-1.5 py-0.5 rounded text-[10px] bg-slate-200 text-slate-700">{t.category}</span>
+                      </div>
+                      <span className="font-mono font-bold text-amber-700">{t.total_count} Units</span>
+                    </div>
+
+                    <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden flex">
+                      <div
+                        className="bg-emerald-500 h-1.5"
+                        style={{ width: `${t.total_count > 0 ? (t.installed_count / t.total_count) * 100 : 0}%` }}
+                      />
+                      <div
+                        className="bg-amber-500 h-1.5"
+                        style={{ width: `${t.total_count > 0 ? (t.with_dealer_count / t.total_count) * 100 : 0}%` }}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between text-[11px] text-slate-500">
+                      <span className="text-emerald-700">● Installed: {t.installed_count}</span>
+                      <span className="text-amber-700">● Available: {t.with_dealer_count}</span>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* Right: Recent Installed Vehicles / Quick Actions */}
+          <div className="lg:col-span-2 glass-panel p-5 rounded-2xl space-y-4 shadow-2xs flex flex-col">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2 text-slate-900 font-bold text-sm">
+                <Car className="w-4 h-4 text-emerald-600" />
+                <span>Recent Vehicle Installations & Actions</span>
+              </div>
+              <button
+                onClick={() => onNavigateTab('installations')}
+                className="text-xs text-emerald-700 font-bold hover:underline flex items-center gap-1 cursor-pointer"
+              >
+                All Installations <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            <div className="flex-1 space-y-3">
+              {(!stats?.recentActivity || stats.recentActivity.length === 0) ? (
+                <div className="text-center py-10 text-xs text-slate-400">
+                  No recent vehicle installations recorded yet. Click "Record Vehicle Installation" above to deploy your first device!
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
+                      <tr>
+                        <th className="p-2.5 font-bold">Vehicle #</th>
+                        <th className="p-2.5 font-bold">Customer</th>
+                        <th className="p-2.5 font-bold">IMEI</th>
+                        <th className="p-2.5 font-bold">Payment</th>
+                        <th className="p-2.5 font-bold text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {stats.recentActivity.slice(0, 6).map((act, i) => (
+                        <tr key={i} className="hover:bg-slate-50 transition-colors">
+                          <td className="p-2.5 font-mono font-bold text-slate-900">{act.vehicle_number || '-'}</td>
+                          <td className="p-2.5 text-slate-700">
+                            <div>{act.customer_name || '-'}</div>
+                            <div className="text-[10px] text-slate-400 font-mono">{act.customer_phone || ''}</div>
+                          </td>
+                          <td className="p-2.5 font-mono text-[11px] text-blue-700">
+                            <button
+                              onClick={() => onOpenTraceDrawer(act.imei_number)}
+                              className="hover:underline text-left cursor-pointer"
+                            >
+                              {act.imei_number}
+                            </button>
+                          </td>
+                          <td className="p-2.5">
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                              act.payment_status === 'PAID' 
+                                ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' 
+                                : 'bg-amber-50 text-amber-800 border border-amber-200'
+                            }`}>
+                              {act.payment_status || 'PENDING'}
+                            </span>
+                          </td>
+                          <td className="p-2.5 text-right flex items-center justify-end gap-1.5">
+                            {act.customer_phone && (
+                              <button
+                                onClick={() => {
+                                  const msg = buildPaymentDueReminderWhatsAppMessage({
+                                    customerName: act.customer_name,
+                                    vehicleNumber: act.vehicle_number,
+                                    imei: act.imei_number,
+                                    amountDue: act.cost || 0
+                                  });
+                                  window.open(`https://wa.me/91${act.customer_phone.replace(/\D/g, '')}?text=${encodeURIComponent(msg)}`, '_blank');
+                                }}
+                                className="p-1 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
+                                title="Send WhatsApp Payment Nudge"
+                              >
+                                <MessageSquare className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                            <button
+                              onClick={() => onOpenTraceDrawer(act.imei_number)}
+                              className="p-1 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                              title="Trace Device Lifecycle"
+                            >
+                              <ArrowUpRight className="w-3.5 h-3.5" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       
       {/* Top Welcome Header & Quick Action Buttons */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs">
         <div>
-          {isDealer ? (
-            <div>
-              <div className="flex items-center gap-2 mb-1.5">
-                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-200">
-                  Dealer Partner Portal
-                </span>
-                <span className="text-xs font-semibold text-slate-500">
-                  {user?.region ? `${user.region} Region` : 'Authorized Branch'}
-                </span>
-              </div>
-              <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
-                <Boxes className="w-5 h-5 text-blue-600" /> Welcome, {user?.name || 'Dealer Partner'}
-              </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Live dashboard of your assigned inventory in {user?.region || 'your region'}. Total allocated stock: <strong className="text-blue-700">{totalDevices} units</strong>.
-              </p>
-            </div>
-          ) : (
-            <div>
-              <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
-                <Activity className="w-5 h-5 text-purple-600" /> Executive Operations Dashboard
-              </h2>
-              <p className="text-xs text-slate-500">
-                Real-time overview of inventory stock, dealer dispatches, vehicle installations, and monthly payment collection.
-              </p>
-            </div>
-          )}
+          <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+            <Activity className="w-5 h-5 text-purple-600" /> Executive Operations Dashboard
+          </h2>
+          <p className="text-xs text-slate-500">
+            Real-time overview of inventory stock, dealer dispatches, vehicle installations, and monthly payment collection.
+          </p>
         </div>
 
         {/* Quick Action Shortcuts */}
