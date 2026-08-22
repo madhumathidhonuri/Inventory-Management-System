@@ -705,8 +705,65 @@ router.get('/export', (req, res) => {
   }
 });
 
-// Helper: Compute 100% dynamic Daily Master Inventory Distribution Matrix
-function computeDailyDistributionMatrix() {
+// Helper: Extract normalized YYYY-MM-DD certificate date from device & attributes
+function extractDeviceCertificateDate(dev = {}, attrs = {}) {
+  const dateKeys = [
+    'CERTIFICATE ISSUED DATE', 'Certificate Issued Date', 'certificate_issued_date',
+    'CERTIFICATE DATE', 'Certificate Date', 'certificate_date',
+    'INSTALLATION DATE', 'Installation Date', 'installation_date',
+    'DATE', 'Date', 'date', 'STOCK PLACE DATE'
+  ];
+
+  for (const k of dateKeys) {
+    if (attrs[k] !== undefined && attrs[k] !== null && String(attrs[k]).trim() !== '') {
+      const val = attrs[k];
+
+      // Excel serial integer (e.g. 46256...)
+      if (typeof val === 'number' || /^\d{5}$/.test(String(val).trim())) {
+        const num = Number(val);
+        if (num > 30000 && num < 60000) {
+          const d = new Date(Math.round((num - 25569) * 86400 * 1000));
+          return d.toISOString().split('T')[0];
+        }
+      }
+
+      const str = String(val).trim();
+      // Match DD/MM/YYYY or DD-MM-YYYY
+      const dmy = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+      if (dmy) {
+        const day = dmy[1].padStart(2, '0');
+        const month = dmy[2].padStart(2, '0');
+        const year = dmy[3];
+        return `${year}-${month}-${day}`;
+      }
+
+      // Match YYYY-MM-DD
+      const ymd = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+      if (ymd) {
+        const year = ymd[1];
+        const month = ymd[2].padStart(2, '0');
+        const day = ymd[3].padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      }
+
+      const parsed = new Date(str);
+      if (!isNaN(parsed.getTime()) && parsed.getFullYear() > 2020) {
+        return parsed.toISOString().split('T')[0];
+      }
+    }
+  }
+
+  if (dev.current_status === 'INSTALLED' && dev.updated_at) {
+    return dev.updated_at.split('T')[0].split(' ')[0];
+  }
+
+  return null;
+}
+
+// Helper: Compute 100% dynamic Daily Master Inventory Distribution Matrix with Today's Issued Certificates
+function computeDailyDistributionMatrix(requestedDate = null) {
+  const targetDate = requestedDate || new Date().toISOString().split('T')[0];
+
   const deviceTypes = db.prepare('SELECT id, name FROM device_types WHERE active = 1 ORDER BY name ASC').all();
   const batches = db.prepare('SELECT device_type_id, SUM(total_devices_count) as total_purchased FROM purchase_batches GROUP BY device_type_id').all();
   const batchMap = {};
@@ -715,24 +772,29 @@ function computeDailyDistributionMatrix() {
   const devices = db.prepare(`
     SELECT 
       d.id, 
+      d.imei_number,
       d.device_type_id, 
       dt.name as device_name, 
       d.current_status, 
       d.current_holder_name, 
-      d.additional_attributes 
+      d.additional_attributes,
+      d.updated_at,
+      d.created_at
     FROM devices d 
     JOIN device_types dt ON d.device_type_id = dt.id
   `).all();
 
   const locationsSet = new Set();
   const matrix = {};
+  const todayIssuedDevices = [];
 
   deviceTypes.forEach(dt => {
     matrix[dt.name] = {
       device_type_id: dt.id,
       device_name: dt.name,
       locations: {},
-      certificates_issued: 0,
+      certificates_issued_today: 0,
+      total_certificates_issued: 0,
       in_stock_total: 0,
       purchased_total: batchMap[dt.id] || 0
     };
@@ -748,16 +810,36 @@ function computeDailyDistributionMatrix() {
         device_type_id: dev.device_type_id,
         device_name: devName,
         locations: {},
-        certificates_issued: 0,
+        certificates_issued_today: 0,
+        total_certificates_issued: 0,
         in_stock_total: 0,
         purchased_total: 0
       };
     }
 
-    const isInstalled = dev.current_status === 'INSTALLED' || Boolean(attrs['VEHICLE NUMBER'] || attrs['VEHICLE NO']);
+    const vehNo = attrs['VEHICLE NUMBER'] || attrs['VEHICLE NO'] || attrs['vehicle_number'] || attrs['vehicle_no'] || '';
+    const isInstalled = dev.current_status === 'INSTALLED' || Boolean(String(vehNo).trim());
+    const certDate = extractDeviceCertificateDate(dev, attrs);
+
+    const isIssuedToday = Boolean(certDate && certDate === targetDate);
+
+    if (isIssuedToday) {
+      matrix[devName].certificates_issued_today++;
+      todayIssuedDevices.push({
+        id: dev.id,
+        imei_number: dev.imei_number,
+        device_name: devName,
+        vehicle_number: vehNo || '-',
+        customer_name: attrs['CUSTOMER NAME'] || attrs['CUSTOMER'] || attrs['customer_name'] || '-',
+        customer_phone: attrs['MOBILE'] || attrs['PHONE'] || attrs['customer_phone'] || '-',
+        certificate_issued_date: certDate,
+        chasis_number: attrs['CHASIS NUMBER'] || attrs['CHASSIS NUMBER'] || attrs['chasis_number'] || '-',
+        engine_number: attrs['ENGINE NUMBER'] || attrs['engine_number'] || '-'
+      });
+    }
 
     if (isInstalled) {
-      matrix[devName].certificates_issued++;
+      matrix[devName].total_certificates_issued++;
     } else {
       let place = attrs['STOCK PLACE'] || attrs['STOCK LOCATION'] || dev.current_holder_name || 'OFFICE';
       place = String(place).trim().toUpperCase();
@@ -769,7 +851,7 @@ function computeDailyDistributionMatrix() {
     }
   });
 
-  // Dynamic locations sorting: Main hubs first if present, then alphabetical
+  // Dynamic locations sorting
   const priority = ['OFFICE', 'RESIDENCE', 'CHENNAI', 'TESTING CHENNAI'];
   const allLocations = Array.from(locationsSet).sort((a, b) => {
     const pA = priority.indexOf(a);
@@ -780,10 +862,11 @@ function computeDailyDistributionMatrix() {
     return a.localeCompare(b);
   });
 
-  // Calculate dynamic column totals for bottom summary row
+  // Column totals
   const columnTotals = {
     locations: {},
-    certificates_issued: 0,
+    certificates_issued_today: 0,
+    total_certificates_issued: 0,
     in_stock_total: 0,
     purchased_total: 0
   };
@@ -796,7 +879,8 @@ function computeDailyDistributionMatrix() {
   });
 
   Object.values(matrix).forEach(m => {
-    columnTotals.certificates_issued += m.certificates_issued;
+    columnTotals.certificates_issued_today += m.certificates_issued_today;
+    columnTotals.total_certificates_issued += m.total_certificates_issued;
     columnTotals.in_stock_total += m.in_stock_total;
     columnTotals.purchased_total += m.purchased_total;
   });
@@ -808,6 +892,9 @@ function computeDailyDistributionMatrix() {
     locations: allLocations,
     rows: Object.values(matrix),
     columnTotals,
+    todayIssuedDevices,
+    todayIssuedCount: todayIssuedDevices.length,
+    targetDate,
     generatedAt: dateStr
   };
 }
@@ -815,39 +902,229 @@ function computeDailyDistributionMatrix() {
 // GET /api/reports/daily-distribution - Live dynamic Daily Stock Matrix JSON
 router.get('/daily-distribution', (req, res) => {
   try {
-    const data = computeDailyDistributionMatrix();
+    const { date } = req.query;
+    const data = computeDailyDistributionMatrix(date);
     res.json({ success: true, data });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// GET /api/reports/export-daily-distribution - Excel export with Blue Header & Orange Total Row
+// GET /api/reports/export-daily-distribution - Excel export with Certificates Issued Today Sheet
 router.get('/export-daily-distribution', async (req, res) => {
   try {
-    const matrixData = computeDailyDistributionMatrix();
-    const { locations, rows, columnTotals, generatedAt } = matrixData;
+    const { date } = req.query;
+    const matrixData = computeDailyDistributionMatrix(date);
+    const { locations, rows, columnTotals, todayIssuedDevices, targetDate, generatedAt } = matrixData;
 
     const wb = new ExcelJS.Workbook();
     wb.creator = 'FuelTracks Technologies IMS';
     wb.lastModifiedBy = 'Super Admin';
     wb.created = new Date();
 
-    const ws = wb.addWorksheet('Daily Inventory Report', {
+    // -------------------------------------------------------------
+    // SHEET 1: Daily Inventory Distribution Matrix
+    // -------------------------------------------------------------
+    const ws = wb.addWorksheet('Daily Stock Matrix', {
       views: [{ showGridLines: true }]
     });
 
-    // Headers array: DEVICE, ...dynamicLocations, CERTIFICATES ISSUED, TOTAL, PURCHASED
-    const headers = ['DEVICE', ...locations, 'CERTIFICATES ISSUED', 'TOTAL', 'PURCHASED'];
+    const headers = [
+      'DEVICE',
+      ...locations,
+      'CERTIFICATES ISSUED TODAY',
+      'TOTAL INSTALLED',
+      'IN-STOCK TOTAL',
+      'PURCHASED'
+    ];
     const headerRow = ws.addRow(headers);
     headerRow.height = 28;
 
-    headerRow.eachCell((cell, colNumber) => {
+    headerRow.eachCell((cell) => {
       cell.fill = {
         type: 'pattern',
         pattern: 'solid',
-        fgColor: { argb: 'FF366092' } // Elegant Sky/Steel Blue Header
+        fgColor: { argb: 'FF366092' } // Steel Blue Header
       };
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 10, name: 'Calibri' };
+      cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+      cell.border = {
+        top: { style: 'thin', color: { argb: 'FFB0C4DE' } },
+        left: { style: 'thin', color: { argb: 'FFB0C4DE' } },
+        bottom: { style: 'medium', color: { argb: 'FF1F497D' } },
+        right: { style: 'thin', color: { argb: 'FFB0C4DE' } }
+      };
+    });
+
+    // Highlight 'CERTIFICATES ISSUED TODAY' header column in dark emerald
+    const certTodayColIdx = locations.length + 2;
+    headerRow.getCell(certTodayColIdx).fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF0D5C3A' } // Dark Emerald Green
+    };
+
+    rows.forEach(r => {
+      const rowValues = [
+        r.device_name,
+        ...locations.map(loc => r.locations[loc] || ''),
+        r.certificates_issued_today || 0,
+        r.total_certificates_issued || 0,
+        r.in_stock_total || 0,
+        r.purchased_total || 0
+      ];
+      const dataRow = ws.addRow(rowValues);
+      dataRow.height = 22;
+
+      dataRow.eachCell((cell, colNumber) => {
+        cell.font = { size: 10, name: 'Calibri' };
+        cell.alignment = { vertical: 'middle', horizontal: colNumber === 1 ? 'left' : 'center' };
+        cell.border = {
+          top: { style: 'thin', color: { argb: 'FFE0E0E0' } },
+          left: { style: 'thin', color: { argb: 'FFE0E0E0' } },
+          bottom: { style: 'thin', color: { argb: 'FFE0E0E0' } },
+          right: { style: 'thin', color: { argb: 'FFE0E0E0' } }
+        };
+
+        if (colNumber === 1) {
+          cell.font = { bold: true, name: 'Calibri', size: 10, color: { argb: 'FF1A202C' } };
+        } else if (colNumber === certTodayColIdx) {
+          cell.font = { bold: true, color: { argb: 'FF0D5C3A' }, name: 'Calibri' };
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE6F4EA' } }; // Light Emerald
+        }
+      });
+    });
+
+    // Orange Summary Totals Footer Row
+    const totalRowValues = [
+      'TOTAL',
+      ...locations.map(loc => columnTotals.locations[loc] || 0),
+      columnTotals.certificates_issued_today || 0,
+      columnTotals.total_certificates_issued || 0,
+      columnTotals.in_stock_total || 0,
+      columnTotals.purchased_total || 0
+    ];
+    const totalRow = ws.addRow(totalRowValues);
+    totalRow.height = 26;
+
+    totalRow.eachCell((cell) => {
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFED7D31' } // Orange
+      };
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 10, name: 'Calibri' };
+      cell.alignment = { vertical: 'middle', horizontal: 'center' };
+      cell.border = {
+        top: { style: 'medium', color: { argb: 'FFC65911' } },
+        left: { style: 'thin', color: { argb: 'FFF4B183' } },
+        bottom: { style: 'medium', color: { argb: 'FFC65911' } },
+        right: { style: 'thin', color: { argb: 'FFF4B183' } }
+      };
+    });
+
+    ws.columns = [
+      { width: 22 },
+      ...locations.map(() => ({ width: 15 })),
+      { width: 26 },
+      { width: 18 },
+      { width: 16 },
+      { width: 16 }
+    ];
+
+    // -------------------------------------------------------------
+    // SHEET 2: Certificates Issued Today Itemized List
+    // -------------------------------------------------------------
+    const wsCert = wb.addWorksheet(`Certificates Issued Today`, {
+      views: [{ showGridLines: true }]
+    });
+
+    const certHeaders = [
+      'Sl No',
+      'Certificate Issue Date',
+      'IMEI Number',
+      'Device Model',
+      'Vehicle Number',
+      'Customer Name',
+      'Customer Contact',
+      'Chassis Number',
+      'Engine Number'
+    ];
+
+    const certHeaderRow = wsCert.addRow(certHeaders);
+    certHeaderRow.height = 28;
+
+    certHeaderRow.eachCell((cell) => {
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FF0D5C3A' } // Deep Emerald Header
+      };
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 10, name: 'Calibri' };
+      cell.alignment = { vertical: 'middle', horizontal: 'center' };
+      cell.border = {
+        top: { style: 'thin', color: { argb: 'FF81C995' } },
+        left: { style: 'thin', color: { argb: 'FF81C995' } },
+        bottom: { style: 'medium', color: { argb: 'FF083D26' } },
+        right: { style: 'thin', color: { argb: 'FF81C995' } }
+      };
+    });
+
+    if (todayIssuedDevices.length === 0) {
+      const emptyRow = wsCert.addRow(['-', targetDate, 'No certificates issued on this date', '-', '-', '-', '-', '-', '-']);
+      emptyRow.height = 24;
+    } else {
+      todayIssuedDevices.forEach((item, idx) => {
+        const r = wsCert.addRow([
+          idx + 1,
+          item.certificate_issued_date || targetDate,
+          item.imei_number,
+          item.device_name,
+          item.vehicle_number,
+          item.customer_name,
+          item.customer_phone,
+          item.chasis_number,
+          item.engine_number
+        ]);
+        r.height = 22;
+        r.eachCell((cell, colNumber) => {
+          cell.font = { size: 10, name: 'Calibri' };
+          cell.alignment = { vertical: 'middle', horizontal: colNumber === 1 ? 'center' : 'left' };
+          cell.border = {
+            top: { style: 'thin', color: { argb: 'FFE0E0E0' } },
+            left: { style: 'thin', color: { argb: 'FFE0E0E0' } },
+            bottom: { style: 'thin', color: { argb: 'FFE0E0E0' } },
+            right: { style: 'thin', color: { argb: 'FFE0E0E0' } }
+          };
+          if (colNumber === 3 || colNumber === 5) {
+            cell.font = { bold: true, name: 'Calibri', size: 10 };
+          }
+        });
+      });
+    }
+
+    wsCert.columns = [
+      { width: 8 },
+      { width: 22 },
+      { width: 22 },
+      { width: 20 },
+      { width: 20 },
+      { width: 26 },
+      { width: 18 },
+      { width: 24 },
+      { width: 22 }
+    ];
+
+    const filename = `Daily_Report_Certificates_${targetDate}`;
+    const buffer = await wb.xlsx.writeBuffer();
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}.xlsx"`);
+    res.send(buffer);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
       cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 10, name: 'Calibri' };
       cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
       cell.border = {

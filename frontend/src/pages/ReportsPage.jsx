@@ -555,11 +555,14 @@ export default function ReportsPage() {
                           {loc}
                         </th>
                       ))}
-                      <th className="p-3 border-r border-[#2a4d77] whitespace-nowrap bg-[#2c5380]">
-                        CERTIFICATES ISSUED
+                      <th className="p-3 border-r border-[#1e543e] whitespace-nowrap bg-[#0D5C3A] text-emerald-100">
+                        CERTIFICATES ISSUED TODAY
                       </th>
                       <th className="p-3 border-r border-[#2a4d77] whitespace-nowrap bg-[#2c5380]">
-                        TOTAL
+                        TOTAL INSTALLED
+                      </th>
+                      <th className="p-3 border-r border-[#2a4d77] whitespace-nowrap bg-[#2c5380]">
+                        IN-STOCK TOTAL
                       </th>
                       <th className="p-3 whitespace-nowrap bg-[#2c5380]">
                         PURCHASED
@@ -583,14 +586,17 @@ export default function ReportsPage() {
                             )}
                           </td>
                         ))}
-                        <td className="p-3 font-mono font-bold text-emerald-800 bg-emerald-50/40 border-r border-slate-200">
-                          {r.certificates_issued}
+                        <td className="p-3 font-mono font-bold text-emerald-900 bg-emerald-100/70 border-r border-slate-200">
+                          {r.certificates_issued_today || 0}
+                        </td>
+                        <td className="p-3 font-mono font-bold text-slate-700 bg-slate-50 border-r border-slate-200">
+                          {r.total_certificates_issued || 0}
                         </td>
                         <td className="p-3 font-mono font-bold text-blue-900 bg-blue-50/40 border-r border-slate-200">
-                          {r.in_stock_total}
+                          {r.in_stock_total || 0}
                         </td>
                         <td className="p-3 font-mono font-bold text-slate-800 bg-slate-50 border-r border-slate-200">
-                          {r.purchased_total}
+                          {r.purchased_total || 0}
                         </td>
                       </tr>
                     ))}
@@ -607,19 +613,81 @@ export default function ReportsPage() {
                           TOTAL = {dailyMatrix.columnTotals.locations[loc] || 0}
                         </td>
                       ))}
-                      <td className="p-3 border-r border-orange-400 font-mono whitespace-nowrap bg-orange-700/80">
-                        TOTAL = {dailyMatrix.columnTotals.certificates_issued}
+                      <td className="p-3 border-r border-orange-400 font-mono whitespace-nowrap bg-emerald-800/90 text-emerald-100">
+                        TOTAL = {dailyMatrix.columnTotals.certificates_issued_today || 0}
                       </td>
                       <td className="p-3 border-r border-orange-400 font-mono whitespace-nowrap bg-orange-700/80">
-                        TOTAL = {dailyMatrix.columnTotals.in_stock_total}
+                        TOTAL = {dailyMatrix.columnTotals.total_certificates_issued || 0}
+                      </td>
+                      <td className="p-3 border-r border-orange-400 font-mono whitespace-nowrap bg-orange-700/80">
+                        TOTAL = {dailyMatrix.columnTotals.in_stock_total || 0}
                       </td>
                       <td className="p-3 font-mono whitespace-nowrap bg-orange-700/80">
-                        TOTAL = {dailyMatrix.columnTotals.purchased_total}
+                        TOTAL = {dailyMatrix.columnTotals.purchased_total || 0}
                       </td>
                     </tr>
                   </tfoot>
 
                 </table>
+              </div>
+
+              {/* Certificates Issued Today Itemized Details Table */}
+              <div className="bg-white rounded-2xl border border-emerald-200 overflow-hidden shadow-2xs">
+                <div className="p-4 bg-emerald-50/80 border-b border-emerald-200 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-5 h-5 text-emerald-700" />
+                    <div>
+                      <h4 className="text-xs font-bold text-emerald-950 uppercase tracking-wider">
+                        Itemized Certificates Issued Today
+                      </h4>
+                      <p className="text-[11px] text-emerald-800">
+                        Vehicles and devices with Certificate Issued Date matching {dailyMatrix.targetDate || 'Today'}
+                      </p>
+                    </div>
+                  </div>
+                  <span className="px-3 py-1 rounded-full text-xs font-bold font-mono bg-emerald-700 text-white shadow-2xs">
+                    {dailyMatrix.todayIssuedCount || 0} Issued Today
+                  </span>
+                </div>
+
+                {(!dailyMatrix.todayIssuedDevices || dailyMatrix.todayIssuedDevices.length === 0) ? (
+                  <div className="p-8 text-center text-xs text-slate-400">
+                    No vehicle fitments or certificates recorded with issue date matching today ({dailyMatrix.targetDate}).
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
+                        <tr>
+                          <th className="p-3 font-bold text-center">#</th>
+                          <th className="p-3 font-bold">Issue Date</th>
+                          <th className="p-3 font-bold">IMEI Number</th>
+                          <th className="p-3 font-bold">Device Model</th>
+                          <th className="p-3 font-bold">Vehicle Number</th>
+                          <th className="p-3 font-bold">Customer Name</th>
+                          <th className="p-3 font-bold">Contact Phone</th>
+                          <th className="p-3 font-bold">Chassis Number</th>
+                          <th className="p-3 font-bold">Engine Number</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {dailyMatrix.todayIssuedDevices.map((item, idx) => (
+                          <tr key={item.id || idx} className="hover:bg-emerald-50/40 transition-colors">
+                            <td className="p-3 text-center font-mono text-slate-400">{idx + 1}</td>
+                            <td className="p-3 font-mono font-bold text-emerald-800">{item.certificate_issued_date}</td>
+                            <td className="p-3 font-mono font-bold text-blue-700">{item.imei_number}</td>
+                            <td className="p-3 text-slate-800 font-semibold">{item.device_name}</td>
+                            <td className="p-3 font-mono font-bold text-slate-900">{item.vehicle_number}</td>
+                            <td className="p-3 text-slate-900 font-medium">{item.customer_name}</td>
+                            <td className="p-3 font-mono text-slate-600">{item.customer_phone}</td>
+                            <td className="p-3 font-mono text-slate-500">{item.chasis_number}</td>
+                            <td className="p-3 font-mono text-slate-500">{item.engine_number}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
 
               {/* Dynamic Columns Info Note */}
