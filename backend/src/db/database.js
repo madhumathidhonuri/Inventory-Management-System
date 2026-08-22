@@ -2,17 +2,44 @@ const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
 
-const dataDir = path.join(__dirname, '../../data');
+const dataDir = process.env.DATA_DIR || path.join(__dirname, '../../data');
 if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir, { recursive: true });
 }
 
+// Ensure backups directory exists
+const backupDir = path.join(dataDir, 'backups');
+if (!fs.existsSync(backupDir)) {
+  fs.mkdirSync(backupDir, { recursive: true });
+}
+
 const dbPath = path.join(dataDir, 'inventory.db');
+
+// Automated backup copy on startup if database exists
+try {
+  if (fs.existsSync(dbPath)) {
+    const todayStr = new Date().toISOString().split('T')[0];
+    const autoBackupPath = path.join(backupDir, `inventory_autobackup_${todayStr}.db`);
+    if (!fs.existsSync(autoBackupPath)) {
+      fs.copyFileSync(dbPath, autoBackupPath);
+    }
+  }
+} catch (e) {
+  console.warn('Auto-backup notice:', e.message);
+}
+
 const db = new Database(dbPath);
 
-// Enable Foreign Keys & WAL mode for performance
+// Enable Foreign Keys & WAL mode for performance & data integrity
 db.pragma('foreign_keys = ON');
 db.pragma('journal_mode = WAL');
+
+// Periodically run WAL checkpoint to ensure all transactions are flushed to disk
+setInterval(() => {
+  try {
+    db.pragma('wal_checkpoint(TRUNCATE)');
+  } catch (e) {}
+}, 10 * 60 * 1000); // Every 10 minutes
 
 function initDatabase() {
   db.exec(`

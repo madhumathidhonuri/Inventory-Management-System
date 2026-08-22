@@ -1242,4 +1242,32 @@ router.get('/customer-directory/export', async (req, res) => {
   }
 });
 
+// GET /api/reports/backup-database - 1-Click live SQLite database backup snapshot download
+router.get('/backup-database', (req, res) => {
+  try {
+    // Flush all pending WAL journal writes to database file
+    db.pragma('wal_checkpoint(TRUNCATE)');
+
+    const fs = require('fs');
+    const path = require('path');
+    const dataDir = process.env.DATA_DIR || path.join(__dirname, '../../data');
+    const dbPath = path.join(dataDir, 'inventory.db');
+
+    if (!fs.existsSync(dbPath)) {
+      return res.status(404).json({ success: false, error: 'Database file not found' });
+    }
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const filename = `FuelTracks_Live_DB_Backup_${timestamp}.db`;
+
+    res.setHeader('Content-Type', 'application/x-sqlite3');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+    const fileStream = fs.createReadStream(dbPath);
+    fileStream.pipe(res);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;

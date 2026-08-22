@@ -13,7 +13,9 @@ import {
   Boxes,
   X,
   ExternalLink,
-  LogOut
+  LogOut,
+  Download,
+  Database
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { globalSearchDevices } from '../services/api';
@@ -282,6 +284,21 @@ export default function Header({ onOpenScanner, onOpenTraceDrawer }) {
                   <div className="text-[11px] text-slate-500 truncate">{user?.email || 'Active Session'}</div>
                 </div>
               </div>
+
+              {user?.role === 'SUPER_ADMIN' && (
+                <div className="pt-1 border-t border-slate-100 space-y-1">
+                  <a
+                    href="/api/reports/backup-database"
+                    download
+                    onClick={() => setShowUserDropdown(false)}
+                    className="w-full text-left px-3 py-2 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-100 flex items-center gap-2 transition-colors cursor-pointer"
+                    title="Download a full live backup snapshot of your entire database"
+                  >
+                    <Database className="w-3.5 h-3.5 text-indigo-600" />
+                    <span>Download Live DB Backup</span>
+                  </a>
+                </div>
+              )}
 
               <div className="pt-1 border-t border-slate-100">
                 <button
