@@ -64,13 +64,6 @@ export default function DispatchPage({ onOpenScannerWithCallback, onOpenTraceDra
       if (res.success && Array.isArray(res.data)) {
         const dealers = res.data.filter(u => u.role === 'DEALER');
         setDealersList(dealers);
-        if (dealers.length > 0) {
-          const d0 = dealers[0];
-          setSelectedDealerId(d0.id.toString());
-          setDealerName(d0.name);
-          setDealerContact(d0.phone || '');
-          setLocation(d0.region || 'Regional Hub');
-        }
       }
     } catch (e) {
       console.warn('Failed to load dealer users:', e);
@@ -267,7 +260,14 @@ export default function DispatchPage({ onOpenScannerWithCallback, onOpenTraceDra
           </button>
 
           <button
-            onClick={() => setShowNewModal(true)}
+            onClick={() => {
+              setSelectedDealerId('__NEW__');
+              setDealerName('');
+              setDealerContact('');
+              setLocation('');
+              setDispatchImeisInput('');
+              setShowNewModal(true);
+            }}
             className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold rounded-xl shadow-xs flex items-center gap-1.5 transition-colors cursor-pointer"
           >
             <Plus className="w-4 h-4" /> New Dispatch
@@ -412,16 +412,16 @@ export default function DispatchPage({ onOpenScannerWithCallback, onOpenTraceDra
                   Select Registered Dealer Account
                 </label>
                 <select
-                  value={selectedDealerId}
+                  value={selectedDealerId || '__NEW__'}
                   onChange={(e) => handleDealerDropdownChange(e.target.value)}
                   className="w-full bg-blue-50/60 border border-blue-200 rounded-xl p-2 text-xs text-blue-950 font-semibold focus:outline-none focus:border-blue-500"
                 >
+                  <option value="__NEW__">➕ Type / Enter Dealer Manually</option>
                   {dealersList.map(d => (
                     <option key={d.id} value={d.id}>
                       🏪 {d.name} — {d.region || 'Branch'} ({d.phone || d.email})
                     </option>
                   ))}
-                  <option value="__NEW__">➕ Type Other / Custom Dealer Manually</option>
                 </select>
               </div>
             )}

@@ -194,6 +194,11 @@ function initDatabase() {
   try { db.exec("CREATE INDEX IF NOT EXISTS idx_devices_status ON devices(current_status);"); } catch (e) {}
   try { db.exec("CREATE INDEX IF NOT EXISTS idx_dispatches_dealer ON dispatches(dealer_name);"); } catch (e) {}
   try { db.exec("CREATE INDEX IF NOT EXISTS idx_devices_rma_status ON devices(rma_status);"); } catch (e) {}
+
+  // Automatically remove legacy mock dummy dealer numbers
+  try {
+    db.prepare("DELETE FROM users WHERE phone = '8096985742' OR email = 'allabakshu@gmail.com'").run();
+  } catch (e) {}
 }
 
 initDatabase();
