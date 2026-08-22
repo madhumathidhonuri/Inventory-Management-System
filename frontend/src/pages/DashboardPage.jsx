@@ -34,7 +34,8 @@ import {
   Tag,
   Receipt,
   Calendar,
-  Table
+  Table,
+  MessageSquare
 } from 'lucide-react';
 import { fetchStats, fetchPurchaseBatches, fetchDeviceTypes, fetchAgingAnalysis, fetchSimValidity, resetDealerStock } from '../services/api';
 import { useAuth } from '../context/AuthContext';
