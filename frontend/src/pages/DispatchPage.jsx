@@ -79,7 +79,7 @@ export default function DispatchPage({ onOpenScannerWithCallback, onOpenTraceDra
       }
       const [dRes, sRes] = await Promise.all([
         fetchDispatches(params),
-        fetchDealerStockSummary()
+        fetchDealerStockSummary(params)
       ]);
       if (dRes.success) setDispatches(dRes.data);
       if (sRes.success) setDealerSummary(sRes.data);
@@ -229,6 +229,14 @@ export default function DispatchPage({ onOpenScannerWithCallback, onOpenTraceDra
     }
   };
 
+  const visibleSummary = isDealer && user?.name
+    ? dealerSummary.filter(item => 
+        item.dealer_name && 
+        (item.dealer_name.toLowerCase().includes(user.name.toLowerCase()) || 
+         user.name.toLowerCase().includes(item.dealer_name.toLowerCase()))
+      )
+    : dealerSummary;
+
   return (
     <div className="space-y-6">
       
@@ -236,13 +244,17 @@ export default function DispatchPage({ onOpenScannerWithCallback, onOpenTraceDra
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs">
         <div>
           <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-            <Truck className="w-5 h-5 text-amber-600" /> Stock Dispatches & Dealer Holding
+            <Truck className="w-5 h-5 text-amber-600" /> {isDealer ? 'My Dispatches & Received Stock' : 'Stock Dispatches & Dealer Holding'}
           </h2>
-          <p className="text-xs text-slate-500">Dispatch stock to dealers/installers, track holding levels, and process returns</p>
+          <p className="text-xs text-slate-500">
+            {isDealer 
+              ? 'View all stock batches dispatched to your account, holding status, and generate DCN Challans' 
+              : 'Dispatch stock to dealers/installers, track holding levels, and process returns'}
+          </p>
         </div>
 
         <div className="flex gap-2 self-start md:self-auto items-center">
-          {dispatches.length > 0 && (
+          {!isDealer && dispatches.length > 0 && (
             <button
               onClick={handleClearAllDispatches}
               className="px-3.5 py-2 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer"
@@ -259,73 +271,85 @@ export default function DispatchPage({ onOpenScannerWithCallback, onOpenTraceDra
             <RotateCcw className="w-4 h-4" /> Process Stock Return
           </button>
 
-          <button
-            onClick={() => {
-              setSelectedDealerId('__NEW__');
-              setDealerName('');
-              setDealerContact('');
-              setLocation('');
-              setDispatchImeisInput('');
-              setShowNewModal(true);
-            }}
-            className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold rounded-xl shadow-xs flex items-center gap-1.5 transition-colors cursor-pointer"
-          >
-            <Plus className="w-4 h-4" /> New Dispatch
-          </button>
+          {!isDealer && (
+            <button
+              onClick={() => {
+                setSelectedDealerId('__NEW__');
+                setDealerName('');
+                setDealerContact('');
+                setLocation('');
+                setDispatchImeisInput('');
+                setShowNewModal(true);
+              }}
+              className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold rounded-xl shadow-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+            >
+              <Plus className="w-4 h-4" /> New Dispatch
+            </button>
+          )}
         </div>
       </div>
 
       {/* Dealer Stock Summary Matrix Cards */}
       <div>
         <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">
-          Per-Dealer Active Stock Summary
+          {isDealer ? 'My Allocated Stock Summary' : 'Per-Dealer Active Stock Summary'}
         </h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-          {dealerSummary.map((item, idx) => (
-            <div
-              key={idx}
-              onClick={() => setSelectedDealerModal(item.dealer_name)}
-              className="glass-panel p-3.5 rounded-xl border border-slate-200 hover:border-amber-400 hover:bg-amber-50/50 flex items-center justify-between transition-all cursor-pointer shadow-2xs group"
-              title={`Click to view stock breakdown, sent units, and installed vehicles for ${item.dealer_name}`}
-            >
-              <div className="flex items-center space-x-3">
-                <div className="p-2 rounded-lg bg-amber-50 text-amber-600 group-hover:bg-amber-100 transition-colors">
-                  <Building2 className="w-4 h-4" />
+        {visibleSummary.length === 0 ? (
+          <div className="p-6 bg-slate-50 border border-slate-200 rounded-xl text-center text-xs text-slate-400">
+            No active uninstalled stock currently held in this account.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+            {visibleSummary.map((item, idx) => (
+              <div
+                key={idx}
+                onClick={() => setSelectedDealerModal(item.dealer_name)}
+                className="glass-panel p-3.5 rounded-xl border border-slate-200 hover:border-amber-400 hover:bg-amber-50/50 flex items-center justify-between transition-all cursor-pointer shadow-2xs group"
+                title={`Click to view stock breakdown, sent units, and installed vehicles for ${item.dealer_name}`}
+              >
+                <div className="flex items-center space-x-3">
+                  <div className="p-2 rounded-lg bg-amber-50 text-amber-600 group-hover:bg-amber-100 transition-colors">
+                    <Building2 className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-900 group-hover:text-amber-800 transition-colors flex items-center gap-1">
+                      <span>{item.dealer_name}</span>
+                      <span className="text-[10px] text-amber-600 opacity-0 group-hover:opacity-100 transition-opacity">→</span>
+                    </h4>
+                    <span className="text-[11px] text-slate-500">{item.device_type_name}</span>
+                  </div>
                 </div>
-                <div>
-                  <h4 className="text-xs font-bold text-slate-900 group-hover:text-amber-800 transition-colors flex items-center gap-1">
-                    <span>{item.dealer_name}</span>
-                    <span className="text-[10px] text-amber-600 opacity-0 group-hover:opacity-100 transition-opacity">→</span>
-                  </h4>
-                  <span className="text-[11px] text-slate-500">{item.device_type_name}</span>
-                </div>
-              </div>
 
-              <div className="flex items-center gap-2">
-                <span className="px-2.5 py-1 rounded-full text-xs font-mono font-bold bg-amber-50 text-amber-700 border border-amber-200">
-                  {item.device_count} Units
-                </span>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleResetDealerHolding(item.dealer_name);
-                  }}
-                  title={`Reset ${item.dealer_name} holding stock back to Central Warehouse`}
-                  className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
-                >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                </button>
+                <div className="flex items-center gap-2">
+                  <span className="px-2.5 py-1 rounded-full text-xs font-mono font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                    {item.device_count} Units
+                  </span>
+                  {!isDealer && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleResetDealerHolding(item.dealer_name);
+                      }}
+                      title={`Reset ${item.dealer_name} holding stock back to Central Warehouse`}
+                      className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Dispatch History Table */}
       <div className="glass-panel rounded-2xl overflow-hidden">
         <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
-          <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">Dispatch Records History</h3>
+          <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+            {isDealer ? 'My Received Dispatches' : 'Dispatch Records History'}
+          </h3>
           <div className="flex items-center gap-3">
             <span className="text-xs text-slate-500">{dispatches.length} Total Dispatches</span>
           </div>
@@ -382,13 +406,15 @@ export default function DispatchPage({ onOpenScannerWithCallback, onOpenTraceDra
                     >
                       <Eye className="w-3.5 h-3.5 text-blue-600" /> View IMEIs
                     </button>
-                    <button
-                      onClick={() => handleDeleteSingleDispatch(disp.id)}
-                      className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
-                      title={`Delete Dispatch #DSP-${disp.id} and revert stock`}
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    {!isDealer && (
+                      <button
+                        onClick={() => handleDeleteSingleDispatch(disp.id)}
+                        className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                        title={`Delete Dispatch #DSP-${disp.id} and revert stock`}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}

@@ -201,7 +201,8 @@ function getDispatchItems(dispatchId, dispatch) {
 // GET /api/dispatches/summary/dealer-stock - Group stock by dealer & device type
 router.get('/summary/dealer-stock', (req, res) => {
   try {
-    const summary = db.prepare(`
+    const { dealer_name } = req.query;
+    let query = `
       SELECT 
         d.current_holder_name as dealer_name,
         dt.name as device_type_name,
@@ -209,10 +210,15 @@ router.get('/summary/dealer-stock', (req, res) => {
       FROM devices d
       JOIN device_types dt ON d.device_type_id = dt.id
       WHERE d.current_status = 'WITH_DEALER'
-      GROUP BY d.current_holder_name, dt.name
-      ORDER BY d.current_holder_name, dt.name
-    `).all();
+    `;
+    const params = [];
+    if (dealer_name) {
+      query += ` AND (d.current_holder_name LIKE ? OR d.current_holder_name = ?)`;
+      params.push(`%${dealer_name}%`, dealer_name);
+    }
+    query += ` GROUP BY d.current_holder_name, dt.name ORDER BY d.current_holder_name, dt.name`;
 
+    const summary = db.prepare(query).all(...params);
     res.json({ success: true, data: summary || [] });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });

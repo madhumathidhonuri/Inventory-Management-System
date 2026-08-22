@@ -212,8 +212,9 @@ export async function returnDispatchStock(payload) {
   return res.json();
 }
 
-export async function fetchDealerStockSummary() {
-  const res = await fetch(`${API_BASE}/dispatches/summary/dealer-stock`);
+export async function fetchDealerStockSummary(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  const res = await fetch(`${API_BASE}/dispatches/summary/dealer-stock${query ? `?${query}` : ''}`);
   if (!res.ok) throw new Error('Failed to fetch dealer stock summary');
   return res.json();
 }
