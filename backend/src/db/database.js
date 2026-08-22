@@ -159,15 +159,41 @@ function initDatabase() {
   // Safe schema migrations for software credentials & payments
   try { db.exec("ALTER TABLE customers ADD COLUMN software_user_id TEXT;"); } catch (e) {}
   try { db.exec("ALTER TABLE customers ADD COLUMN software_password TEXT;"); } catch (e) {}
+  try { db.exec("ALTER TABLE customers ADD COLUMN aadhar_number TEXT;"); } catch (e) {}
+  try { db.exec("ALTER TABLE customers ADD COLUMN pan_number TEXT;"); } catch (e) {}
   try { db.exec("ALTER TABLE customers ADD COLUMN notes TEXT;"); } catch (e) {}
   try { db.exec("ALTER TABLE installations ADD COLUMN software_user_id TEXT;"); } catch (e) {}
   try { db.exec("ALTER TABLE installations ADD COLUMN software_password TEXT;"); } catch (e) {}
   try { db.exec("ALTER TABLE installations ADD COLUMN payment_status TEXT DEFAULT 'PENDING';"); } catch (e) {}
+  try { db.exec("ALTER TABLE installations ADD COLUMN aadhar_number TEXT;"); } catch (e) {}
+  try { db.exec("ALTER TABLE installations ADD COLUMN pan_number TEXT;"); } catch (e) {}
+  try { db.exec("ALTER TABLE installations ADD COLUMN chasis_number TEXT;"); } catch (e) {}
+  try { db.exec("ALTER TABLE installations ADD COLUMN engine_number TEXT;"); } catch (e) {}
+  try { db.exec("ALTER TABLE installations ADD COLUMN amc_due_date TEXT;"); } catch (e) {}
+  try { db.exec("ALTER TABLE installations ADD COLUMN sim_expiry_date TEXT;"); } catch (e) {}
+
+  // Enterprise SIM & RMA Tracking Columns
+  try { db.exec("ALTER TABLE devices ADD COLUMN sim_operator TEXT DEFAULT 'Airtel';"); } catch (e) {}
+  try { db.exec("ALTER TABLE devices ADD COLUMN sim_expiry_date TEXT;"); } catch (e) {}
+  try { db.exec("ALTER TABLE devices ADD COLUMN sim_status TEXT DEFAULT 'ACTIVE';"); } catch (e) {}
+  try { db.exec("ALTER TABLE devices ADD COLUMN rma_status TEXT DEFAULT 'NONE';"); } catch (e) {}
+  try { db.exec("ALTER TABLE devices ADD COLUMN rma_notes TEXT;"); } catch (e) {}
+  try { db.exec("ALTER TABLE devices ADD COLUMN rma_vendor_name TEXT;"); } catch (e) {}
+  try { db.exec("ALTER TABLE devices ADD COLUMN rma_replacement_imei TEXT;"); } catch (e) {}
+  try { db.exec("ALTER TABLE devices ADD COLUMN rma_date TEXT;"); } catch (e) {}
+
+  // Digital Delivery Challan (DCN) Columns
+  try { db.exec("ALTER TABLE dispatches ADD COLUMN challan_number TEXT;"); } catch (e) {}
+  try { db.exec("ALTER TABLE dispatches ADD COLUMN accepted_at DATETIME;"); } catch (e) {}
+  try { db.exec("ALTER TABLE dispatches ADD COLUMN receiver_phone TEXT;"); } catch (e) {}
+  try { db.exec("ALTER TABLE dispatches ADD COLUMN transport_details TEXT;"); } catch (e) {}
+
   try { db.exec("ALTER TABLE users ADD COLUMN password TEXT DEFAULT '123456';"); } catch (e) {}
   try { db.exec("ALTER TABLE users ADD COLUMN allowed_columns TEXT DEFAULT '[]';"); } catch (e) {}
   try { db.exec("CREATE INDEX IF NOT EXISTS idx_devices_holder_name ON devices(current_holder_name);"); } catch (e) {}
   try { db.exec("CREATE INDEX IF NOT EXISTS idx_devices_status ON devices(current_status);"); } catch (e) {}
   try { db.exec("CREATE INDEX IF NOT EXISTS idx_dispatches_dealer ON dispatches(dealer_name);"); } catch (e) {}
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_devices_rma_status ON devices(rma_status);"); } catch (e) {}
 }
 
 initDatabase();

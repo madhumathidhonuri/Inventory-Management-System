@@ -385,3 +385,97 @@ Authorized GPS VLT Tracking Partner`;
 
   return { message, url, targetPhone };
 }
+
+/**
+ * Generate standard NPCI / UPI deep-link URL for dynamic QR code & mobile payment
+ */
+export function generateUpiUri({
+  upiId = 'fueltracks@icici',
+  payeeName = 'FuelTracks Technologies Pvt Ltd',
+  amount = 0,
+  transactionNote = 'GPS Device Fitment Payment',
+  currency = 'INR'
+}) {
+  const cleanUpi = String(upiId || 'fueltracks@icici').trim();
+  const cleanName = String(payeeName || 'FuelTracks Technologies Pvt Ltd').trim();
+  const cleanNote = String(transactionNote || 'GPS Fitment Payment').trim();
+  const amtNum = parseFloat(amount);
+  const amtStr = !isNaN(amtNum) && amtNum > 0 ? amtNum.toFixed(2) : '';
+
+  let uri = `upi://pay?pa=${encodeURIComponent(cleanUpi)}&pn=${encodeURIComponent(cleanName)}&cu=${currency}`;
+  if (amtStr) uri += `&am=${amtStr}`;
+  if (cleanNote) uri += `&tn=${encodeURIComponent(cleanNote)}`;
+
+  return uri;
+}
+
+/**
+ * Helper to build 1-Click WhatsApp Payment Request message with UPI link & QR info
+ */
+export function buildPaymentQrWhatsAppMessage({
+  phone = '',
+  customerName = 'Valued Customer',
+  vehicleNumber = '',
+  imei = '',
+  amount = 0,
+  cost = 0,
+  gst = 0,
+  totalCost = 0,
+  upiId = 'fueltracks@icici',
+  payeeName = 'FuelTracks Technologies Pvt. Ltd.',
+  stockPlace = 'FuelTracks Central'
+}) {
+  const cleanDigits = phone ? String(phone).replace(/[^0-9]/g, '') : '';
+  const targetPhone = cleanDigits.length === 10 ? `91${cleanDigits}` : cleanDigits;
+
+  const dueAmount = parseFloat(totalCost || amount || cost || 0);
+  const formattedDue = formatINR(dueAmount);
+
+  const note = `Payment for GPS Fitment ${vehicleNumber ? `- ${vehicleNumber}` : ''}${imei ? ` (${String(imei).slice(-6)})` : ''}`;
+  const upiLink = generateUpiUri({
+    upiId,
+    payeeName,
+    amount: dueAmount,
+    transactionNote: note
+  });
+
+  const message = `*🧾 FUELTRACKS PAYMENT REQUEST & UPI QR CODE*
+
+*Dear ${customerName || 'Valued Customer'},*
+
+Greetings from *FuelTracks Technologies Pvt. Ltd.*! 🚗
+
+Your AIS-140 GPS / VLTD tracking device has been successfully configured and entered into our inventory system.
+
+📋 *Vehicle Number:* ${vehicleNumber || 'Registered Vehicle'}
+🏷️ *Device IMEI:* ${imei || 'N/A'}
+💰 *Amount Due:* *${formattedDue}*
+
+━━━━━━━━━━━━━━━━━━━━━━
+📲 *HOW TO PAY INSTANTLY VIA UPI:*
+━━━━━━━━━━━━━━━━━━━━━━
+1️⃣ *Pay directly via UPI ID:*
+   *UPI ID:* \`${upiId}\`
+   *Payee Name:* ${payeeName}
+
+2️⃣ *Tap to Pay directly on Mobile:*
+   👉 ${upiLink}
+   *(Opens PhonePe / Google Pay / Paytm / BHIM / Cred directly)*
+
+3️⃣ Or scan the official *FuelTracks Payment QR Code* attached to your fitment slip.
+━━━━━━━━━━━━━━━━━━━━━━
+
+🏢 *Branch / Dealer:* ${stockPlace || 'FuelTracks Central'}
+
+✅ *Payment Confirmation:* Once payment is initiated, kindly reply with the screenshot/UTR number to receive your instant VAHAN Fitment Certificate & Receipt.
+
+Thank you for choosing *FuelTracks*!
+📞 Support: +91 998800234 | www.fueltracks.in`;
+
+  const url = targetPhone
+    ? `https://api.whatsapp.com/send?phone=${targetPhone}&text=${encodeURIComponent(message)}`
+    : `https://api.whatsapp.com/send?text=${encodeURIComponent(message)}`;
+
+  return { message, url, targetPhone, upiLink, dueAmount, upiId };
+}
+

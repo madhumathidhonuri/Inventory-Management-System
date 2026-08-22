@@ -382,4 +382,65 @@ export async function bulkTransferDevices(payload) {
   return data;
 }
 
+export async function fetchCustomerDirectory() {
+  const res = await fetch(`${API_BASE}/reports/customer-directory`);
+  if (!res.ok) throw new Error('Failed to fetch customer directory');
+  return res.json();
+}
+
+export function getCustomerDirectoryExportUrl() {
+  return `${API_BASE}/reports/customer-directory/export`;
+}
+
+export async function fetchAgingAnalysis() {
+  const res = await fetch(`${API_BASE}/devices/aging-analysis`);
+  if (!res.ok) throw new Error('Failed to fetch aging analysis');
+  return res.json();
+}
+
+export async function fetchSimValidity() {
+  const res = await fetch(`${API_BASE}/devices/sim-validity`);
+  if (!res.ok) throw new Error('Failed to fetch SIM validity records');
+  return res.json();
+}
+
+export async function updateRmaStatus(id, payload) {
+  const res = await fetch(`${API_BASE}/devices/${id}/rma-update`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) throw new Error(data.error || 'Failed to update RMA status');
+  return data;
+}
+
+export async function bulkSimUpdate(payload) {
+  const res = await fetch(`${API_BASE}/devices/bulk-sim-update`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) throw new Error(data.error || 'Failed to update SIM details');
+  return data;
+}
+
+export async function fetchDispatchChallan(id) {
+  const res = await fetch(`${API_BASE}/dispatches/${id}/challan`);
+  if (!res.ok) throw new Error('Failed to fetch dispatch challan');
+  return res.json();
+}
+
+export async function acknowledgeDispatch(id, payload) {
+  const res = await fetch(`${API_BASE}/dispatches/${id}/acknowledge`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) throw new Error(data.error || 'Failed to acknowledge dispatch');
+  return data;
+}
+
 

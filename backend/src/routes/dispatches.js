@@ -40,10 +40,26 @@ router.post('/', (req, res) => {
     }
 
     // 2. Create Dispatch Record
+    const year = new Date().getFullYear();
+    const countRow = db.prepare('SELECT COUNT(*) as c FROM dispatches').get();
+    const nextNum = (countRow ? countRow.c : 0) + 1;
+    const challanNumber = `FT-DCN-${year}-${String(nextNum).padStart(4, '0')}`;
+
     const dispatchResult = db.prepare(`
-      INSERT INTO dispatches (dispatch_date, dispatched_by, dealer_name, dealer_contact, location, dispatch_type, device_count, remarks, status)
-      VALUES (datetime('now'), ?, ?, ?, ?, ?, ?, ?, 'DISPATCHED')
-    `).run(dispatched_by || 'Warehouse Manager', dealer_name, dealer_contact || '', location, dispatch_type || 'DEALER', validDevices.length, remarks || '');
+      INSERT INTO dispatches (dispatch_date, dispatched_by, dealer_name, dealer_contact, receiver_phone, location, dispatch_type, device_count, remarks, challan_number, transport_details, status)
+      VALUES (datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'DISPATCHED')
+    `).run(
+      dispatched_by || 'Warehouse Manager',
+      dealer_name,
+      dealer_contact || '',
+      dealer_contact || '',
+      location,
+      dispatch_type || 'DEALER',
+      validDevices.length,
+      remarks || '',
+      challanNumber,
+      req.body.transport_details || 'Hand Delivery / Field Courier'
+    );
 
     const dispatchId = dispatchResult.lastInsertRowid;
 
@@ -131,6 +147,57 @@ router.get('/', (req, res) => {
   }
 });
 
+// Helper to fetch and resolve dispatch items with intelligent fallback & SIM formatting
+function getDispatchItems(dispatchId, dispatch) {
+  let items = db.prepare(`
+    SELECT di.id, di.imei_number, d.sim_number, d.sim_operator, d.additional_attributes, dt.name as device_type_name
+    FROM dispatch_items di
+    JOIN devices d ON di.device_id = d.id
+    JOIN device_types dt ON d.device_type_id = dt.id
+    WHERE di.dispatch_id = ?
+  `).all(dispatchId);
+
+  // If no items were explicitly bound yet, look up devices assigned to this dealer / location
+  if (!items || items.length === 0) {
+    const dealerName = dispatch.dealer_name || '';
+    const location = dispatch.location || '';
+    const limit = dispatch.device_count || 50;
+
+    const fallbackDevs = db.prepare(`
+      SELECT d.id, d.imei_number, d.sim_number, d.sim_operator, d.additional_attributes, dt.name as device_type_name
+      FROM devices d
+      JOIN device_types dt ON d.device_type_id = dt.id
+      WHERE d.current_holder_name LIKE ? 
+         OR d.additional_attributes LIKE ?
+         OR (d.additional_attributes LIKE ? AND ? != '')
+      LIMIT ?
+    `).all(`%${dealerName}%`, `%${dealerName}%`, `%${location}%`, location, limit);
+
+    if (fallbackDevs && fallbackDevs.length > 0) {
+      items = fallbackDevs;
+      try {
+        const insertStmt = db.prepare('INSERT OR IGNORE INTO dispatch_items (dispatch_id, device_id, imei_number) VALUES (?, ?, ?)');
+        for (const dev of fallbackDevs) {
+          insertStmt.run(dispatchId, dev.id, dev.imei_number);
+        }
+      } catch (e) {}
+    }
+  }
+
+  return (items || []).map(it => {
+    let attrs = {};
+    try { attrs = JSON.parse(it.additional_attributes || '{}'); } catch {}
+    const sim = it.sim_number || attrs['simno1'] || attrs['SIM NUMBER'] || attrs['sim_number'] || attrs['simno2'] || '';
+    return {
+      id: it.id,
+      imei_number: it.imei_number,
+      sim_number: sim ? String(sim) : '-',
+      sim_operator: it.sim_operator || attrs['SIM OPERATOR'] || attrs['NETWORK'] || 'Airtel',
+      device_type_name: it.device_type_name || 'AIS-140 GPS'
+    };
+  });
+}
+
 // GET /api/dispatches/:id - Drill down into a dispatch record
 router.get('/:id', (req, res) => {
   const { id } = req.params;
@@ -140,15 +207,64 @@ router.get('/:id', (req, res) => {
       return res.status(404).json({ success: false, error: 'Dispatch record not found' });
     }
 
-    const items = db.prepare(`
-      SELECT di.*, d.sim_number, d.current_status, dt.name as device_type_name
-      FROM dispatch_items di
-      JOIN devices d ON di.device_id = d.id
-      JOIN device_types dt ON d.device_type_id = dt.id
-      WHERE di.dispatch_id = ?
-    `).all(id);
+    const items = getDispatchItems(id, dispatch);
+    const challanNo = dispatch.challan_number || `FT-DCN-2026-${String(dispatch.id).padStart(4, '0')}`;
 
-    res.json({ success: true, data: { ...dispatch, items } });
+    res.json({ success: true, data: { ...dispatch, challan_number: challanNo, items } });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/dispatches/:id/challan - Structured Delivery Challan (DCN) details
+router.get('/:id/challan', (req, res) => {
+  const { id } = req.params;
+  try {
+    const dispatch = db.prepare('SELECT * FROM dispatches WHERE id = ?').get(id);
+    if (!dispatch) return res.status(404).json({ success: false, error: 'Dispatch record not found' });
+
+    const items = getDispatchItems(id, dispatch);
+    const challanNo = dispatch.challan_number || `FT-DCN-2026-${String(dispatch.id).padStart(4, '0')}`;
+
+    res.json({
+      success: true,
+      data: {
+        challan_number: challanNo,
+        dispatch_id: dispatch.id,
+        dispatch_date: dispatch.dispatch_date,
+        dispatched_by: dispatch.dispatched_by,
+        dealer_name: dispatch.dealer_name,
+        dealer_contact: dispatch.dealer_contact || '',
+        location: dispatch.location,
+        transport_details: dispatch.transport_details || 'Field Courier / Direct Handover',
+        device_count: items.length || dispatch.device_count || 0,
+        status: dispatch.status,
+        accepted_at: dispatch.accepted_at,
+        remarks: dispatch.remarks,
+        items
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/dispatches/:id/acknowledge - Dealer digital acceptance of stock
+router.post('/:id/acknowledge', (req, res) => {
+  const { id } = req.params;
+  const { acknowledged_by } = req.body;
+  try {
+    const dispatch = db.prepare('SELECT * FROM dispatches WHERE id = ?').get(id);
+    if (!dispatch) return res.status(404).json({ success: false, error: 'Dispatch not found' });
+
+    db.prepare(`
+      UPDATE dispatches
+      SET accepted_at = CURRENT_TIMESTAMP,
+          remarks = COALESCE(remarks, '') || ' [Accepted by ' || ? || ' on ' || datetime('now') || ']'
+      WHERE id = ?
+    `).run(acknowledged_by || dispatch.dealer_name, id);
+
+    res.json({ success: true, message: `Dispatch #${id} confirmed and accepted into custody.` });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }

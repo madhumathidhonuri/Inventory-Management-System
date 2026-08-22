@@ -47,10 +47,8 @@ export const DEFAULT_ROLE_COLUMNS = {
 };
 
 export const SAMPLE_USERS = [
-  { id: 1, name: 'Super Admin (Owner)', role: 'SUPER_ADMIN', email: 'owner@fueltracks.in', password: 'admin', allowed_columns: [], desc: 'Master access to all modules, financial reporting, system settings, and complete deletion rights.' },
-  { id: 2, name: 'Operations Admin Team', role: 'ADMIN_TEAM', email: 'admin@fueltracks.in', password: 'admin', allowed_columns: DEFAULT_ROLE_COLUMNS.ADMIN_TEAM, desc: 'Access to Vehicle Number, Chassis, Engine, Customer Name, and Certificate Issued Date data entry. Core hardware IMEI/SIM and deletion options are locked.' },
-  { id: 3, name: 'Sales Commercial Team', role: 'SALES_TEAM', email: 'sales@fueltracks.in', password: 'sales', allowed_columns: DEFAULT_ROLE_COLUMNS.SALES_TEAM, desc: 'Access to Cost, Tax, Total Cost, Installation Charges, and Payment Received status entry. Vehicle numbers and technical hardware fields are locked.' },
-  { id: 4, name: 'Jaya Surya', role: 'DEALER', region: 'Kurnool', email: 'jayasurya@fueltracks.in', password: 'dealer', allowed_columns: DEFAULT_ROLE_COLUMNS.DEALER, desc: 'Dealer account for Kurnool. Sees only stock assigned to Jaya Surya (50 Vamo, 20 Volty, 5 Tracknow).' }
+  { id: 1, name: 'FuelTracks Admin', role: 'SUPER_ADMIN', email: 'owner@fueltracks.in', password: 'admin', allowed_columns: [], desc: 'Master access to all modules, financial reporting, system settings, and complete deletion rights.' },
+  { id: 2, name: 'FuelTracks Admin', role: 'SUPER_ADMIN', email: 'admin@fueltracks.in', password: 'admin', allowed_columns: [], desc: 'Master access to all modules, financial reporting, system settings, and complete deletion rights.' }
 ];
 
 // Helper to determine if a specific role or user can edit a given field
@@ -124,6 +122,25 @@ export function canUserEditField(userOrRole, fieldName) {
   }
 
   return false;
+}
+
+// Helper to check if active user is Super Admin
+export function isSuperAdmin(userOrRole) {
+  if (!userOrRole) return false;
+  const roleKey = typeof userOrRole === 'string' ? userOrRole : userOrRole.role;
+  return roleKey === 'SUPER_ADMIN';
+}
+
+// Helper to check if active user has delete permissions (Strictly Super Admin)
+export function canUserDelete(userOrRole) {
+  return isSuperAdmin(userOrRole);
+}
+
+// Helper to check if active user can see wholesale vendor costs
+export function canUserSeeWholesaleCost(userOrRole) {
+  if (!userOrRole) return false;
+  const roleKey = typeof userOrRole === 'string' ? userOrRole : userOrRole.role;
+  return roleKey === 'SUPER_ADMIN';
 }
 
 export function AuthProvider({ children }) {

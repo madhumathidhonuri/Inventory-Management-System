@@ -2,16 +2,22 @@ import React, { useState, useEffect } from 'react';
 import { 
   X, Copy, Check, QrCode, Cpu, Radio, Truck, User, Phone, 
   MapPin, Calendar, CreditCard, ShieldCheck, Wrench, Clock, 
-  ArrowRight, FileSpreadsheet, Printer, ExternalLink, Sparkles, Trash2
+  ArrowRight, FileSpreadsheet, Printer, ExternalLink, Sparkles, Trash2, Send
 } from 'lucide-react';
 import { fetchDeviceByImei } from '../services/api';
-import { buildCustomerCredentialsWhatsAppMessage, formatDisplayCellValue } from '../utils/whatsapp';
+import { buildCustomerCredentialsWhatsAppMessage, buildPaymentQrWhatsAppMessage, formatDisplayCellValue } from '../utils/whatsapp';
+import { useAuth, isSuperAdmin, canUserEditField } from '../context/AuthContext';
+import PaymentQrModal from './PaymentQrModal';
 
 export default function DeviceDetailCardModal({ isOpen, onClose, imei, onDelete, canDelete = true }) {
+  const { user } = useAuth();
+  const isSuper = isSuperAdmin(user);
   const [device, setDevice] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [copied, setCopied] = useState(false);
+  const [isPaymentQrOpen, setIsPaymentQrOpen] = useState(false);
+
 
   useEffect(() => {
     if (isOpen && imei) {
@@ -481,10 +487,44 @@ export default function DeviceDetailCardModal({ isOpen, onClose, imei, onDelete,
                       </span>
                     </div>
 
-                    {/* WhatsApp Credentials Direct Action */}
-                    {custPhone && custPhone !== '-' && (
-                      <div className="pt-2 border-t border-slate-100">
-                        {(() => {
+                    {/* WhatsApp Credentials & Payment QR Direct Actions */}
+                    <div className="pt-2 border-t border-slate-100 flex flex-col gap-2">
+                      {custPhone && custPhone !== '-' && (
+                        (() => {
+                          const waPay = buildPaymentQrWhatsAppMessage({
+                            phone: custPhone,
+                            customerName: custName,
+                            vehicleNumber: vehNo,
+                            imei: imei,
+                            amount: attrs['TOTAL COST'] || attrs['COST'] || attrs['Sale Price'] || 6500,
+                            stockPlace: stockPlace
+                          });
+                          return (
+                            <a
+                              href={waPay.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="w-full py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                              title={`Send 1-Click WhatsApp Payment Request with UPI Link to ${custPhone}`}
+                            >
+                              <Send className="w-3.5 h-3.5" />
+                              <span>Send WhatsApp Payment Request (UPI Link)</span>
+                            </a>
+                          );
+                        })()
+                      )}
+
+                      <button
+                        onClick={() => setIsPaymentQrOpen(true)}
+                        className="w-full py-2 px-3 bg-slate-900 hover:bg-slate-800 text-emerald-300 hover:text-emerald-200 font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 shadow-2xs transition-colors cursor-pointer border border-slate-700"
+                        title="Generate & View UPI Payment QR Code"
+                      >
+                        <QrCode className="w-4 h-4 text-emerald-400" />
+                        <span>View / Print Payment QR Slip</span>
+                      </button>
+
+                      {custPhone && custPhone !== '-' && (
+                        (() => {
                           const wa = buildCustomerCredentialsWhatsAppMessage({
                             phone: custPhone,
                             customerName: custName,
@@ -497,15 +537,15 @@ export default function DeviceDetailCardModal({ isOpen, onClose, imei, onDelete,
                               href={wa.url}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="w-full py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                              className="w-full py-2 px-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
                               title={`Send official Volty Track credentials to ${custPhone}`}
                             >
-                              <span>💬</span> Send Login Credentials to Customer (WhatsApp)
+                              <span>💬</span> Send GPS Login Credentials to Customer (WhatsApp)
                             </a>
                           );
-                        })()}
-                      </div>
-                    )}
+                        })()
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -583,17 +623,20 @@ export default function DeviceDetailCardModal({ isOpen, onClose, imei, onDelete,
 
         {/* Footer */}
         <div className="p-4 bg-white border-t border-slate-200 flex justify-between items-center text-xs">
-          {canDelete && onDelete && device ? (
+          {isSuper && onDelete && device ? (
             <button
               onClick={() => onDelete(device)}
               className="px-3.5 py-2 bg-red-50 hover:bg-red-100 text-red-600 font-semibold rounded-xl cursor-pointer border border-red-200 flex items-center gap-1.5 transition-colors"
-              title="Permanently delete this device record"
+              title="Permanently delete this device record (Super Admin Exclusive)"
             >
               <Trash2 className="w-3.5 h-3.5 text-red-600" />
-              <span>Delete Device</span>
+              <span>Delete Device (Super Admin)</span>
             </button>
           ) : (
-            <span className="text-slate-400">FuelTracks Telematics Identity Card</span>
+            <span className="text-slate-400 text-xs flex items-center gap-1.5 font-medium">
+              <Lock className="w-3.5 h-3.5 text-amber-500" />
+              <span>{isSuper ? 'Master Device Passport' : 'Hardware Serials & Master Deletion Locked'}</span>
+            </span>
           )}
           <button
             onClick={onClose}
@@ -604,6 +647,26 @@ export default function DeviceDetailCardModal({ isOpen, onClose, imei, onDelete,
         </div>
 
       </div>
+
+      {/* Dynamic Payment QR Modal */}
+      {device && (
+        <PaymentQrModal
+          isOpen={isPaymentQrOpen}
+          onClose={() => setIsPaymentQrOpen(false)}
+          paymentData={{
+            ...device,
+            vehicle_number: vehNo,
+            customer_name: custName,
+            customer_phone: custPhone,
+            sale_price: attrs['TOTAL COST'] || attrs['COST'] || 6500,
+            stock_place: stockPlace
+          }}
+          onPaymentUpdated={() => {
+            if (imei) loadDevice(imei);
+          }}
+        />
+      )}
+
     </div>
   );
 }

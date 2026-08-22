@@ -24,15 +24,23 @@ import {
   CreditCard,
   Table,
   Sparkles,
-  Building
+  Building,
+  UserCheck,
+  CreditCard as PanIcon,
+  Shield
 } from 'lucide-react';
-import { fetchReportOptions, fetchReportPreview, fetchDailyDistributionReport } from '../services/api';
+import { fetchReportOptions, fetchReportPreview, fetchDailyDistributionReport, fetchCustomerDirectory, getCustomerDirectoryExportUrl } from '../services/api';
 
 export default function ReportsPage() {
-  const [activeTab, setActiveTab] = useState('daily_matrix'); // 'daily_matrix' | 'custom_builder'
+  const [activeTab, setActiveTab] = useState('customer_directory'); // 'customer_directory' | 'daily_matrix' | 'custom_builder'
   const [loadingOptions, setLoadingOptions] = useState(true);
   const [dailyMatrixLoading, setDailyMatrixLoading] = useState(false);
   const [dailyMatrix, setDailyMatrix] = useState(null);
+
+  // Customer Directory State
+  const [customerDirectory, setCustomerDirectory] = useState([]);
+  const [customerDirLoading, setCustomerDirLoading] = useState(false);
+  const [customerDirSearch, setCustomerDirSearch] = useState('');
 
   const [options, setOptions] = useState({
     batches: [],
@@ -61,11 +69,32 @@ export default function ReportsPage() {
   const [previewData, setPreviewData] = useState({ totalCount: 0, preview: [] });
   const [downloading, setDownloading] = useState(null);
 
-  // Load options & daily matrix on mount
+  // Load options, daily matrix & customer directory on mount
   useEffect(() => {
     loadOptions();
     loadDailyMatrix();
+    loadCustomerDirectory();
   }, []);
+
+  const loadCustomerDirectory = async () => {
+    setCustomerDirLoading(true);
+    try {
+      const res = await fetchCustomerDirectory();
+      if (res.success) {
+        setCustomerDirectory(res.data || []);
+      }
+    } catch (err) {
+      console.error('Failed to load customer directory:', err);
+    } finally {
+      setCustomerDirLoading(false);
+    }
+  };
+
+  const handleExportCustomerDirectory = () => {
+    setDownloading('customer_directory');
+    window.location.href = getCustomerDirectoryExportUrl();
+    setTimeout(() => setDownloading(null), 3000);
+  };
 
   // Update preview whenever filters change
   useEffect(() => {
@@ -247,7 +276,22 @@ export default function ReportsPage() {
       </div>
 
       {/* Main Mode Navigation Tabs */}
-      <div className="flex items-center gap-3 border-b border-slate-200 pb-2">
+      <div className="flex flex-wrap items-center gap-3 border-b border-slate-200 pb-2">
+        <button
+          onClick={() => setActiveTab('customer_directory')}
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 border ${
+            activeTab === 'customer_directory'
+              ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
+              : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+          }`}
+        >
+          <UserCheck className="w-4 h-4" />
+          <span>Customer & Vehicle Directory (KYC Master)</span>
+          <span className="px-2 py-0.5 rounded-full text-[10px] bg-white/20 text-white font-bold">
+            {customerDirectory.length} Records
+          </span>
+        </button>
+
         <button
           onClick={() => setActiveTab('daily_matrix')}
           className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 border ${
@@ -267,7 +311,7 @@ export default function ReportsPage() {
           onClick={() => setActiveTab('custom_builder')}
           className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 border ${
             activeTab === 'custom_builder'
-              ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
+              ? 'bg-purple-700 text-white border-purple-700 shadow-2xs'
               : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
           }`}
         >
@@ -275,6 +319,177 @@ export default function ReportsPage() {
           <span>Tailored Report & Billing Register Export</span>
         </button>
       </div>
+
+      {/* TAB 0: Customer & Vehicle KYC Directory Master */}
+      {activeTab === 'customer_directory' && (
+        <div className="glass-panel p-6 rounded-2xl space-y-5 border border-slate-200 shadow-sm animate-fadeIn">
+          {/* Header & Excel Download Action */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  <UserCheck className="w-5 h-5 text-indigo-600" /> Customer Master & Vehicle Directory (KYC Details)
+                </h3>
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-800 border border-indigo-200">
+                  {customerDirectory.length} Total Customers
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 mt-1">
+                Complete directory containing Customer Name, Phone Number, Aadhar Number, PAN Number, Chassis Number, Engine Number, Vehicle Number, and Email.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <button
+                onClick={loadCustomerDirectory}
+                disabled={customerDirLoading}
+                className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition-colors cursor-pointer text-xs font-semibold flex items-center gap-1.5 border border-slate-200"
+                title="Refresh customer records"
+              >
+                <RefreshCw className={`w-4 h-4 ${customerDirLoading ? 'animate-spin text-indigo-600' : ''}`} />
+                <span className="hidden sm:inline">Refresh</span>
+              </button>
+
+              <button
+                onClick={handleExportCustomerDirectory}
+                disabled={downloading === 'customer_directory' || customerDirectory.length === 0}
+                className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-2 cursor-pointer"
+                title="Download Customer Details with Aadhar, PAN, Chassis, Engine in Excel Sheet (.xlsx)"
+              >
+                <FileSpreadsheet className="w-4 h-4" />
+                <span>
+                  {downloading === 'customer_directory' ? 'Generating Excel...' : '📥 Download Customer Excel Sheet (.xlsx)'}
+                </span>
+              </button>
+            </div>
+          </div>
+
+          {/* Live Search & Filter Bar */}
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200">
+            <div className="relative w-full sm:w-96">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Search by Customer Name, Phone, Vehicle, Aadhar, PAN, Chassis..."
+                value={customerDirSearch}
+                onChange={(e) => setCustomerDirSearch(e.target.value)}
+                className="w-full bg-white border border-slate-300 rounded-xl pl-9 pr-4 py-2 text-xs text-slate-900 focus:outline-none focus:border-indigo-500 font-medium"
+              />
+            </div>
+
+            <div className="text-xs text-slate-500 font-medium">
+              Showing <strong>{
+                customerDirectory.filter(r => {
+                  if (!customerDirSearch.trim()) return true;
+                  const q = customerDirSearch.toLowerCase().trim();
+                  return (
+                    String(r.customer_name || '').toLowerCase().includes(q) ||
+                    String(r.phone_number || '').toLowerCase().includes(q) ||
+                    String(r.vehicle_number || '').toLowerCase().includes(q) ||
+                    String(r.aadhar_number || '').toLowerCase().includes(q) ||
+                    String(r.pan_number || '').toLowerCase().includes(q) ||
+                    String(r.chasis_number || '').toLowerCase().includes(q) ||
+                    String(r.engine_number || '').toLowerCase().includes(q) ||
+                    String(r.email || '').toLowerCase().includes(q) ||
+                    String(r.imei_number || '').toLowerCase().includes(q)
+                  );
+                }).length
+              }</strong> of {customerDirectory.length} records
+            </div>
+          </div>
+
+          {/* Table Container */}
+          <div className="border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
+            <div className="overflow-x-auto max-h-[560px]">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead className="bg-slate-900 text-white uppercase text-[10px] tracking-wider sticky top-0 z-10">
+                  <tr>
+                    <th className="p-3 border-r border-slate-800">#</th>
+                    <th className="p-3 border-r border-slate-800 font-bold">Customer Name</th>
+                    <th className="p-3 border-r border-slate-800">Phone Number</th>
+                    <th className="p-3 border-r border-slate-800">Aadhar Number</th>
+                    <th className="p-3 border-r border-slate-800">PAN Number</th>
+                    <th className="p-3 border-r border-slate-800">Chassis Number</th>
+                    <th className="p-3 border-r border-slate-800">Engine Number</th>
+                    <th className="p-3 border-r border-slate-800 font-bold text-amber-300">Vehicle Number</th>
+                    <th className="p-3 border-r border-slate-800">Email Address</th>
+                    <th className="p-3 border-r border-slate-800 font-mono">IMEI Number</th>
+                    <th className="p-3">Device Model</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200 bg-white">
+                  {customerDirLoading ? (
+                    <tr>
+                      <td colSpan={11} className="p-8 text-center text-slate-500">
+                        <RefreshCw className="w-6 h-6 animate-spin mx-auto text-indigo-600 mb-2" />
+                        <span>Loading customer directory records...</span>
+                      </td>
+                    </tr>
+                  ) : customerDirectory.length === 0 ? (
+                    <tr>
+                      <td colSpan={11} className="p-8 text-center text-slate-400">
+                        No customer vehicle installation records found in directory yet.
+                      </td>
+                    </tr>
+                  ) : (
+                    customerDirectory
+                      .filter(r => {
+                        if (!customerDirSearch.trim()) return true;
+                        const q = customerDirSearch.toLowerCase().trim();
+                        return (
+                          String(r.customer_name || '').toLowerCase().includes(q) ||
+                          String(r.phone_number || '').toLowerCase().includes(q) ||
+                          String(r.vehicle_number || '').toLowerCase().includes(q) ||
+                          String(r.aadhar_number || '').toLowerCase().includes(q) ||
+                          String(r.pan_number || '').toLowerCase().includes(q) ||
+                          String(r.chasis_number || '').toLowerCase().includes(q) ||
+                          String(r.engine_number || '').toLowerCase().includes(q) ||
+                          String(r.email || '').toLowerCase().includes(q) ||
+                          String(r.imei_number || '').toLowerCase().includes(q)
+                        );
+                      })
+                      .map((rec, idx) => (
+                        <tr key={idx} className="hover:bg-indigo-50/40 transition-colors">
+                          <td className="p-3 text-slate-400 text-[11px] font-mono border-r border-slate-100">{idx + 1}</td>
+                          <td className="p-3 font-bold text-slate-900 border-r border-slate-100 whitespace-nowrap">
+                            {rec.customer_name}
+                          </td>
+                          <td className="p-3 font-mono font-medium text-emerald-700 border-r border-slate-100 whitespace-nowrap">
+                            {rec.phone_number ? `📞 ${rec.phone_number}` : '-'}
+                          </td>
+                          <td className="p-3 font-mono text-slate-700 border-r border-slate-100 whitespace-nowrap">
+                            {rec.aadhar_number || '-'}
+                          </td>
+                          <td className="p-3 font-mono uppercase text-slate-700 border-r border-slate-100 whitespace-nowrap">
+                            {rec.pan_number || '-'}
+                          </td>
+                          <td className="p-3 font-mono text-slate-800 border-r border-slate-100 whitespace-nowrap">
+                            {rec.chasis_number || '-'}
+                          </td>
+                          <td className="p-3 font-mono text-slate-800 border-r border-slate-100 whitespace-nowrap">
+                            {rec.engine_number || '-'}
+                          </td>
+                          <td className="p-3 font-mono font-black text-amber-900 bg-amber-50/60 border-r border-slate-100 whitespace-nowrap">
+                            {rec.vehicle_number || '-'}
+                          </td>
+                          <td className="p-3 text-slate-600 border-r border-slate-100 whitespace-nowrap">
+                            {rec.email || '-'}
+                          </td>
+                          <td className="p-3 font-mono text-slate-600 border-r border-slate-100 whitespace-nowrap">
+                            {rec.imei_number}
+                          </td>
+                          <td className="p-3 text-slate-600 whitespace-nowrap">
+                            {rec.device_model}
+                          </td>
+                        </tr>
+                      ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* TAB 1: Auto-Prepared Daily Master Stock Distribution Matrix */}
       {activeTab === 'daily_matrix' && (

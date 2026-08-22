@@ -14,6 +14,10 @@ router.post('/', (req, res) => {
     customer_type,
     vehicle_number,
     vehicle_type,
+    chasis_number,
+    engine_number,
+    aadhar_number,
+    pan_number,
     sale_price,
     payment_status,
     installed_by,
@@ -37,6 +41,10 @@ router.post('/', (req, res) => {
   const cleanImei = String(imei_number).trim();
   const cleanPhone = String(customer_phone).trim();
   const cleanVehicle = String(vehicle_number).trim().toUpperCase();
+  const cleanAadhar = aadhar_number ? String(aadhar_number).trim() : '';
+  const cleanPan = pan_number ? String(pan_number).trim().toUpperCase() : '';
+  const cleanChasis = chasis_number ? String(chasis_number).trim().toUpperCase() : '';
+  const cleanEngine = engine_number ? String(engine_number).trim().toUpperCase() : '';
   const cleanSoftwareUser = software_user_id ? String(software_user_id).trim() : '';
   const cleanSoftwarePass = software_password ? String(software_password).trim() : '';
   const cleanPayStatus = payment_status ? String(payment_status).toUpperCase().trim() : (sale_price && parseFloat(sale_price) > 0 ? 'RECEIVED' : 'NOT RECEIVED');
@@ -51,7 +59,11 @@ router.post('/', (req, res) => {
         'VEHICLE NUMBER': cleanVehicle,
         'CUSTOMER NAME': customer_name.trim(),
         'CUSTOMER PHONE NUMBER': cleanPhone,
-        'INSTALLATION DATE': instDate
+        'INSTALLATION DATE': instDate,
+        'CHASIS NUMBER': cleanChasis,
+        'ENGINE NUMBER': cleanEngine,
+        'AADHAR NUMBER': cleanAadhar,
+        'PAN NUMBER': cleanPan
       };
       const info = db.prepare(`
         INSERT INTO devices (imei_number, device_type_id, purchase_date, vendor_name, current_status, current_holder_type, current_holder_name, additional_attributes)
@@ -67,20 +79,22 @@ router.post('/', (req, res) => {
 
     if (customer) {
       customerId = customer.id;
-      // Update customer info if software credentials or additional details provided
+      // Update customer info if software credentials, aadhar, pan or additional details provided
       db.prepare(`
         UPDATE customers
         SET name = COALESCE(?, name),
             email = COALESCE(?, email),
             address = COALESCE(?, address),
+            aadhar_number = COALESCE(NULLIF(?, ''), aadhar_number),
+            pan_number = COALESCE(NULLIF(?, ''), pan_number),
             software_user_id = COALESCE(NULLIF(?, ''), software_user_id),
             software_password = COALESCE(NULLIF(?, ''), software_password)
         WHERE id = ?
-      `).run(customer_name.trim(), customer_email || null, customer_address || null, cleanSoftwareUser, cleanSoftwarePass, customerId);
+      `).run(customer_name.trim(), customer_email || null, customer_address || null, cleanAadhar, cleanPan, cleanSoftwareUser, cleanSoftwarePass, customerId);
     } else {
       const custResult = db.prepare(`
-        INSERT INTO customers (name, phone_number, alternate_phone, email, address, customer_type, source, software_user_id, software_password)
-        VALUES (?, ?, ?, ?, ?, ?, 'Direct Entry', ?, ?)
+        INSERT INTO customers (name, phone_number, alternate_phone, email, address, customer_type, source, aadhar_number, pan_number, software_user_id, software_password)
+        VALUES (?, ?, ?, ?, ?, ?, 'Direct Entry', ?, ?, ?, ?)
       `).run(
         customer_name.trim(),
         cleanPhone,
@@ -88,6 +102,8 @@ router.post('/', (req, res) => {
         customer_email || null,
         customer_address || null,
         customer_type || 'Individual',
+        cleanAadhar || null,
+        cleanPan || null,
         cleanSoftwareUser || null,
         cleanSoftwarePass || null
       );
@@ -99,9 +115,10 @@ router.post('/', (req, res) => {
       INSERT INTO installations (
         device_id, imei_number, customer_id, installation_date, installed_by,
         sales_manager, sales_person, customer_name, customer_contact, vehicle_number,
-        vehicle_type, sale_price, payment_status, installation_location, remarks, warranty_end_date,
+        vehicle_type, aadhar_number, pan_number, chasis_number, engine_number,
+        sale_price, payment_status, installation_location, remarks, warranty_end_date,
         software_user_id, software_password
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       dev.id,
       cleanImei,
@@ -114,6 +131,10 @@ router.post('/', (req, res) => {
       cleanPhone,
       cleanVehicle,
       vehicle_type || 'Commercial / Heavy',
+      cleanAadhar || null,
+      cleanPan || null,
+      cleanChasis || null,
+      cleanEngine || null,
       sale_price ? parseFloat(sale_price) : 0,
       cleanPayStatus,
       installation_location || 'Field Site',

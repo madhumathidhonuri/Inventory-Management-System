@@ -522,11 +522,51 @@ router.get('/stats', (req, res) => {
       };
     });
 
-    // 9. Aggregate Totals
+    // 9. Aggregate Totals & Enterprise Telemetry Alerts
     const totalDevices = db.prepare(`SELECT COUNT(*) as c FROM devices d ${whereClause}`).get(...queryParams).c;
     const totalInstallations = db.prepare(`SELECT COUNT(*) as c FROM devices d ${whereClause ? `${whereClause} AND d.current_status = 'INSTALLED'` : "WHERE d.current_status = 'INSTALLED'"}`).get(...queryParams).c;
     const totalCustomers = db.prepare(`SELECT COUNT(*) as c FROM customers`).get().c;
     const totalDispatched = db.prepare(`SELECT COUNT(*) as c FROM devices d ${whereClause ? `${whereClause} AND d.current_status = 'WITH_DEALER'` : "WHERE d.current_status = 'WITH_DEALER'"}`).get(...queryParams).c;
+
+    // Stale stock count (> 45 days idle)
+    let staleStockCount = 0;
+    const idleDevices = db.prepare("SELECT purchase_date, created_at, additional_attributes FROM devices WHERE current_status != 'INSTALLED'").all();
+    const nowTs = new Date().getTime();
+    idleDevices.forEach(dev => {
+      let attrs = {};
+      try { attrs = JSON.parse(dev.additional_attributes || '{}'); } catch {}
+      const pDate = dev.purchase_date || attrs['STOCK PLACE DATE'] || dev.created_at;
+      const d = new Date(pDate);
+      if (!isNaN(d.getTime())) {
+        const days = (nowTs - d.getTime()) / (1000 * 86400);
+        if (days > 45) staleStockCount++;
+      }
+    });
+
+    // Active RMA Count
+    const activeRmaRow = db.prepare("SELECT COUNT(*) as c FROM devices WHERE rma_status != 'NONE' AND rma_status != 'REPLACED'").get();
+    const activeRmaCount = activeRmaRow ? activeRmaRow.c : 0;
+
+    // SIM Expiring in 30 days
+    let simExpiringCount = 0;
+    const sims = db.prepare("SELECT sim_expiry_date, purchase_date, created_at FROM devices WHERE sim_number IS NOT NULL AND sim_number != ''").all();
+    sims.forEach(s => {
+      let exp = s.sim_expiry_date;
+      if (!exp) {
+        const b = new Date(s.purchase_date || s.created_at);
+        if (!isNaN(b.getTime())) {
+          b.setFullYear(b.getFullYear() + 1);
+          exp = b.toISOString().split('T')[0];
+        }
+      }
+      if (exp) {
+        const days = (new Date(exp).getTime() - nowTs) / (1000 * 86400);
+        if (days <= 30) simExpiringCount++;
+      }
+    });
+
+    // AMC Due in next 30 days
+    const amcDueCount = upcomingExpiries.filter(e => e.days_remaining <= 30).length;
 
     res.json({
       success: true,
@@ -549,7 +589,17 @@ router.get('/stats', (req, res) => {
           devices: totalDevices,
           installations: totalInstallations,
           customers: totalCustomers,
-          dispatched_to_dealers: totalDispatched
+          dispatched_to_dealers: totalDispatched,
+          stale_stock_count: staleStockCount,
+          sim_expiring_count: simExpiringCount,
+          active_rma_count: activeRmaCount,
+          amc_due_count: amcDueCount
+        },
+        alerts: {
+          stale_stock: staleStockCount,
+          sim_expiring: simExpiringCount,
+          active_rma: activeRmaCount,
+          amc_due: amcDueCount
         }
       }
     });

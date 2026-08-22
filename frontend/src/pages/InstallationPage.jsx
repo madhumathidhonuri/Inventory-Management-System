@@ -15,15 +15,26 @@ import {
   ExternalLink,
   Layers,
   X,
-  AlertCircle
+  AlertCircle,
+  QrCode,
+  CreditCard,
+  Send,
+  FileSpreadsheet
 } from 'lucide-react';
-import { recordInstallation, recordBulkInstallations, fetchInstallations, lookupCustomerByPhone } from '../services/api';
-import { buildCustomerCredentialsWhatsAppMessage } from '../utils/whatsapp';
+import { recordInstallation, recordBulkInstallations, fetchInstallations, lookupCustomerByPhone, getCustomerDirectoryExportUrl } from '../services/api';
+import { buildCustomerCredentialsWhatsAppMessage, buildPaymentQrWhatsAppMessage } from '../utils/whatsapp';
+import PaymentQrModal from '../components/PaymentQrModal';
 
 export default function InstallationPage({ onOpenScannerWithCallback, onOpenTraceDrawer }) {
   const [installations, setInstallations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+
+  // Payment QR Modal State
+  const [paymentQrData, setPaymentQrData] = useState(null);
+  const [isPaymentQrOpen, setIsPaymentQrOpen] = useState(false);
+  const [postInstallQrPrompt, setPostInstallQrPrompt] = useState(null);
+  const [autoSendWhatsAppPayment, setAutoSendWhatsAppPayment] = useState(true);
 
   // Single Action Form State
   const [showModal, setShowModal] = useState(false);
@@ -34,6 +45,10 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
   const [customerAddress, setCustomerAddress] = useState('');
   const [vehicleNumber, setVehicleNumber] = useState('');
   const [vehicleType, setVehicleType] = useState('Commercial / Heavy');
+  const [aadharNumber, setAadharNumber] = useState('');
+  const [panNumber, setPanNumber] = useState('');
+  const [chasisNumber, setChasisNumber] = useState('');
+  const [engineNumber, setEngineNumber] = useState('');
   const [salePrice, setSalePrice] = useState('');
   const [paymentStatus, setPaymentStatus] = useState('RECEIVED');
   const [softwareUserId, setSoftwareUserId] = useState('');
@@ -80,6 +95,8 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
           if (!customerName) setCustomerName(res.data.name || '');
           if (!customerEmail) setCustomerEmail(res.data.email || '');
           if (!customerAddress) setCustomerAddress(res.data.address || '');
+          if (!aadharNumber) setAadharNumber(res.data.aadhar_number || '');
+          if (!panNumber) setPanNumber(res.data.pan_number || '');
           if (!softwareUserId) setSoftwareUserId(res.data.software_user_id || '');
           if (!softwarePassword) setSoftwarePassword(res.data.software_password || '');
         } else {
@@ -117,6 +134,10 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
         customer_address: customerAddress.trim(),
         vehicle_number: vehicleNumber.trim().toUpperCase(),
         vehicle_type: vehicleType,
+        aadhar_number: aadharNumber.trim(),
+        pan_number: panNumber.trim().toUpperCase(),
+        chasis_number: chasisNumber.trim().toUpperCase(),
+        engine_number: engineNumber.trim().toUpperCase(),
         sale_price: salePrice ? parseFloat(salePrice) : 0,
         payment_status: paymentStatus,
         software_user_id: softwareUserId.trim(),
@@ -128,7 +149,42 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
       });
 
       if (res.success) {
-        setSuccessToast(`✅ Successfully linked vehicle ${vehicleNumber.trim().toUpperCase()} with IMEI ${imei.trim()}! Master stock updated to INSTALLED.`);
+        const savedImei = imei.trim();
+        const savedVeh = vehicleNumber.trim().toUpperCase();
+        const savedCust = customerName.trim();
+        const savedPhone = phone.trim();
+        const savedPrice = salePrice ? parseFloat(salePrice) : 0;
+        const savedLocation = location.trim();
+        const savedStatus = paymentStatus;
+
+        setSuccessToast(`✅ Successfully linked vehicle ${savedVeh} with IMEI ${savedImei}! Master stock updated to INSTALLED.`);
+        setPostInstallQrPrompt({
+          imei: savedImei,
+          vehicleNumber: savedVeh,
+          customerName: savedCust,
+          customerPhone: savedPhone,
+          salePrice: savedPrice,
+          paymentStatus: savedStatus,
+          stockPlace: savedLocation || 'FuelTracks Central'
+        });
+
+        // 1-Click Option 1 Auto-dispatch: Open WhatsApp with customer payment request and UPI link
+        if (autoSendWhatsAppPayment && savedPhone) {
+          const upiConfigId = localStorage.getItem('fueltracks_merchant_upi') || 'fueltracks@icici';
+          const upiConfigPayee = localStorage.getItem('fueltracks_payee_name') || 'FuelTracks Technologies Pvt Ltd';
+          const { url } = buildPaymentQrWhatsAppMessage({
+            phone: savedPhone,
+            customerName: savedCust,
+            vehicleNumber: savedVeh,
+            imei: savedImei,
+            amount: savedPrice,
+            upiId: upiConfigId,
+            payeeName: upiConfigPayee,
+            stockPlace: savedLocation || 'FuelTracks Central'
+          });
+          window.open(url, '_blank');
+        }
+
         setShowModal(false);
         // Reset form
         setImei('');
@@ -137,12 +193,16 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
         setCustomerEmail('');
         setCustomerAddress('');
         setVehicleNumber('');
+        setAadharNumber('');
+        setPanNumber('');
+        setChasisNumber('');
+        setEngineNumber('');
         setSalePrice('');
         setSoftwareUserId('');
         setSoftwarePassword('');
         setCustLookup(null);
         loadData();
-        setTimeout(() => setSuccessToast(''), 6000);
+        setTimeout(() => setSuccessToast(''), 10000);
       }
     } catch (err) {
       alert(err.message);
@@ -215,7 +275,18 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
           </p>
         </div>
 
-        <div className="flex items-center gap-2 self-start md:self-auto">
+        <div className="flex items-center gap-2 self-start md:self-auto flex-wrap">
+          <a
+            href={getCustomerDirectoryExportUrl()}
+            target="_blank"
+            rel="noreferrer"
+            className="px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer"
+            title="Download full Customer details with Aadhar, PAN, Chassis, Engine in Excel Sheet (.xlsx)"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5 text-indigo-600" />
+            <span>📥 Export Customer KYC Excel</span>
+          </a>
+
           <button
             onClick={() => { setShowBulkModal(true); setBulkResult(null); }}
             className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer"
@@ -232,14 +303,28 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
         </div>
       </div>
 
-      {/* Success Notification Banner */}
+      {/* Success Notification Banner with 1-Click Payment QR Option */}
       {successToast && (
-        <div className="p-4 bg-emerald-50 border border-emerald-300 rounded-2xl text-xs font-bold text-emerald-900 flex items-center justify-between gap-3 shadow-xs animate-in fade-in-50">
+        <div className="p-4 bg-emerald-50 border border-emerald-300 rounded-2xl text-xs font-bold text-emerald-900 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs animate-in fade-in-50">
           <div className="flex items-center gap-2">
             <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
             <span>{successToast}</span>
           </div>
-          <button onClick={() => setSuccessToast('')} className="text-emerald-700 hover:text-emerald-900 font-normal">✕</button>
+          <div className="flex items-center gap-2 self-end sm:self-auto">
+            {postInstallQrPrompt && (
+              <button
+                onClick={() => {
+                  setPaymentQrData(postInstallQrPrompt);
+                  setIsPaymentQrOpen(true);
+                }}
+                className="px-3.5 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+              >
+                <QrCode className="w-3.5 h-3.5" />
+                <span>Send Payment QR to Customer</span>
+              </button>
+            )}
+            <button onClick={() => { setSuccessToast(''); setPostInstallQrPrompt(null); }} className="text-emerald-700 hover:text-emerald-900 font-normal ml-1">✕</button>
+          </div>
         </div>
       )}
 
@@ -280,7 +365,7 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
                   <th className="p-3.5 bg-indigo-50/50 text-indigo-900 border-l border-r border-indigo-100">GPS Software Login</th>
                   <th className="p-3.5">Technician / City</th>
                   <th className="p-3.5">Price & Payment</th>
-                  <th className="p-3.5 text-right sticky right-0 bg-slate-50 border-l border-slate-200">WhatsApp</th>
+                  <th className="p-3.5 text-right sticky right-0 bg-slate-50 border-l border-slate-200">Customer Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -360,28 +445,75 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
                         </span>
                       </td>
 
-                      {/* 1-Click WhatsApp Trigger */}
+                      {/* 1-Click WhatsApp Payment & Login Actions */}
                       <td className="p-3.5 text-right sticky right-0 bg-slate-50 border-l border-slate-200">
-                        {(() => {
-                          const wa = buildCustomerCredentialsWhatsAppMessage({
-                            phone: inst.customer_contact,
-                            customerName: inst.customer_name,
-                            userId: inst.software_user_id,
-                            password: inst.software_password,
-                            vehicleNumber: inst.vehicle_number
-                          });
-                          return (
-                            <a
-                              href={wa.url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              title={`Send official Volty Track credentials to ${inst.customer_contact}`}
-                              className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-[11px] font-bold inline-flex items-center gap-1 shadow-2xs transition-colors cursor-pointer"
-                            >
-                              <span>💬</span> Send Login
-                            </a>
-                          );
-                        })()}
+                        <div className="flex items-center justify-end gap-1.5">
+                          {/* 1-Click Option 1: WhatsApp Payment Request with UPI Link */}
+                          {(() => {
+                            const waPay = buildPaymentQrWhatsAppMessage({
+                              phone: inst.customer_contact,
+                              customerName: inst.customer_name,
+                              vehicleNumber: inst.vehicle_number,
+                              imei: inst.imei_number,
+                              amount: inst.sale_price || 0,
+                              stockPlace: inst.installation_location || 'FuelTracks Central'
+                            });
+                            return (
+                              <a
+                                href={waPay.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title={`Send 1-Click WhatsApp Payment Request (UPI) to ${inst.customer_contact || 'Customer'}`}
+                                className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-[11px] font-bold inline-flex items-center gap-1 shadow-2xs transition-colors cursor-pointer"
+                              >
+                                <Send className="w-3 h-3" />
+                                <span>Pay (WA)</span>
+                              </a>
+                            );
+                          })()}
+
+                          {/* 1-Click WhatsApp GPS Credentials */}
+                          {(() => {
+                            const wa = buildCustomerCredentialsWhatsAppMessage({
+                              phone: inst.customer_contact,
+                              customerName: inst.customer_name,
+                              userId: inst.software_user_id,
+                              password: inst.software_password,
+                              vehicleNumber: inst.vehicle_number
+                            });
+                            return (
+                              <a
+                                href={wa.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title={`Send official Volty Track credentials to ${inst.customer_contact || 'Customer'}`}
+                                className="px-2 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-[11px] font-bold inline-flex items-center gap-1 shadow-2xs transition-colors cursor-pointer"
+                              >
+                                <span>💬</span> Login
+                              </a>
+                            );
+                          })()}
+
+                          {/* QR Code Modal Trigger */}
+                          <button
+                            onClick={() => {
+                              setPaymentQrData({
+                                imei: inst.imei_number,
+                                vehicleNumber: inst.vehicle_number,
+                                customerName: inst.customer_name,
+                                customerPhone: inst.customer_contact,
+                                salePrice: inst.sale_price,
+                                paymentStatus: inst.payment_status,
+                                stockPlace: inst.installation_location || 'FuelTracks Central'
+                              });
+                              setIsPaymentQrOpen(true);
+                            }}
+                            className="p-1.5 bg-slate-900 hover:bg-slate-800 text-emerald-300 hover:text-emerald-200 rounded-xl text-[11px] font-bold inline-flex items-center shadow-2xs transition-colors cursor-pointer border border-slate-700"
+                            title="Generate & View UPI Payment QR Code"
+                          >
+                            <QrCode className="w-3.5 h-3.5 text-emerald-400" />
+                          </button>
+                        </div>
                       </td>
 
                     </tr>
@@ -505,6 +637,50 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
                     />
                   </div>
                 </div>
+
+                {/* KYC & Vehicle Technical Details */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-slate-200">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Aadhar Number (Optional)</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. 1234 5678 9012"
+                      value={aadharNumber}
+                      onChange={(e) => setAadharNumber(e.target.value)}
+                      className="w-full bg-white border border-slate-300 rounded-xl p-2.5 text-xs text-slate-900 font-mono focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">PAN Number (Optional)</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. ABCDE1234F"
+                      value={panNumber}
+                      onChange={(e) => setPanNumber(e.target.value.toUpperCase())}
+                      className="w-full bg-white border border-slate-300 rounded-xl p-2.5 text-xs text-slate-900 font-mono uppercase focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Chassis Number (Optional)</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. MA3EWBIS2001928"
+                      value={chasisNumber}
+                      onChange={(e) => setChasisNumber(e.target.value.toUpperCase())}
+                      className="w-full bg-white border border-slate-300 rounded-xl p-2.5 text-xs text-slate-900 font-mono uppercase focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Engine Number (Optional)</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. E483CD99281"
+                      value={engineNumber}
+                      onChange={(e) => setEngineNumber(e.target.value.toUpperCase())}
+                      className="w-full bg-white border border-slate-300 rounded-xl p-2.5 text-xs text-slate-900 font-mono uppercase focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                </div>
               </div>
 
               {/* Admin GPS Software Login Credentials */}
@@ -575,23 +751,66 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
                 </div>
               </div>
 
+              {/* 1-Click WhatsApp Auto-Dispatch Option (Option 1) */}
+              <div className="p-3 bg-emerald-50/90 border border-emerald-300 rounded-2xl flex items-center justify-between gap-3 shadow-2xs">
+                <label className="flex items-center gap-2.5 text-xs text-emerald-950 font-bold cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={autoSendWhatsAppPayment}
+                    onChange={(e) => setAutoSendWhatsAppPayment(e.target.checked)}
+                    className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 border-slate-300 cursor-pointer"
+                  />
+                  <span>💬 Automatically open WhatsApp with 1-Click UPI Payment Link on Save</span>
+                </label>
+                <span className="px-2 py-0.5 rounded-full bg-emerald-200 text-emerald-900 text-[10px] font-extrabold uppercase tracking-wider hidden sm:inline">
+                  Recommended
+                </span>
+              </div>
+
               {/* Submit Buttons */}
-              <div className="flex gap-2 justify-end pt-2">
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => setShowModal(false)}
-                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium rounded-xl cursor-pointer"
+                  onClick={() => {
+                    if (!imei.trim() || !vehicleNumber.trim()) {
+                      alert('Please enter at least IMEI and Vehicle Number to preview Payment QR.');
+                      return;
+                    }
+                    setPaymentQrData({
+                      imei: imei.trim(),
+                      vehicleNumber: vehicleNumber.trim().toUpperCase(),
+                      customerName: customerName.trim() || 'Valued Customer',
+                      customerPhone: phone.trim(),
+                      salePrice: salePrice ? parseFloat(salePrice) : 6500,
+                      paymentStatus: paymentStatus,
+                      stockPlace: location.trim() || 'FuelTracks Central'
+                    });
+                    setIsPaymentQrOpen(true);
+                  }}
+                  className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-emerald-300 hover:text-emerald-200 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer border border-slate-700 shadow-2xs"
+                  title="Preview & Send UPI Payment QR Code"
                 >
-                  Cancel
+                  <QrCode className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Preview Payment QR</span>
                 </button>
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
-                >
-                  {submitting ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
-                  Save & Update Master Stock
-                </button>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowModal(false)}
+                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium rounded-xl cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+                  >
+                    {submitting ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                    Save & Update Master Stock
+                  </button>
+                </div>
               </div>
 
             </form>
@@ -688,6 +907,14 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
           </div>
         </div>
       )}
+
+      {/* Payment QR Code Modal */}
+      <PaymentQrModal
+        isOpen={isPaymentQrOpen}
+        onClose={() => setIsPaymentQrOpen(false)}
+        paymentData={paymentQrData}
+        onPaymentUpdated={() => loadData()}
+      />
 
     </div>
   );

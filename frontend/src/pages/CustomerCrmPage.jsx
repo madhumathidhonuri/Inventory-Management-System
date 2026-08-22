@@ -17,9 +17,10 @@ import {
   CheckCircle2,
   DollarSign,
   ShieldCheck,
-  X
+  X,
+  FileSpreadsheet
 } from 'lucide-react';
-import { fetchCustomers, fetchCustomerById, updateCustomer, deleteCustomer } from '../services/api';
+import { fetchCustomers, fetchCustomerById, updateCustomer, deleteCustomer, getCustomerDirectoryExportUrl } from '../services/api';
 import FitmentReceiptModal from '../components/FitmentReceiptModal';
 import ConsolidatedReminderModal from '../components/ConsolidatedReminderModal';
 import { buildPaymentDueReminderWhatsAppMessage } from '../utils/whatsapp';
@@ -151,7 +152,7 @@ export default function CustomerCrmPage({ onOpenTraceDrawer }) {
           </p>
         </div>
 
-        {/* Aggregate Stats Badges */}
+        {/* Aggregate Stats Badges & 1-Click Excel Export */}
         <div className="flex flex-wrap items-center gap-2 self-start md:self-auto">
           <div className="px-3.5 py-1.5 rounded-xl bg-indigo-50 border border-indigo-200 text-xs text-indigo-900 font-bold">
             👥 {customers.length} Customers
@@ -162,6 +163,17 @@ export default function CustomerCrmPage({ onOpenTraceDrawer }) {
           <div className="px-3.5 py-1.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-900 font-bold font-mono">
             ₹{totalRevenueBilled.toLocaleString()} Billed
           </div>
+
+          <a
+            href={getCustomerDirectoryExportUrl()}
+            target="_blank"
+            rel="noreferrer"
+            className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
+            title="Download Customer Master Details in formatted Excel (.xlsx)"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5" />
+            <span>📥 Download Customer Excel</span>
+          </a>
         </div>
       </div>
 

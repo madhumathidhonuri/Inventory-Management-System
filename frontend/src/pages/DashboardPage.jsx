@@ -36,7 +36,7 @@ import {
   Calendar,
   Table
 } from 'lucide-react';
-import { fetchStats, fetchPurchaseBatches, fetchDeviceTypes } from '../services/api';
+import { fetchStats, fetchPurchaseBatches, fetchDeviceTypes, fetchAgingAnalysis, fetchSimValidity } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import DealerDetailModal from '../components/DealerDetailModal';
 import FitmentReceiptModal from '../components/FitmentReceiptModal';
@@ -57,6 +57,16 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
   const [selectedMonth, setSelectedMonth] = useState('ALL');
   const [selectedDealerModal, setSelectedDealerModal] = useState(null);
   const [selectedReceiptDevice, setSelectedReceiptDevice] = useState(null);
+
+  // Aging Analysis Modal States
+  const [isAgingModalOpen, setIsAgingModalOpen] = useState(false);
+  const [agingData, setAgingData] = useState(null);
+  const [loadingAging, setLoadingAging] = useState(false);
+
+  // SIM Validity Modal States
+  const [isSimModalOpen, setIsSimModalOpen] = useState(false);
+  const [simData, setSimData] = useState(null);
+  const [loadingSim, setLoadingSim] = useState(false);
 
   // Monthly Payment Excel Export Modal States
   const [isMonthlyExportModalOpen, setIsMonthlyExportModalOpen] = useState(false);
@@ -276,6 +286,46 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
     }
   };
 
+  const handleOpenAgingModal = async () => {
+    setIsAgingModalOpen(true);
+    setLoadingAging(true);
+    try {
+      const res = await fetchAgingAnalysis();
+      if (res.success) setAgingData(res.data);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoadingAging(false);
+    }
+  };
+
+  const handleOpenSimModal = async () => {
+    setIsSimModalOpen(true);
+    setLoadingSim(true);
+    try {
+      const res = await fetchSimValidity();
+      if (res.success) setSimData(res.data);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoadingSim(false);
+    }
+  };
+
+  const handleNudgeDealerWhatsApp = (dealerName, count, imeiList = []) => {
+    const msg = `*⚠️ FUELTRACKS STOCK RECONCILIATION NOTICE*\n\n` +
+      `*Dear ${dealerName},*\n\n` +
+      `Our centralized inventory audit shows you currently hold *${count} uninstalled GPS devices* that have been idle for *over 45 days* without vehicle fitment updates.\n\n` +
+      `📋 *IMEI Serials Held (Sample):*\n` +
+      imeiList.slice(0, 5).map(i => `• \`${i}\``).join('\n') +
+      (imeiList.length > 5 ? `\n...and ${imeiList.length - 5} more.` : '') +
+      `\n\nKindly update their fitment status in your portal or return unutilized units to the central warehouse.\n\n` +
+      `*FuelTracks Central Operations*`;
+
+    const url = `https://wa.me/?text=${encodeURIComponent(msg)}`;
+    window.open(url, '_blank');
+  };
+
   return (
     <div className="space-y-6">
       
@@ -363,6 +413,73 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
             </>
           )}
         </div>
+      </div>
+
+      {/* Enterprise Operations Telemetry Bar */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {/* 1. Stale Stock Aging Alert */}
+        <button
+          onClick={() => handleOpenAgingModal()}
+          className="p-3.5 rounded-2xl border bg-amber-50/70 border-amber-200/80 hover:bg-amber-100/80 transition-all text-left cursor-pointer shadow-2xs group"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] uppercase font-bold text-amber-800 tracking-wider">Dead-Stock / Aging</span>
+            <Clock className="w-4 h-4 text-amber-600 group-hover:scale-110 transition-transform" />
+          </div>
+          <div className="mt-1 flex items-baseline gap-1.5">
+            <span className="text-xl font-black text-amber-950 font-mono">{totals?.stale_stock_count || stats?.alerts?.stale_stock || 0}</span>
+            <span className="text-[10px] text-amber-800 font-medium">Idle &gt; 45d</span>
+          </div>
+          <p className="text-[10px] text-amber-700 mt-0.5">Click for 1-click dealer stock nudge</p>
+        </button>
+
+        {/* 2. SIM Expiry Alert */}
+        <button
+          onClick={() => handleOpenSimModal()}
+          className="p-3.5 rounded-2xl border bg-blue-50/70 border-blue-200/80 hover:bg-blue-100/80 transition-all text-left cursor-pointer shadow-2xs group"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] uppercase font-bold text-blue-800 tracking-wider">SIM Validity Alert</span>
+            <Activity className="w-4 h-4 text-blue-600 group-hover:scale-110 transition-transform" />
+          </div>
+          <div className="mt-1 flex items-baseline gap-1.5">
+            <span className="text-xl font-black text-blue-950 font-mono">{totals?.sim_expiring_count || stats?.alerts?.sim_expiring || 0}</span>
+            <span className="text-[10px] text-blue-800 font-medium">Expiring in 30d</span>
+          </div>
+          <p className="text-[10px] text-blue-700 mt-0.5">Telecom data recharge watcher</p>
+        </button>
+
+        {/* 3. AMC & Warranty Renewal */}
+        <button
+          onClick={() => onNavigateTab('customers')}
+          className="p-3.5 rounded-2xl border bg-emerald-50/70 border-emerald-200/80 hover:bg-emerald-100/80 transition-all text-left cursor-pointer shadow-2xs group"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] uppercase font-bold text-emerald-800 tracking-wider">Annual Renewal Due</span>
+            <Receipt className="w-4 h-4 text-emerald-600 group-hover:scale-110 transition-transform" />
+          </div>
+          <div className="mt-1 flex items-baseline gap-1.5">
+            <span className="text-xl font-black text-emerald-950 font-mono">{totals?.amc_due_count || upcomingExpiries?.length || 0}</span>
+            <span className="text-[10px] text-emerald-800 font-medium">365d Subscriptions</span>
+          </div>
+          <p className="text-[10px] text-emerald-700 mt-0.5">Auto-send WhatsApp UPI links</p>
+        </button>
+
+        {/* 4. RMA Warranty Pipeline */}
+        <button
+          onClick={() => onNavigateTab('inventory')}
+          className="p-3.5 rounded-2xl border bg-purple-50/70 border-purple-200/80 hover:bg-purple-100/80 transition-all text-left cursor-pointer shadow-2xs group"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] uppercase font-bold text-purple-800 tracking-wider">RMA Repairs Lab</span>
+            <Wrench className="w-4 h-4 text-purple-600 group-hover:scale-110 transition-transform" />
+          </div>
+          <div className="mt-1 flex items-baseline gap-1.5">
+            <span className="text-xl font-black text-purple-950 font-mono">{totals?.active_rma_count || stats?.alerts?.active_rma || 0}</span>
+            <span className="text-[10px] text-purple-800 font-medium">Active Warranty</span>
+          </div>
+          <p className="text-[10px] text-purple-700 mt-0.5">OEM replacement tracker</p>
+        </button>
       </div>
 
       {/* List / Brand / Sheet Selector Bar */}
@@ -1190,6 +1307,182 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
               </button>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* Dead-Stock & Aging Analysis Modal */}
+      {isAgingModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-xs overflow-y-auto animate-in fade-in-50">
+          <div className="bg-white rounded-3xl shadow-2xl max-w-3xl w-full max-h-[90vh] flex flex-col border border-slate-200 overflow-hidden my-auto">
+            <div className="flex items-center justify-between p-4 bg-slate-900 text-white border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <Clock className="w-5 h-5 text-amber-400" />
+                <h3 className="text-sm font-bold">Uninstalled Stock Aging & Dead-Stock Analysis</h3>
+              </div>
+              <button onClick={() => setIsAgingModalOpen(false)} className="p-1.5 text-slate-400 hover:text-white rounded-xl">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 overflow-y-auto space-y-5">
+              {loadingAging ? (
+                <div className="p-8 text-center text-slate-500">
+                  <RefreshCw className="w-6 h-6 animate-spin text-amber-600 mx-auto mb-2" />
+                  <span>Computing aging brackets across all dealer stock...</span>
+                </div>
+              ) : !agingData ? (
+                <div className="p-8 text-center text-slate-400">No aging records found.</div>
+              ) : (
+                <>
+                  {/* Summary Metric Strip */}
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-center">
+                      <span className="text-[10px] uppercase font-bold text-red-700">🔴 Stale Stock (&gt; 60 Days)</span>
+                      <p className="text-xl font-black text-red-950 font-mono mt-0.5">{agingData.summary?.staleCount || 0}</p>
+                    </div>
+                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-center">
+                      <span className="text-[10px] uppercase font-bold text-amber-700">🟡 Aging Stock (30-60 Days)</span>
+                      <p className="text-xl font-black text-amber-950 font-mono mt-0.5">{agingData.summary?.agingCount || 0}</p>
+                    </div>
+                    <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-center">
+                      <span className="text-[10px] uppercase font-bold text-emerald-700">🟢 Fresh Stock (&lt; 30 Days)</span>
+                      <p className="text-xl font-black text-emerald-950 font-mono mt-0.5">{agingData.summary?.freshCount || 0}</p>
+                    </div>
+                  </div>
+
+                  {/* Stale & Aging Devices Table */}
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-800 mb-2 flex items-center gap-1.5">
+                      <AlertTriangle className="w-4 h-4 text-amber-600" /> Stale Devices Requiring Action ({[...(agingData.stale || []), ...(agingData.aging || [])].length} Units)
+                    </h4>
+                    <div className="border border-slate-200 rounded-xl overflow-hidden max-h-[380px] overflow-y-auto">
+                      <table className="w-full text-left text-xs border-collapse">
+                        <thead className="bg-slate-100 text-slate-700 uppercase text-[10px] font-bold sticky top-0">
+                          <tr>
+                            <th className="p-2.5 border-b border-r border-slate-200">IMEI Serial</th>
+                            <th className="p-2.5 border-b border-r border-slate-200">Current Holder / Stock Place</th>
+                            <th className="p-2.5 border-b border-r border-slate-200 text-center">Age (Days)</th>
+                            <th className="p-2.5 border-b border-slate-200 text-center">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 font-medium">
+                          {[...(agingData.stale || []), ...(agingData.aging || [])].map((item, idx) => (
+                            <tr key={idx} className="hover:bg-slate-50">
+                              <td className="p-2.5 font-mono font-bold text-slate-900 border-r border-slate-100">{item.imei_number}</td>
+                              <td className="p-2.5 font-bold text-slate-700 border-r border-slate-100">{item.current_holder_name}</td>
+                              <td className="p-2.5 text-center font-mono font-black border-r border-slate-100">
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] ${item.age_days > 60 ? 'bg-red-100 text-red-900' : 'bg-amber-100 text-amber-900'}`}>
+                                  {item.age_days} Days
+                                </span>
+                              </td>
+                              <td className="p-2.5 text-center">
+                                <button
+                                  onClick={() => handleNudgeDealerWhatsApp(item.current_holder_name, 1, [item.imei_number])}
+                                  className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold rounded-lg transition-colors cursor-pointer"
+                                >
+                                  Nudge (WA)
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="p-4 bg-slate-50 border-t border-slate-200 flex justify-end">
+              <button
+                onClick={() => setIsAgingModalOpen(false)}
+                className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SIM Card Validity & Telecom Expiry Modal */}
+      {isSimModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-xs overflow-y-auto animate-in fade-in-50">
+          <div className="bg-white rounded-3xl shadow-2xl max-w-3xl w-full max-h-[90vh] flex flex-col border border-slate-200 overflow-hidden my-auto">
+            <div className="flex items-center justify-between p-4 bg-slate-900 text-white border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <Activity className="w-5 h-5 text-blue-400" />
+                <h3 className="text-sm font-bold">M2M / eSIM Telecom Validity & Expiry Watcher</h3>
+              </div>
+              <button onClick={() => setIsSimModalOpen(false)} className="p-1.5 text-slate-400 hover:text-white rounded-xl">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 overflow-y-auto space-y-5">
+              {loadingSim ? (
+                <div className="p-8 text-center text-slate-500">
+                  <RefreshCw className="w-6 h-6 animate-spin text-blue-600 mx-auto mb-2" />
+                  <span>Checking SIM telecom plans and expiry timelines...</span>
+                </div>
+              ) : !simData ? (
+                <div className="p-8 text-center text-slate-400">No SIM records found.</div>
+              ) : (
+                <>
+                  {/* Telecom Carrier Pills */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    {Object.entries(simData.data?.carrier_counts || {}).map(([carrier, count]) => (
+                      <span key={carrier} className="px-3 py-1.5 rounded-xl bg-blue-50 border border-blue-200 text-xs font-bold text-blue-900">
+                        📶 {carrier}: <strong className="font-mono text-blue-950">{count}</strong>
+                      </span>
+                    ))}
+                  </div>
+
+                  {/* Expiring Soon Table */}
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-800 mb-2 flex items-center gap-1.5">
+                      <AlertTriangle className="w-4 h-4 text-amber-600" /> SIMs Expiring in Next 30 Days ({simData.summary?.expiringSoonCount || 0} Units)
+                    </h4>
+                    <div className="border border-slate-200 rounded-xl overflow-hidden max-h-[360px] overflow-y-auto">
+                      <table className="w-full text-left text-xs border-collapse">
+                        <thead className="bg-slate-100 text-slate-700 uppercase text-[10px] font-bold sticky top-0">
+                          <tr>
+                            <th className="p-2.5 border-b border-r border-slate-200">Device IMEI</th>
+                            <th className="p-2.5 border-b border-r border-slate-200 font-mono">SIM / ICCID</th>
+                            <th className="p-2.5 border-b border-r border-slate-200">Vehicle / Customer</th>
+                            <th className="p-2.5 border-b border-slate-200 text-center">Days Remaining</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 font-medium">
+                          {(simData.data?.expiring_soon || []).map((item, idx) => (
+                            <tr key={idx} className="hover:bg-slate-50">
+                              <td className="p-2.5 font-mono font-bold text-slate-900 border-r border-slate-100">{item.imei_number}</td>
+                              <td className="p-2.5 font-mono text-blue-700 border-r border-slate-100">{item.sim_number} ({item.sim_operator})</td>
+                              <td className="p-2.5 text-slate-800 border-r border-slate-100">{item.vehicle_number || item.customer_name || item.current_holder_name}</td>
+                              <td className="p-2.5 text-center font-mono font-black">
+                                <span className="px-2 py-0.5 rounded-full text-[10px] bg-amber-100 text-amber-900">
+                                  {item.days_remaining} Days
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="p-4 bg-slate-50 border-t border-slate-200 flex justify-end">
+              <button
+                onClick={() => setIsSimModalOpen(false)}
+                className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}

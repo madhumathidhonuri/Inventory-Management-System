@@ -159,50 +159,6 @@ export default function LoginPage() {
             </button>
           </form>
 
-          {/* Quick Demo Login Switcher */}
-          <div className="pt-2 border-t border-slate-700/60 space-y-2">
-            <p className="text-[11px] font-semibold text-slate-400 text-center">
-              Quick Test Accounts:
-            </p>
-            <div className="grid grid-cols-2 gap-2 text-[11px]">
-              <button
-                type="button"
-                onClick={() => { setEmail('admin@fueltracks.in'); setPassword('admin'); }}
-                className="p-2 rounded-xl bg-slate-900/80 hover:bg-purple-950/60 border border-slate-700 hover:border-purple-500 text-left transition-all cursor-pointer"
-              >
-                <div className="font-bold text-white flex items-center gap-1">👑 Super Admin</div>
-                <div className="text-[10px] text-slate-400">All Stock & System</div>
-              </button>
-              
-              <button
-                type="button"
-                onClick={() => { setEmail('jayasurya@fueltracks.in'); setPassword('dealer'); }}
-                className="p-2 rounded-xl bg-slate-900/80 hover:bg-blue-950/60 border border-slate-700 hover:border-blue-500 text-left transition-all cursor-pointer"
-              >
-                <div className="font-bold text-blue-300 flex items-center gap-1">🏪 Jaya Surya</div>
-                <div className="text-[10px] text-slate-400">Kurnool Dealer (75 units)</div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => { setEmail('operations@fueltracks.in'); setPassword('admin'); }}
-                className="p-2 rounded-xl bg-slate-900/80 hover:bg-amber-950/60 border border-slate-700 hover:border-amber-500 text-left transition-all cursor-pointer"
-              >
-                <div className="font-bold text-amber-300 flex items-center gap-1">🛠️ Operations</div>
-                <div className="text-[10px] text-slate-400">Admin Team</div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => { setEmail('sales@fueltracks.in'); setPassword('sales'); }}
-                className="p-2 rounded-xl bg-slate-900/80 hover:bg-emerald-950/60 border border-slate-700 hover:border-emerald-500 text-left transition-all cursor-pointer"
-              >
-                <div className="font-bold text-emerald-300 flex items-center gap-1">💼 Sales Team</div>
-                <div className="text-[10px] text-slate-400">Commercial Entry</div>
-              </button>
-            </div>
-          </div>
-
         </div>
       </main>
 

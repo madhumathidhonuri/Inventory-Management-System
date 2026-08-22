@@ -3,6 +3,7 @@ import { Truck, Plus, Search, Barcode, Eye, RotateCcw, RefreshCw, CheckCircle2, 
 import { fetchDispatches, fetchDispatchById, createDispatch, returnDispatchStock, fetchDealerStockSummary, fetchUsers, fetchDevices } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import DealerDetailModal from '../components/DealerDetailModal';
+import DeliveryChallanModal from '../components/DeliveryChallanModal';
 
 export default function DispatchPage({ onOpenScannerWithCallback, onOpenTraceDrawer }) {
   const { user } = useAuth();
@@ -15,12 +16,16 @@ export default function DispatchPage({ onOpenScannerWithCallback, onOpenTraceDra
   const [loading, setLoading] = useState(true);
   const [selectedDealerModal, setSelectedDealerModal] = useState(null);
 
+  // Delivery Challan Modal State
+  const [selectedChallanId, setSelectedChallanId] = useState(null);
+  const [isChallanModalOpen, setIsChallanModalOpen] = useState(false);
+
   // New Dispatch Form State
   const [showNewModal, setShowNewModal] = useState(false);
   const [selectedDealerId, setSelectedDealerId] = useState('');
-  const [dealerName, setDealerName] = useState('Jaya Surya');
-  const [dealerContact, setDealerContact] = useState('9848012345');
-  const [location, setLocation] = useState('Kurnool');
+  const [dealerName, setDealerName] = useState('');
+  const [dealerContact, setDealerContact] = useState('');
+  const [location, setLocation] = useState('');
   const [dispatchType, setDispatchType] = useState('DEALER');
   const [remarks, setRemarks] = useState('Stock assignment for dealer');
   const [dispatchImeisInput, setDispatchImeisInput] = useState('');
@@ -288,10 +293,20 @@ export default function DispatchPage({ onOpenScannerWithCallback, onOpenTraceDra
                       {disp.status}
                     </span>
                   </td>
-                  <td className="p-3.5 text-right">
+                  <td className="p-3.5 text-right flex items-center justify-end gap-1.5">
+                    <button
+                      onClick={() => {
+                        setSelectedChallanId(disp.id);
+                        setIsChallanModalOpen(true);
+                      }}
+                      className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-[11px] font-bold rounded-lg transition-colors inline-flex items-center gap-1 cursor-pointer"
+                      title="Generate and print official Delivery Challan (DCN)"
+                    >
+                      <Truck className="w-3.5 h-3.5 text-indigo-600" /> DCN Challan
+                    </button>
                     <button
                       onClick={() => handleViewDispatch(disp.id)}
-                      className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-medium rounded-lg transition-colors inline-flex items-center gap-1"
+                      className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-medium rounded-lg transition-colors inline-flex items-center gap-1 cursor-pointer"
                     >
                       <Eye className="w-3.5 h-3.5 text-blue-600" /> View IMEIs
                     </button>
@@ -562,6 +577,17 @@ export default function DispatchPage({ onOpenScannerWithCallback, onOpenTraceDra
         onClose={() => setSelectedDealerModal(null)}
         dealerName={selectedDealerModal}
         onOpenDeviceCard={onOpenTraceDrawer}
+      />
+
+      {/* Digital Delivery Challan (DCN) Modal */}
+      <DeliveryChallanModal
+        dispatchId={selectedChallanId}
+        isOpen={isChallanModalOpen}
+        onClose={() => {
+          setIsChallanModalOpen(false);
+          setSelectedChallanId(null);
+        }}
+        onAcknowledgeSuccess={loadData}
       />
 
     </div>

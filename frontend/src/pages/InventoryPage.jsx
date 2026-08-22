@@ -29,7 +29,8 @@ import {
   CreditCard,
   Layers,
   Zap,
-  ChevronDown
+  ChevronDown,
+  QrCode
 } from 'lucide-react';
 import { useAuth, canUserEditField } from '../context/AuthContext';
 import {
@@ -53,6 +54,8 @@ import {
 import DeviceDetailCardModal from '../components/DeviceDetailCardModal';
 import FitmentReceiptModal from '../components/FitmentReceiptModal';
 import ConsolidatedReminderModal from '../components/ConsolidatedReminderModal';
+import PaymentQrModal from '../components/PaymentQrModal';
+import RmaManagementModal from '../components/RmaManagementModal';
 import { buildCustomerCredentialsWhatsAppMessage, buildPaymentDueReminderWhatsAppMessage, formatINR, formatDisplayCellValue } from '../utils/whatsapp';
 
 export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClearInitialFilter }) {
@@ -70,7 +73,12 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
   const [typeFilter, setTypeFilter] = useState('');
   const [batchFilter, setBatchFilter] = useState('');
   const [columnPreset, setColumnPreset] = useState('ALL'); // 'ALL' | 'COMMERCIAL' | 'TECHNICAL' | 'DEALER'
+  const [agingFilter, setAgingFilter] = useState('ALL'); // 'ALL' | 'STALE' | 'AGING' | 'FRESH'
+  const [rmaFilter, setRmaFilter] = useState('ALL'); // 'ALL' | 'RMA_ACTIVE'
+  const [rmaDevice, setRmaDevice] = useState(null);
+  const [isRmaModalOpen, setIsRmaModalOpen] = useState(false);
   const [selectedReceiptDevice, setSelectedReceiptDevice] = useState(null);
+  const [selectedPaymentQrDevice, setSelectedPaymentQrDevice] = useState(null);
   const [activePaymentMenuId, setActivePaymentMenuId] = useState(null);
   const [consolidatedReminderModalData, setConsolidatedReminderModalData] = useState(null);
   const [isDealersExpanded, setIsDealersExpanded] = useState(false);
@@ -758,9 +766,26 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
       if (activationFilter === 'ACTIVATED' && !isActivated) return false;
       if (activationFilter === 'NOT_ACTIVATED' && isActivated) return false;
 
+      // 4. Aging & Dead-Stock Filter
+      if (agingFilter && agingFilter !== 'ALL') {
+        const pDate = dev.purchase_date || attrs['STOCK PLACE DATE'] || dev.created_at;
+        const itemDate = new Date(pDate);
+        const now = new Date();
+        const ageDays = !isNaN(itemDate.getTime()) ? Math.max(0, Math.floor((now - itemDate) / (1000 * 86400))) : 0;
+
+        if (agingFilter === 'STALE' && (ageDays <= 60 || isInstalled)) return false;
+        if (agingFilter === 'AGING' && (ageDays < 30 || ageDays > 60 || isInstalled)) return false;
+        if (agingFilter === 'FRESH' && (ageDays >= 30 || isInstalled)) return false;
+      }
+
+      // 5. RMA Warranty Repairs Filter
+      if (rmaFilter === 'RMA_ACTIVE') {
+        if (!dev.rma_status || dev.rma_status === 'NONE') return false;
+      }
+
       return true;
     });
-  }, [devices, quickPreset, dealerFilter, stockPlaceFilter, paymentFilter, deploymentFilter, salesPersonFilter, rtoFilter, activationFilter]);
+  }, [devices, quickPreset, dealerFilter, stockPlaceFilter, paymentFilter, deploymentFilter, salesPersonFilter, rtoFilter, activationFilter, agingFilter, rmaFilter]);
 
   // Reset all active filters
   const handleResetAllFilters = () => {
@@ -1863,6 +1888,27 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
                               className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer inline-flex items-center"
                             >
                               <span className="text-sm">💬</span>
+                            </button>
+
+                            {/* Customer Payment QR Code Generator */}
+                            <button
+                              onClick={() => {
+                                const attrs = dev.additional_attributes || {};
+                                setSelectedPaymentQrDevice({
+                                  ...dev,
+                                  imei: dev.imei_number,
+                                  vehicleNumber: attrs['VEHICLE NUMBER'] || attrs['Vehicle Number'] || dev.vehicle_number || 'N/A',
+                                  customerName: attrs['CUSTOMER NAME'] || dev.customer_name || 'Valued Customer',
+                                  customerPhone: attrs['CUSTOMER PHONE NUMBER'] || attrs['Primary Mobile'] || dev.customer_phone || '',
+                                  salePrice: attrs['TOTAL COST'] || attrs['COST'] || dev.sale_price || 6500,
+                                  paymentStatus: attrs['AMOUNT RECEIVED'] || dev.payment_status || 'NOT RECEIVED',
+                                  stockPlace: attrs['STOCK PLACE'] || dev.current_holder_name || 'FuelTracks Central'
+                                });
+                              }}
+                              title="Generate & Send Customer Payment QR Code (UPI / WhatsApp)"
+                              className="p-1.5 text-emerald-600 hover:text-emerald-800 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
+                            >
+                              <QrCode className="w-4 h-4" />
                             </button>
 
                             {/* Quick Inline Edit Pencil */}
@@ -3066,6 +3112,24 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
         stockPlace={consolidatedReminderModalData?.stockPlace || 'FuelTracks Central'}
       />
 
+      {/* Dynamic Customer Payment QR Code Modal */}
+      <PaymentQrModal
+        isOpen={Boolean(selectedPaymentQrDevice)}
+        onClose={() => setSelectedPaymentQrDevice(null)}
+        paymentData={selectedPaymentQrDevice}
+        onPaymentUpdated={() => loadData()}
+      />
+
+      {/* RMA & Warranty Return Pipeline Modal */}
+      <RmaManagementModal
+        device={rmaDevice}
+        isOpen={isRmaModalOpen}
+        onClose={() => {
+          setIsRmaModalOpen(false);
+          setRmaDevice(null);
+        }}
+        onSuccess={loadData}
+      />
 
     </div>
   );

@@ -1,9 +1,12 @@
-import React from 'react';
+import React, { useRef, useEffect } from 'react';
+import QRCode from 'qrcode';
 import { X, Printer, Send, ShieldCheck, CheckCircle2, QrCode, Building, Car, Phone, Calendar, CreditCard, Sparkles } from 'lucide-react';
-import { buildFitmentReceiptWhatsAppMessage } from '../utils/whatsapp';
+import { buildFitmentReceiptWhatsAppMessage, generateUpiUri } from '../utils/whatsapp';
 
 export default function FitmentReceiptModal({ isOpen, onClose, deviceData }) {
   if (!isOpen || !deviceData) return null;
+
+  const canvasRef = useRef(null);
 
   const {
     imei_number,
@@ -38,6 +41,30 @@ export default function FitmentReceiptModal({ isOpen, onClose, deviceData }) {
   const isPaid = (payment_status === 'RECEIVED' || String(additional_attributes['AMOUNT RECEIVED'] || '').toUpperCase().includes('REC'));
   const payStatusLabel = isPaid ? 'PAID & RECEIVED' : 'PAYMENT PENDING';
   const payModeLabel = payment_mode || additional_attributes['AMOUNT RECEIVED BY'] || (isPaid ? 'UPI / Online' : 'Pending');
+
+  const upiId = localStorage.getItem('fueltracks_merchant_upi') || 'fueltracks@icici';
+  const payeeName = localStorage.getItem('fueltracks_payee_name') || 'FuelTracks Technologies Pvt Ltd';
+  const companyQrImage = localStorage.getItem('fueltracks_company_qr_image') || '';
+
+  const upiUri = generateUpiUri({
+    upiId,
+    payeeName,
+    amount: parseFloat(rawCost) || 0,
+    transactionNote: `GPS Fitment ${vehNo} (${String(imei_number).slice(-6)})`
+  });
+
+  useEffect(() => {
+    if (canvasRef.current && upiUri && !companyQrImage) {
+      QRCode.toCanvas(canvasRef.current, upiUri, {
+        width: 100,
+        margin: 1,
+        color: { dark: '#0f172a', light: '#ffffff' }
+      }, (err) => {
+        if (err) console.error(err);
+      });
+    }
+  }, [upiUri, isOpen, companyQrImage]);
+
 
   const sims = [sim_number, simno1, additional_attributes['simno1'], additional_attributes['Sim 1'], simno2, additional_attributes['simno2']]
     .filter(Boolean)
@@ -214,12 +241,29 @@ export default function FitmentReceiptModal({ isOpen, onClose, deviceData }) {
               </table>
             </div>
 
-            {/* Commercial Billing Summary */}
+            {/* Commercial Billing Summary & Dynamic Payment QR */}
             <div className="flex flex-col sm:flex-row items-center justify-between p-4 bg-slate-900 text-white rounded-xl gap-4">
               <div className="space-y-0.5 text-center sm:text-left">
                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Total Amount Billed</span>
                 <div className="text-2xl font-black font-mono text-white">{formattedCost}</div>
                 <div className="text-[11px] text-slate-300">Payment Mode: <span className="font-semibold text-white">{payModeLabel}</span></div>
+                <div className="text-[10px] text-slate-400 font-mono">UPI ID: {upiId}</div>
+              </div>
+
+              {/* Dynamic / Company Payment QR Code */}
+              <div className="flex items-center gap-3 bg-slate-800/90 border border-slate-700/80 p-2 rounded-xl">
+                <div className="bg-white p-1 rounded-lg">
+                  {companyQrImage ? (
+                    <img src={companyQrImage} alt="Company QR" className="w-[100px] h-[100px] object-contain rounded" />
+                  ) : (
+                    <canvas ref={canvasRef} />
+                  )}
+                </div>
+                <div className="text-left space-y-0.5">
+                  <div className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">Scan & Pay UPI</div>
+                  <div className="text-[9px] text-slate-300">PhonePe / GPay / Paytm</div>
+                  <div className="text-[9px] text-slate-400 font-mono">{formattedCost}</div>
+                </div>
               </div>
 
               <div className="text-center sm:text-right">

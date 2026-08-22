@@ -948,4 +948,298 @@ router.get('/export-daily-distribution', async (req, res) => {
   }
 });
 
+/**
+ * Helper to fetch consolidated customer directory records from both installations & device records
+ */
+function getCustomerDirectoryRecords() {
+  // 1. Fetch from installations table
+  const installRows = db.prepare(`
+    SELECT 
+      i.id as installation_id,
+      i.customer_name,
+      i.customer_contact as phone_number,
+      c.email,
+      COALESCE(i.aadhar_number, c.aadhar_number, '') as aadhar_number,
+      COALESCE(i.pan_number, c.pan_number, '') as pan_number,
+      i.vehicle_number,
+      COALESCE(i.chasis_number, '') as chasis_number,
+      COALESCE(i.engine_number, '') as engine_number,
+      i.imei_number,
+      dt.name as device_model,
+      i.installation_date,
+      i.installation_location,
+      i.sale_price,
+      i.payment_status,
+      d.additional_attributes
+    FROM installations i
+    LEFT JOIN customers c ON i.customer_id = c.id
+    LEFT JOIN devices d ON i.device_id = d.id
+    LEFT JOIN device_types dt ON d.device_type_id = dt.id
+    ORDER BY i.installation_date DESC
+  `).all();
+
+  // 2. Fetch all devices with customer/vehicle data from additional_attributes
+  const deviceRows = db.prepare(`
+    SELECT 
+      d.id as device_id,
+      d.imei_number,
+      d.current_status,
+      d.current_holder_name,
+      d.additional_attributes,
+      dt.name as device_model
+    FROM devices d
+    JOIN device_types dt ON d.device_type_id = dt.id
+  `).all();
+
+  const records = [];
+  const seenKeys = new Set();
+
+  // Process installations first
+  installRows.forEach(row => {
+    let attrs = {};
+    try {
+      attrs = typeof row.additional_attributes === 'string' ? JSON.parse(row.additional_attributes || '{}') : (row.additional_attributes || {});
+    } catch {}
+
+    const chasis = row.chasis_number || attrs['CHASIS NUMBER'] || attrs['Chasis Number'] || attrs['Chassis Number'] || attrs['CHASSIS'] || '';
+    const engine = row.engine_number || attrs['ENGINE NUMBER'] || attrs['Engine Number'] || attrs['ENGINE'] || '';
+    const aadhar = row.aadhar_number || attrs['AADHAR NUMBER'] || attrs['Aadhar Number'] || attrs['Aadhar'] || attrs['AADHAR'] || '';
+    const pan = row.pan_number || attrs['PAN NUMBER'] || attrs['Pan Number'] || attrs['PAN'] || '';
+    const email = row.email || attrs['EMAIL'] || attrs['Customer Email'] || attrs['Email'] || '';
+
+    const rec = {
+      customer_name: row.customer_name || 'N/A',
+      phone_number: row.phone_number || '',
+      aadhar_number: aadhar,
+      pan_number: pan,
+      chasis_number: chasis,
+      engine_number: engine,
+      vehicle_number: row.vehicle_number || '',
+      email: email,
+      imei_number: row.imei_number,
+      device_model: row.device_model || 'AIS-140 GPS',
+      installation_date: row.installation_date || '',
+      location: row.installation_location || '',
+      sale_price: row.sale_price || 0,
+      payment_status: row.payment_status || 'PENDING'
+    };
+
+    const key = `${rec.vehicle_number}_${rec.imei_number}`.toUpperCase();
+    seenKeys.add(key);
+    records.push(rec);
+  });
+
+  // Process any other devices in master sheets with customer/vehicle info
+  deviceRows.forEach(dev => {
+    let attrs = {};
+    try {
+      attrs = typeof dev.additional_attributes === 'string' ? JSON.parse(dev.additional_attributes || '{}') : (dev.additional_attributes || {});
+    } catch {}
+
+    const custName = attrs['CUSTOMER NAME'] || attrs['Customer Name'] || attrs['Customer'] || '';
+    const vehNo = attrs['VEHICLE NUMBER'] || attrs['Vehicle Number'] || attrs['Veh No'] || attrs['VEH NO'] || '';
+    const phone = attrs['CUSTOMER PHONE NUMBER'] || attrs['Customer Contact'] || attrs['Phone'] || attrs['Mobile'] || attrs['Primary Mobile'] || '';
+
+    if (custName || vehNo) {
+      const key = `${vehNo}_${dev.imei_number}`.toUpperCase();
+      if (!seenKeys.has(key)) {
+        seenKeys.add(key);
+        const chasis = attrs['CHASIS NUMBER'] || attrs['Chasis Number'] || attrs['Chassis Number'] || attrs['CHASSIS'] || '';
+        const engine = attrs['ENGINE NUMBER'] || attrs['Engine Number'] || attrs['ENGINE'] || '';
+        const aadhar = attrs['AADHAR NUMBER'] || attrs['Aadhar Number'] || attrs['Aadhar'] || attrs['AADHAR'] || '';
+        const pan = attrs['PAN NUMBER'] || attrs['Pan Number'] || attrs['PAN'] || '';
+        const email = attrs['EMAIL'] || attrs['Customer Email'] || attrs['Email'] || '';
+        const date = formatExcelDate(attrs['CERTIFICATE ISSUED DATE'] || attrs['STOCK PLACE DATE'] || '');
+
+        records.push({
+          customer_name: custName || 'Valued Customer',
+          phone_number: phone,
+          aadhar_number: aadhar,
+          pan_number: pan,
+          chasis_number: chasis,
+          engine_number: engine,
+          vehicle_number: vehNo,
+          email: email,
+          imei_number: dev.imei_number,
+          device_model: dev.device_model || 'AIS-140 GPS',
+          installation_date: date,
+          location: dev.current_holder_name || attrs['STOCK PLACE'] || '',
+          sale_price: attrs['TOTAL COST'] || attrs['COST'] || 0,
+          payment_status: attrs['AMOUNT RECEIVED'] ? 'RECEIVED' : 'PENDING'
+        });
+      }
+    }
+  });
+
+  return records;
+}
+
+// GET /api/reports/customer-directory - List customer KYC & vehicle directory JSON
+router.get('/customer-directory', (req, res) => {
+  try {
+    const records = getCustomerDirectoryRecords();
+    res.json({
+      success: true,
+      count: records.length,
+      data: records
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/reports/customer-directory/export - Download Customer Master Excel Sheet (.xlsx)
+router.get('/customer-directory/export', async (req, res) => {
+  try {
+    const records = getCustomerDirectoryRecords();
+
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'FuelTracks Technologies';
+    wb.lastModifiedBy = 'FuelTracks IMS';
+    wb.created = new Date();
+
+    const ws = wb.addWorksheet('Customer KYC Master Directory', {
+      views: [{ showGridLines: true, state: 'frozen', ySplit: 3 }]
+    });
+
+    // 1. Title Banner
+    ws.mergeCells('A1:K1');
+    const titleCell = ws.getCell('A1');
+    titleCell.value = 'FUELTRACKS TECHNOLOGIES - CUSTOMER KYC & VEHICLE DIRECTORY MASTER SHEET';
+    titleCell.font = { bold: true, size: 14, color: { argb: 'FFFFFFFF' }, name: 'Calibri' };
+    titleCell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF0F172A' } // Slate 900
+    };
+    titleCell.alignment = { vertical: 'middle', horizontal: 'center' };
+    ws.getRow(1).height = 36;
+
+    // 2. Subtitle / Timestamp
+    ws.mergeCells('A2:K2');
+    const subCell = ws.getCell('A2');
+    subCell.value = `Export Generated on ${new Date().toLocaleString('en-IN')} | Total Records: ${records.length}`;
+    subCell.font = { italic: true, size: 10, color: { argb: 'FF475569' }, name: 'Calibri' };
+    subCell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFF1F5F9' } // Slate 100
+    };
+    subCell.alignment = { vertical: 'middle', horizontal: 'center' };
+    ws.getRow(2).height = 20;
+
+    // 3. Header Row (Requested Specific Columns)
+    const headers = [
+      'Customer Name',
+      'Phone Number',
+      'Aadhar Number',
+      'PAN Number',
+      'Chassis Number',
+      'Engine Number',
+      'Vehicle Number',
+      'Email Address',
+      'IMEI Number',
+      'Device Model',
+      'Installation / Fitment Date'
+    ];
+
+    const headerRow = ws.addRow(headers);
+    headerRow.height = 28;
+
+    headerRow.eachCell((cell) => {
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FF4338CA' } // Indigo 700
+      };
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11, name: 'Calibri' };
+      cell.alignment = { vertical: 'middle', horizontal: 'center' };
+      cell.border = {
+        top: { style: 'thin', color: { argb: 'FF312E81' } },
+        left: { style: 'thin', color: { argb: 'FF312E81' } },
+        bottom: { style: 'medium', color: { argb: 'FF312E81' } },
+        right: { style: 'thin', color: { argb: 'FF312E81' } }
+      };
+    });
+
+    // 4. Data Rows
+    records.forEach((rec, idx) => {
+      const rowValues = [
+        rec.customer_name || 'N/A',
+        rec.phone_number || '',
+        rec.aadhar_number || '-',
+        rec.pan_number || '-',
+        rec.chasis_number || '-',
+        rec.engine_number || '-',
+        rec.vehicle_number || '-',
+        rec.email || '-',
+        rec.imei_number || '',
+        rec.device_model || '',
+        rec.installation_date || ''
+      ];
+
+      const row = ws.addRow(rowValues);
+      row.height = 22;
+
+      const isEven = idx % 2 === 0;
+
+      row.eachCell((cell, colNum) => {
+        cell.font = {
+          size: 10,
+          name: 'Calibri',
+          color: { argb: 'FF1E293B' },
+          bold: colNum === 1 || colNum === 7 // Bold for Customer Name & Vehicle Number
+        };
+
+        cell.alignment = {
+          vertical: 'middle',
+          horizontal: [2, 3, 4, 5, 6, 7, 9, 11].includes(colNum) ? 'center' : 'left'
+        };
+
+        cell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: isEven ? 'FFFFFFFF' : 'FFF8FAFC' }
+        };
+
+        cell.border = {
+          top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          right: { style: 'thin', color: { argb: 'FFE2E8F0' } }
+        };
+
+        // Format Vehicle Number column with special background
+        if (colNum === 7 && cell.value && cell.value !== '-') {
+          cell.font = { bold: true, color: { argb: 'FF92400E' }, name: 'Calibri', size: 10 }; // Amber text
+        }
+      });
+    });
+
+    // Set Column Widths
+    ws.columns = [
+      { width: 26 }, // Customer Name
+      { width: 18 }, // Phone Number
+      { width: 20 }, // Aadhar Number
+      { width: 18 }, // PAN Number
+      { width: 24 }, // Chassis Number
+      { width: 22 }, // Engine Number
+      { width: 20 }, // Vehicle Number
+      { width: 28 }, // Email Address
+      { width: 22 }, // IMEI Number
+      { width: 20 }, // Device Model
+      { width: 20 }  // Installation Date
+    ];
+
+    const filename = `FuelTracks_Customer_KYC_Directory_${new Date().toISOString().split('T')[0]}`;
+    const buffer = await wb.xlsx.writeBuffer();
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}.xlsx"`);
+    res.send(buffer);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;
