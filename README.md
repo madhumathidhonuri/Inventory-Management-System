@@ -1,50 +1,81 @@
-# FuelTracks Technologies — Inventory Management System (IMS)
+# FuelTracks Technologies — Enterprise Inventory & Fleet Management Platform
 
-An enterprise-grade, full-stack **Inventory Management System (IMS)** designed for tracking GPS trackers, AIS-140 / VLTD devices, fuel level sensors, OBD units, and SIM cards by IMEI across their entire lifecycle — from smart vendor Excel ingestion, warehouse stock management, and batch stock transfers to vehicle installations, customer CRM, granular user permissions, and executive reporting.
+An enterprise-grade, full-stack **Inventory Management & Telematics Operations System (IMS)** designed for tracking GPS trackers, AIS-140 / VLTD devices, fuel level sensors, OBD units, and M2M SIM cards by IMEI across their entire lifecycle — from smart vendor Excel ingestion, centralized warehouse storage, dealer dispatches, and Delivery Challans (DCN) to vehicle installations, KYC customer CRM, RMA warranty repairs, automated WhatsApp payment acknowledgements, and executive financial reporting.
 
 ---
 
 ## 🚀 Key Modules & Capabilities
 
-### 1. 📊 Executive Dashboard & Real-Time Alerts
-- **5-Metric KPI Summary**: Live counts for **Total Master Stock**, **Total In-Stock (Unassigned + With Dealers)**, **Installed Fleet Units**, **With Dealer Dispatches**, and **Faulty / RMA Bay**.
-- **30-Day Warranty & Certificate Renewal Alert Center**: Automated tracking of 1-year certificate validity and SIM recharges with color-coded urgency badges (`Overdue`, `Urgently Due`, `Expiring Soon`) and **1-Click WhatsApp Reminders**.
-- **Live Operations Activity Feed**: Real-time log of team edits, field updates, stock transfers, and payment flips with instant CSV/Excel export.
-- **Stock Allocation Matrix**: Breakdown of device allocations across dealer branches and Unassigned Stock.
+### 1. 📊 Executive Telemetry & Real-Time Dashboard
+- **5-Metric Live Fleet Summary**: Real-time counters for **Total Master Stock**, **Total In-Stock**, **Installed In Vehicles**, **With Dealers / Branches**, and **Unassigned Central Warehouse Stock**.
+- **Financial & Payment Collection Telemetry**: Tracks collected revenue vs pending amounts, active collection rates, and 1-click **Monthly Payments Excel Statements**.
+- **Dealer & Branch Stock Allocation Matrix**: Real-time breakdown of device allocations per dealer with 1-click dossier views and **Reset Stock Holding** actions.
+- **Dead-Stock & Aging Analysis Engine**: Color-coded aging brackets (`< 30 Days`, `30–60 Days`, `> 60 Days`) with 1-click **WhatsApp Stock Nudge Notices** to dealers for idle stock reconciliation.
+- **Telecom & M2M SIM Validity Watcher**: Real-time carrier analytics (Airtel, Vi, Jio, BSNL) with 30-day pre-expiry alerts and bulk SIM validity updates.
 
-### 2. 🔐 Super Admin Role-Based Access & Granular Column Permissions
-- **Team Account Creation**: Super Admin creates and manages **Admin Team** and **Sales Team** logins.
-- **Granular Column Edit Matrix**: Super Admin can check/uncheck exact editable columns per user:
-  - 🚗 *Vehicle & Registration*: `Vehicle Number`, `Customer Name`, `Chasis Number`, `Engine Number`, `Certificate Issued Date`, etc.
-  - 💼 *Commercial & Financials*: `Cost`, `Tax`, `Total Cost`, `Installation Charges`, `Payment Status`, `Amount Received`, etc.
-  - 📍 *Logistics & Location*: `Stock Place`, `Stock Place Date`, `SIM Number`, `Status`, `Remarks`.
-  - ⚙️ *Core Hardware*: `IMEI Number`, `Device Type`, `Vendor Name`, `Purchase Price`.
-- **Default Presets**: Pre-configured defaults for Technical Admins (technical fields unlocked, commercial locked) vs Sales (commercial unlocked, technical locked).
-- **1-Click Credential Sharing**: Copy email and password credentials with one click.
+---
 
-### 3. 📦 Dynamic Inventory Spreadsheet Grid & Batch Stock Transfer
-- **Full Custom Columns Preservation**: Automatically ingests and renders all vendor custom headers (e.g. `Stock Place`, `Sim 1`, `Vehicle Number`, `Vahan ID`, `Certificate Date`, etc.).
-- **Multi-Select & Bulk Stock Movement**: Select multiple rows via checkboxes and transfer **50+ IMEIs** to a dealer, branch, or test office in **1 click** with date and courier reference tracking.
-- **Inline Cell Editing & Diff Audit**: Edit cells directly in the table with permission locks (`🔒 Locked`) and automatic before $\rightarrow$ after audit logging.
-- **One-Click Payment Flip**: Rapidly toggle payment status (`PENDING` ↔ `PAID`) with real-time financial updates.
+### 2. 📑 Smart Vendor Excel Ingestion & Auto-Mapper
+- **Intelligent Header Detection**: Automatically identifies `IMEI`, `SIM Number`, `Cost / Price`, `Vehicle Number`, and vendor custom attributes from any spreadsheet (*Tracknow, Vamosys, Volty, BSTPL, etc.*).
+- **Interactive Visual Column Mapper**: Review and remap columns dynamically with row-by-row validation before importing into **Central Warehouse Stock**.
+- **Excel Batch Tracker**: Filter the dashboard and inventory grid by specific Excel upload sheets and import dates.
 
-### 4. 📑 Smart Vendor Excel Ingestion & Auto-Mapper
-- **Intelligent Header Detection**: Automatically identifies `IMEI`, `SIM Number`, and `Cost / Price` from any vendor spreadsheet (*Tracknow, Vamosys, Volty, BSTPL, etc.*).
-- **Interactive Visual Column Mapper**: Review or remap columns dynamically with instant row validation before importing into **Unassigned Stock**.
-- **Deduplicated Export**: Clean Excel and CSV exports with deduplicated headers and formatted dates (`DD-MM-YYYY`).
+---
 
-### 5. 🔍 15-Digit IMEI Journey & Traceability Drawer
-- **Instant Search & History**: Slide-over journey drawer detailing any device's full lifecycle timeline (`PURCHASED` → `STOCK_TRANSFERRED` → `INSTALLED` → `PAYMENT_RECEIVED`).
-- **Comprehensive Audit Diff**: Detailed before $\rightarrow$ after value changes for every update.
+### 3. 📦 Dynamic Inventory Spreadsheet Grid & Lifecycle Traceability
+- **Full Custom Column Preservation**: Ingests and displays all vendor custom headers (`Stock Place`, `Sim 1`, `Vehicle Number`, `Vahan ID`, `Certificate Date`, etc.).
+- **Multi-Select & Bulk Stock Movement**: Select multiple rows via checkboxes to transfer or dispatch **50+ IMEIs** in **1 click**.
+- **Inline Cell Editing & Audit Diff**: Direct table editing with before $\rightarrow$ after audit logs and column permission locks.
+- **15-Digit IMEI Journey Drawer**: Slide-over lifecycle drawer detailing any device's full chronological history (`PURCHASED` → `DISPATCHED` → `INSTALLED` → `PAYMENT_RECEIVED`).
 
-### 6. 📸 Continuous Barcode & Camera Scanner
-- **High-Speed Camera Scanning**: Live camera scanner (`html5-qrcode`) for smartphone cameras and webcams.
-- **Continuous Loop Mode**: Scan batches sequentially with live counter and instant installation trigger.
-- **Desktop Simulation Mode**: Built-in test scanner for desktop testing.
+---
 
-### 7. 🛠️ Vehicle Installation & Customer CRM Hub
-- **Single-Action Vehicle Deployment**: Record IMEI, vehicle registration number, chassis/engine details, customer contact, and installation charges in one step.
-- **Customer CRM**: Automatic customer profile generation and multi-vehicle fleet tracking.
+### 4. 🚚 Stock Dispatches, Digital Delivery Challans (DCN) & Delete Controls
+- **Digital Delivery Challan (DCN)**: Generates official serialized Delivery Challans (`FT-DCN-2026-XXXX`) with printable layouts, dispatch metadata, and serialized IMEI handover tables.
+- **1-Click WhatsApp Challan Sharing**: Send formatted dispatch handover manifests directly to dealers via WhatsApp.
+- **Stock Dispatches & Assign Management**: Dispatch stock to registered or custom dealers with bulk barcode scanning or comma-separated IMEI inputs.
+- **Full Delete & Reset Controls**:
+  - **Single Dispatch Deletion**: Delete any past dispatch record with automatic device return back to Central Warehouse.
+  - **Clear All Dispatches**: 1-click purge of all dispatch history with complete warehouse stock restoration.
+  - **Reset Dealer Holding**: Instantly revert uninstalled devices held by any dealer back to Central Warehouse.
+
+---
+
+### 5. 👥 Customer KYC Directory & Formatted Excel Export
+- **Comprehensive Customer KYC Fields**: Captures and manages complete customer records:
+  - `Customer Name`, `Phone Number`, `Aadhar Number`, `PAN Number`, `Chassis Number`, `Engine Number`, `Vehicle Number`, `Email`.
+- **1-Click KYC Excel Export**: Download formatted, professional `.xlsx` customer directories directly from the CRM and Reports Hub.
+- **Multi-Vehicle Fleet CRM**: Automatically groups installed vehicles under customer profiles with login credentials tracking.
+
+---
+
+### 6. 🛠️ Vehicle Installations & 1-Click WhatsApp Payment Hub
+- **Rapid Installation Entry**: Single-step deployment recording IMEI, vehicle registration, customer contact, GPS software credentials, and sale price.
+- **Instant 1-Click WhatsApp Payment Received Acknowledgement**:
+  - Replaces paper slips with instant, professional WhatsApp confirmation messages containing:
+    - *Customer Name & Contact*
+    - *Vehicle Number & Device IMEI*
+    - *Amount Received (₹) & Payment Date*
+    - *Payment Mode / Ref ID*
+    - *Confirmation that tracking services are active*
+- **1-Click WhatsApp UPI Payment Request**: Send instant payment requests with direct tap-to-pay deep links and QR codes.
+- **1-Click App Login Sharing**: Send Volty Track mobile app login credentials (User ID and Password) to vehicle owners via WhatsApp.
+
+---
+
+### 7. 🔧 RMA & Warranty Repairs Pipeline
+- **4-Stage Lifecycle Tracking**:
+  1. `FAULTY_REPORTED` (Defective device reported from field / dealer)
+  2. `RECEIVED_LAB` (Received at central technical testing bench)
+  3. `SENT_TO_OEM` (Dispatched to vendor / manufacturer for repair)
+  4. `REPLACED` (Repaired or replaced with new unit)
+- **Vendor RMA Logging**: Record vendor names, courier tracking numbers, repair notes, and replacement IMEIs.
+
+---
+
+### 8. 🔐 Authentication & Role-Based Permissions
+- **Super Admin Portal**: Master administrative control with clean profile presentation.
+- **Role Permission Matrix**: Granular column-level edit permissions for Operations and Sales teams.
 
 ---
 
@@ -52,15 +83,15 @@ An enterprise-grade, full-stack **Inventory Management System (IMS)** designed f
 
 | Layer | Technology |
 |---|---|
-| **Frontend** | React 19, Vite, Tailwind CSS, Lucide Icons, SheetJS (`xlsx`) |
+| **Frontend** | React 19, Vite, Vanilla CSS Design System, Lucide Icons, SheetJS (`xlsx`), `qrcode` |
 | **Backend** | Node.js, Express.js REST API |
 | **Database** | SQLite (`better-sqlite3`) with WAL (Write-Ahead Logging) mode |
 | **Scanning** | `html5-qrcode` Camera & Barcode Reader |
-| **Design System** | Clean Light Theme (Charcoal Slate `#0f172a`, Purple `#7c3aed`, Emerald `#059669`, Amber `#d97706`) |
+| **Deployment** | Compatible with Render, Railway, AWS EC2, VPS, and Docker |
 
 ---
 
-## 💻 Getting Started
+## 💻 Getting Started Locally
 
 ### 1. Clone the Repository
 ```bash
@@ -83,13 +114,11 @@ npm run dev
 
 ---
 
-## 🔑 Default Credentials & Role Matrix
+## 🔑 Default Administrator Credentials
 
-| Role | Default Access | Editable Fields |
-|---|---|---|
-| **👑 Super Admin** | Full access to all modules, lists, deletions, user roles, and audits | All fields unlocked |
-| **🛠️ Admin Team** | Operations, inventory, vehicle installations, stock movement | Vehicle info, certificates, stock place, SIM |
-| **💼 Sales Team** | Commercial tracking, customer CRM, payment updates | Cost, tax, payment status, amount received, sale price |
+| Role | Username / Email | Password | Access Level |
+|---|---|---|---|
+| **Super Admin** | `admin@fueltracks.in` | `admin` | Full Master Control (All modules, settings, dispatches, user roles) |
 
 ---
 
@@ -101,15 +130,17 @@ Inventory-Management-System/
 │   ├── data/                 # SQLite database storage (inventory.db)
 │   ├── src/
 │   │   ├── db/               # DB schema, migrations, and seed scripts
-│   │   ├── routes/           # REST API routes (devices, dashboard, users, reports, etc.)
+│   │   ├── routes/           # REST API routes (devices, dashboard, dispatches, users, reports, etc.)
+│   │   ├── scripts/          # Database maintenance and cleanup utilities
 │   │   └── index.js          # Express server entrypoint
 │   └── package.json
 ├── frontend/
 │   ├── src/
-│   │   ├── components/       # Header, Sidebar, Scanner Modal, Journey Drawer
+│   │   ├── components/       # Header, Sidebar, Delivery Challan, RMA Modal, Scanner Modal, Journey Drawer
 │   │   ├── context/          # AuthContext & Column Permission Matrix
-│   │   ├── pages/            # Dashboard, Inventory, Upload, Users, CRM, Reports
+│   │   ├── pages/            # Dashboard, Inventory, Dispatches, Upload, CRM, Installations, Reports
 │   │   ├── services/         # REST API client services
+│   │   ├── utils/            # WhatsApp templates, UPI generator, Excel formatters
 │   │   ├── App.jsx           # Application routing & layout
 │   │   └── main.jsx          # React DOM entrypoint
 │   ├── index.html
