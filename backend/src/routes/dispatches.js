@@ -196,7 +196,26 @@ function getDispatchItems(dispatchId, dispatch) {
       device_type_name: it.device_type_name || 'AIS-140 GPS'
     };
   });
-}
+// GET /api/dispatches/summary/dealer-stock - Group stock by dealer & device type
+router.get('/summary/dealer-stock', (req, res) => {
+  try {
+    const summary = db.prepare(`
+      SELECT 
+        d.current_holder_name as dealer_name,
+        dt.name as device_type_name,
+        COUNT(d.id) as device_count
+      FROM devices d
+      JOIN device_types dt ON d.device_type_id = dt.id
+      WHERE d.current_status = 'WITH_DEALER'
+      GROUP BY d.current_holder_name, dt.name
+      ORDER BY d.current_holder_name, dt.name
+    `).all();
+
+    res.json({ success: true, data: summary || [] });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 
 // GET /api/dispatches/:id - Drill down into a dispatch record
 router.get('/:id', (req, res) => {
