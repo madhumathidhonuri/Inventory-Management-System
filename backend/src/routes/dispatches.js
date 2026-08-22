@@ -196,6 +196,8 @@ function getDispatchItems(dispatchId, dispatch) {
       device_type_name: it.device_type_name || 'AIS-140 GPS'
     };
   });
+}
+
 // GET /api/dispatches/summary/dealer-stock - Group stock by dealer & device type
 router.get('/summary/dealer-stock', (req, res) => {
   try {
