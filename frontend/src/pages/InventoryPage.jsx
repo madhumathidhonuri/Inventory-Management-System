@@ -57,6 +57,7 @@ import ConsolidatedReminderModal from '../components/ConsolidatedReminderModal';
 import PaymentQrModal from '../components/PaymentQrModal';
 import RmaManagementModal from '../components/RmaManagementModal';
 import { buildCustomerCredentialsWhatsAppMessage, buildPaymentDueReminderWhatsAppMessage, formatINR, formatDisplayCellValue } from '../utils/whatsapp';
+import { exportDevicesToExcel } from '../utils/excelExport';
 
 export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClearInitialFilter }) {
   const { user } = useAuth();
@@ -1106,6 +1107,26 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
     document.body.removeChild(link);
   };
 
+  // Export Filtered Live Stock Records directly to Styled Excel (.xlsx)
+  const handleExportFilteredExcel = async () => {
+    if (filteredDevices.length === 0) {
+      alert('No records available to export');
+      return;
+    }
+    const today = new Date().toISOString().slice(0, 10);
+    const activeDt = typeFilter ? deviceTypes.find(dt => dt.id.toString() === typeFilter.toString()) : null;
+    const activeTypeName = activeDt ? activeDt.name : (batchFilter ? 'Batch_Stock' : 'Inventory_Stock');
+    const fileName = `${activeTypeName.replace(/\s+/g, '_')}_List_${today}.xlsx`;
+
+    await exportDevicesToExcel(
+      fileName,
+      activeTypeName,
+      filteredDevices,
+      customColumns,
+      '1E3A8A' // Royal Navy Blue Header
+    );
+  };
+
   // Handle Bulk Dealer Allocation Submit
   const handleBulkAssignSubmit = async (e) => {
     e.preventDefault();
@@ -1536,11 +1557,19 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
             </button>
 
             <button
+              onClick={handleExportFilteredExcel}
+              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl border border-emerald-600 flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
+              title="Download currently filtered stock records in formatted Excel sheet (.xlsx) with all IMEIs, VLTD SNo, SIMs & Customer intact"
+            >
+              <Download className="w-3.5 h-3.5 text-white" /> Export Excel (.xlsx)
+            </button>
+
+            <button
               onClick={handleExportFilteredCsv}
-              className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-semibold rounded-xl border border-emerald-200 flex items-center gap-1.5 transition-colors cursor-pointer"
+              className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl border border-slate-200 flex items-center gap-1.5 transition-colors cursor-pointer"
               title="Download currently filtered inventory table as CSV"
             >
-              <Download className="w-3.5 h-3.5 text-emerald-600" /> Export CSV
+              <Download className="w-3.5 h-3.5 text-slate-600" /> Export CSV
             </button>
           </div>
         </div>

@@ -2,13 +2,41 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db/database');
 
+function getDefaultTemplateColumns(category = '', name = '') {
+  const cat = String(category).toLowerCase();
+  const n = String(name).toLowerCase();
+  if (cat.includes('fuel') || n.includes('fuel')) {
+    return ['IMEI / Serial Number', 'SIM Number', 'Rod Length (mm)', 'Calibration Code', 'Price', 'Vendor', 'Invoice No'];
+  }
+  if (cat.includes('obd') || n.includes('obd')) {
+    return ['IMEI Number', 'SIM Number', 'Protocol', 'Price', 'Vendor', 'Invoice No'];
+  }
+  if (cat.includes('accessory') || n.includes('accessory') || cat.includes('sensor')) {
+    return ['Serial Number', 'Model Code', 'Price', 'Vendor', 'Remarks'];
+  }
+  // Default GPS Tracker
+  return ['IMEI Number', 'SIM Number', 'Price', 'Vendor', 'Warranty Months', 'Invoice No'];
+}
+
+function parseTemplateColumns(raw, category = '', name = '') {
+  try {
+    if (!raw) return getDefaultTemplateColumns(category, name);
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    return getDefaultTemplateColumns(category, name);
+  } catch {
+    return getDefaultTemplateColumns(category, name);
+  }
+}
+
 // GET all device types
 router.get('/', (req, res) => {
   try {
     const types = db.prepare('SELECT * FROM device_types ORDER BY id ASC').all();
     const formatted = types.map(t => ({
       ...t,
-      custom_fields: JSON.parse(t.custom_fields || '{}')
+      custom_fields: JSON.parse(t.custom_fields || '{}'),
+      template_columns: parseTemplateColumns(t.template_columns, t.category, t.name)
     }));
     res.json({ success: true, data: formatted });
   } catch (err) {
@@ -18,16 +46,25 @@ router.get('/', (req, res) => {
 
 // POST new device type
 router.post('/', (req, res) => {
-  const { name, category, custom_fields } = req.body;
+  const { name, category, custom_fields, template_columns } = req.body;
   if (!name || !category) {
     return res.status(400).json({ success: false, error: 'Name and category are required' });
   }
   try {
     const fieldsStr = typeof custom_fields === 'object' ? JSON.stringify(custom_fields) : (custom_fields || '{}');
-    const stmt = db.prepare('INSERT INTO device_types (name, category, custom_fields) VALUES (?, ?, ?)');
-    const result = stmt.run(name, category, fieldsStr);
+    const cols = Array.isArray(template_columns) ? template_columns : getDefaultTemplateColumns(category, name);
+    const colsStr = JSON.stringify(cols);
+    const stmt = db.prepare('INSERT INTO device_types (name, category, custom_fields, template_columns) VALUES (?, ?, ?, ?)');
+    const result = stmt.run(name, category, fieldsStr, colsStr);
     const created = db.prepare('SELECT * FROM device_types WHERE id = ?').get(result.lastInsertRowid);
-    res.json({ success: true, data: { ...created, custom_fields: JSON.parse(created.custom_fields || '{}') } });
+    res.json({
+      success: true,
+      data: {
+        ...created,
+        custom_fields: JSON.parse(created.custom_fields || '{}'),
+        template_columns: parseTemplateColumns(created.template_columns, created.category, created.name)
+      }
+    });
   } catch (err) {
     res.status(400).json({ success: false, error: err.message });
   }
@@ -36,20 +73,30 @@ router.post('/', (req, res) => {
 // PUT update device type
 router.put('/:id', (req, res) => {
   const { id } = req.params;
-  const { name, category, custom_fields, active } = req.body;
+  const { name, category, custom_fields, template_columns, active } = req.body;
   try {
     const fieldsStr = typeof custom_fields === 'object' ? JSON.stringify(custom_fields) : custom_fields;
+    const colsStr = Array.isArray(template_columns) ? JSON.stringify(template_columns) : (typeof template_columns === 'string' ? template_columns : undefined);
+    
     const stmt = db.prepare(`
       UPDATE device_types
       SET name = COALESCE(?, name),
           category = COALESCE(?, category),
           custom_fields = COALESCE(?, custom_fields),
+          template_columns = COALESCE(?, template_columns),
           active = COALESCE(?, active)
       WHERE id = ?
     `);
-    stmt.run(name, category, fieldsStr, active, id);
+    stmt.run(name, category, fieldsStr, colsStr, active, id);
     const updated = db.prepare('SELECT * FROM device_types WHERE id = ?').get(id);
-    res.json({ success: true, data: { ...updated, custom_fields: JSON.parse(updated.custom_fields || '[]') } });
+    res.json({
+      success: true,
+      data: {
+        ...updated,
+        custom_fields: JSON.parse(updated.custom_fields || '[]'),
+        template_columns: parseTemplateColumns(updated.template_columns, updated.category, updated.name)
+      }
+    });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }

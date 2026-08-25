@@ -209,6 +209,9 @@ function initDatabase() {
   try { db.exec("ALTER TABLE devices ADD COLUMN rma_replacement_imei TEXT;"); } catch (e) {}
   try { db.exec("ALTER TABLE devices ADD COLUMN rma_date TEXT;"); } catch (e) {}
 
+  // Excel Template Columns per Device Type
+  try { db.exec("ALTER TABLE device_types ADD COLUMN template_columns TEXT DEFAULT '[]';"); } catch (e) {}
+
   // Digital Delivery Challan (DCN) Columns
   try { db.exec("ALTER TABLE dispatches ADD COLUMN challan_number TEXT;"); } catch (e) {}
   try { db.exec("ALTER TABLE dispatches ADD COLUMN accepted_at DATETIME;"); } catch (e) {}

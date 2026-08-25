@@ -98,10 +98,10 @@ router.post('/preview', upload.single('file'), (req, res) => {
       const simVal = autoMapping.sim ? String(row[autoMapping.sim] || '').trim() : '';
 
       const errors = [];
+      const isExisting = Boolean(imeiVal && existingImeis.has(imeiVal));
+
       if (!imeiVal) {
         errors.push('Missing IMEI');
-      } else if (existingImeis.has(imeiVal)) {
-        errors.push('IMEI already exists in database');
       }
 
       return {
@@ -110,6 +110,7 @@ router.post('/preview', upload.single('file'), (req, res) => {
         detected_imei: imeiVal,
         detected_sim: simVal,
         detected_price: autoMapping.price ? row[autoMapping.price] : null,
+        is_existing: isExisting,
         valid: errors.length === 0,
         errors
       };
@@ -117,6 +118,8 @@ router.post('/preview', upload.single('file'), (req, res) => {
 
     const totalRows = rowsWithValidation.length;
     const validRows = rowsWithValidation.filter(r => r.valid).length;
+    const existingRows = rowsWithValidation.filter(r => r.valid && r.is_existing).length;
+    const newRows = rowsWithValidation.filter(r => r.valid && !r.is_existing).length;
     const invalidRows = totalRows - validRows;
 
     res.json({
@@ -126,6 +129,8 @@ router.post('/preview', upload.single('file'), (req, res) => {
       autoMapping,
       totalRows,
       validRows,
+      newRows,
+      existingRows,
       invalidRows,
       previewRows: rowsWithValidation
     });
@@ -134,7 +139,7 @@ router.post('/preview', upload.single('file'), (req, res) => {
   }
 });
 
-// POST /api/purchase-batches/confirm - Execute bulk insertion of purchase batch & devices
+// POST /api/purchase-batches/confirm - Execute bulk insertion & updates of purchase batch & devices
 router.post('/confirm', (req, res) => {
   const {
     uploaded_by,
@@ -144,6 +149,8 @@ router.post('/confirm', (req, res) => {
     purchase_date,
     source_file,
     notes,
+    headers, // Array of column headers in exact uploaded Excel order
+    update_existing = true, // Default to true (Upsert Mode)
     items // Array of { imei, sim, price, additional_attributes }
   } = req.body;
 
@@ -164,37 +171,40 @@ router.post('/confirm', (req, res) => {
         if (existingType) {
           targetDeviceTypeId = existingType.id;
         } else {
-          const insertTypeStmt = db.prepare('INSERT INTO device_types (name, category, custom_fields) VALUES (?, ?, ?)');
-          const typeRes = insertTypeStmt.run(typeName, 'GPS Tracker', '[]');
+          const insertTypeStmt = db.prepare('INSERT INTO device_types (name, category, custom_fields, template_columns) VALUES (?, ?, ?, ?)');
+          const typeRes = insertTypeStmt.run(typeName, 'GPS Tracker', '[]', '[]');
           targetDeviceTypeId = typeRes.lastInsertRowid;
         }
       }
 
-      // Collect all distinct custom field names from all items
-      const targetType = db.prepare('SELECT * FROM device_types WHERE id = ?').get(targetDeviceTypeId);
-      if (!targetType) {
-        throw new Error(`Device type with ID ${targetDeviceTypeId} not found`);
-      }
-      let existingCustomFields = [];
-      try {
-        const parsed = JSON.parse(targetType.custom_fields || '[]');
-        existingCustomFields = Array.isArray(parsed) ? parsed : Object.keys(parsed);
-      } catch {}
-
-      const customFieldsSet = new Set(existingCustomFields);
-
-      for (const item of items) {
-        if (item.additional_attributes) {
-          Object.keys(item.additional_attributes).forEach(k => {
-            if (k && k !== 'original_row') customFieldsSet.add(k);
-          });
+      // Preserve exact uploaded Excel columns in their exact sequence
+      let orderedHeaders = [];
+      const seen = new Set();
+      if (Array.isArray(headers) && headers.length > 0) {
+        headers.forEach(h => {
+          const trimmed = String(h || '').trim();
+          if (trimmed && !seen.has(trimmed)) {
+            seen.add(trimmed);
+            orderedHeaders.push(trimmed);
+          }
+        });
+      } else {
+        for (const item of items) {
+          if (item.additional_attributes) {
+            Object.keys(item.additional_attributes).forEach(k => {
+              if (k && k !== 'original_row' && !seen.has(k)) {
+                seen.add(k);
+                orderedHeaders.push(k);
+              }
+            });
+          }
         }
       }
 
-      // Update device_types custom_fields schema
-      const updatedFieldsArray = Array.from(customFieldsSet);
-      db.prepare('UPDATE device_types SET custom_fields = ? WHERE id = ?').run(
-        JSON.stringify(updatedFieldsArray),
+      // Update device_types custom_fields and template_columns with exact ordered column list
+      db.prepare('UPDATE device_types SET custom_fields = ?, template_columns = ? WHERE id = ?').run(
+        JSON.stringify(orderedHeaders),
+        JSON.stringify(orderedHeaders),
         targetDeviceTypeId
       );
 
@@ -206,17 +216,29 @@ router.post('/confirm', (req, res) => {
 
       const batchId = batchResult.lastInsertRowid;
 
+      const getExistingDeviceStmt = db.prepare('SELECT id, additional_attributes, current_status, current_holder_name FROM devices WHERE imei_number = ?');
+
       const insertDeviceStmt = db.prepare(`
         INSERT INTO devices (imei_number, sim_number, device_type_id, purchase_batch_id, purchase_date, purchase_price, vendor_name, current_status, current_holder_type, current_holder_id, current_holder_name, additional_attributes)
         VALUES (?, ?, ?, ?, ?, ?, ?, 'IN_WAREHOUSE', 'WAREHOUSE', 1, 'Central Warehouse', ?)
       `);
 
+      const updateDeviceStmt = db.prepare(`
+        UPDATE devices
+        SET sim_number = COALESCE(?, sim_number),
+            purchase_price = COALESCE(?, purchase_price),
+            additional_attributes = ?,
+            updated_at = datetime('now')
+        WHERE id = ?
+      `);
+
       const insertHistoryStmt = db.prepare(`
         INSERT INTO device_history (device_id, imei_number, event_type, event_date, from_holder, to_holder, performed_by, remarks)
-        VALUES (?, ?, 'PURCHASED', datetime('now'), NULL, 'Central Warehouse', ?, ?)
+        VALUES (?, ?, ?, datetime('now'), NULL, ?, ?, ?)
       `);
 
       const createdDevices = [];
+      const updatedDevices = [];
       const skippedItems = [];
 
       for (const item of items) {
@@ -242,32 +264,74 @@ router.post('/confirm', (req, res) => {
             }
           });
 
-          const result = insertDeviceStmt.run(
-            imei,
-            item.sim || null,
-            targetDeviceTypeId,
-            batchId,
-            purchase_date || new Date().toISOString().split('T')[0],
-            item.price ? parseFloat(item.price) : null,
-            vendor,
-            JSON.stringify(extraAttrs)
-          );
+          const existingDev = getExistingDeviceStmt.get(imei);
 
-          const devId = result.lastInsertRowid;
-          insertHistoryStmt.run(
-            devId,
-            imei,
-            uploaded_by || 'Warehouse Admin',
-            `Purchased from ${vendor} (Batch #${batchId})`
-          );
+          if (existingDev) {
+            if (update_existing) {
+              // Merge existing attributes with newly uploaded spreadsheet attributes
+              let oldAttrs = {};
+              try { oldAttrs = JSON.parse(existingDev.additional_attributes || '{}'); } catch {}
+              const mergedAttrs = { ...oldAttrs, ...extraAttrs };
 
-          createdDevices.push({ id: devId, imei });
+              updateDeviceStmt.run(
+                item.sim || null,
+                item.price ? parseFloat(item.price) : null,
+                JSON.stringify(mergedAttrs),
+                existingDev.id
+              );
+
+              insertHistoryStmt.run(
+                existingDev.id,
+                imei,
+                'STATUS_CHANGED',
+                existingDev.current_holder_name || 'Central Warehouse',
+                uploaded_by || 'Warehouse Admin',
+                `Updated attributes via Excel Upload (Batch #${batchId})`
+              );
+
+              updatedDevices.push({ id: existingDev.id, imei });
+            } else {
+              skippedItems.push({ imei, reason: 'Already exists in database' });
+            }
+          } else {
+            // New Device Insert
+            const result = insertDeviceStmt.run(
+              imei,
+              item.sim || null,
+              targetDeviceTypeId,
+              batchId,
+              purchase_date || new Date().toISOString().split('T')[0],
+              item.price ? parseFloat(item.price) : null,
+              vendor,
+              JSON.stringify(extraAttrs)
+            );
+
+            const devId = result.lastInsertRowid;
+            insertHistoryStmt.run(
+              devId,
+              imei,
+              'PURCHASED',
+              'Central Warehouse',
+              uploaded_by || 'Warehouse Admin',
+              `Purchased from ${vendor} (Batch #${batchId})`
+            );
+
+            createdDevices.push({ id: devId, imei });
+          }
         } catch (err) {
           skippedItems.push({ imei, reason: err.message });
         }
       }
 
-      return { batchId, deviceTypeId: targetDeviceTypeId, totalCount: createdDevices.length, skippedCount: skippedItems.length, skippedItems };
+      return {
+        batchId,
+        deviceTypeId: targetDeviceTypeId,
+        totalCount: createdDevices.length + updatedDevices.length,
+        createdCount: createdDevices.length,
+        updatedCount: updatedDevices.length,
+        skippedCount: skippedItems.length,
+        skippedItems
+      };
     });
 
     const result = transaction();

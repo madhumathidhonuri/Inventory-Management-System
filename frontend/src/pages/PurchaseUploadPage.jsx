@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { FileSpreadsheet, Upload, CheckCircle2, AlertTriangle, Download, ArrowRight, Check, X, RefreshCw, FileText } from 'lucide-react';
 import { fetchDeviceTypes, previewPurchaseUpload, confirmPurchaseUpload } from '../services/api';
+import { downloadStyledTemplate } from '../utils/excelExport';
 import * as xlsx from 'xlsx';
 
 export default function PurchaseUploadPage({ onUploadSuccess }) {
@@ -74,6 +75,8 @@ export default function PurchaseUploadPage({ onUploadSuccess }) {
     }
   };
 
+  const [updateExisting, setUpdateExisting] = useState(true);
+
   // Dynamically compute preview rows based on current column mapping
   const computedPreviewRows = useMemo(() => {
     if (!previewData || !previewData.previewRows) return [];
@@ -85,7 +88,6 @@ export default function PurchaseUploadPage({ onUploadSuccess }) {
 
       const errors = [];
       if (!imeiVal) errors.push('Missing IMEI');
-      else if (row.errors.includes('IMEI already exists in database')) errors.push('IMEI already exists');
 
       return {
         ...row,
@@ -97,6 +99,14 @@ export default function PurchaseUploadPage({ onUploadSuccess }) {
       };
     });
   }, [previewData, columnMapping]);
+
+  const newRowCount = useMemo(() => {
+    return computedPreviewRows.filter(r => r.valid && !r.is_existing).length;
+  }, [computedPreviewRows]);
+
+  const existingRowCount = useMemo(() => {
+    return computedPreviewRows.filter(r => r.valid && r.is_existing).length;
+  }, [computedPreviewRows]);
 
   const validRowCount = useMemo(() => {
     return computedPreviewRows.filter(r => r.valid).length;
@@ -136,6 +146,8 @@ export default function PurchaseUploadPage({ onUploadSuccess }) {
         vendor_name: vendorName,
         source_file: previewData.filename,
         notes,
+        headers: previewData.headers, // Preserves exact columns & sequence from uploaded Excel sheet
+        update_existing: updateExisting,
         items: validItems
       };
 
@@ -161,16 +173,22 @@ export default function PurchaseUploadPage({ onUploadSuccess }) {
     }
   };
 
-  const downloadSampleTemplate = () => {
-    const templateData = [
-      { 'IMEI Number': '864920050019201', 'SIM Number': '89914000982300099', 'Price': '3500', 'Vendor': 'Vamosys', 'Sensor Length': '600mm', 'Calibration Code': 'CAL-991' },
-      { 'IMEI Number': '864920050019202', 'SIM Number': '89914000982300098', 'Price': '3500', 'Vendor': 'Vamosys', 'Sensor Length': '600mm', 'Calibration Code': 'CAL-992' },
-      { 'IMEI Number': '864920050019203', 'SIM Number': '89914000982300097', 'Price': '3500', 'Vendor': 'Vamosys', 'Sensor Length': '750mm', 'Calibration Code': 'CAL-993' }
-    ];
-    const ws = xlsx.utils.json_to_sheet(templateData);
-    const wb = xlsx.utils.book_new();
-    xlsx.utils.book_append_sheet(wb, ws, 'Sample_Stock');
-    xlsx.writeFile(wb, 'FuelTracks_Stock_Import_Template.xlsx');
+  const currentDeviceType = useMemo(() => {
+    return deviceTypes.find(d => d.id.toString() === selectedType) || null;
+  }, [deviceTypes, selectedType]);
+
+  const downloadSampleTemplate = async () => {
+    const typeName = currentDeviceType ? currentDeviceType.name : (newTypeName || 'Device');
+    const cols = (currentDeviceType && Array.isArray(currentDeviceType.template_columns) && currentDeviceType.template_columns.length > 0)
+      ? currentDeviceType.template_columns
+      : ['IMEI Number', 'SIM Number', 'Price', 'Vendor Name', 'Warranty Months', 'Invoice No'];
+
+    await downloadStyledTemplate(
+      `${typeName.replace(/\s+/g, '_')}_Stock_Template.xlsx`,
+      typeName,
+      cols,
+      '1E3A8A' // Royal Navy Blue Header
+    );
   };
 
   return (
@@ -182,14 +200,14 @@ export default function PurchaseUploadPage({ onUploadSuccess }) {
           <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
             <FileSpreadsheet className="w-5 h-5 text-purple-600" /> Purchase Bulk Stock Upload
           </h2>
-          <p className="text-xs text-slate-500">Upload vendor Excel sheet to bulk create IMEI device records into Unassigned Stock with full column preservation</p>
+          <p className="text-xs text-slate-500">Upload vendor Excel sheet to bulk create IMEI device records into Unassigned Stock with dynamic schema validation</p>
         </div>
 
         <button
           onClick={downloadSampleTemplate}
-          className="px-3 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-semibold rounded-xl border border-slate-200 flex items-center gap-1.5 transition-colors"
+          className="px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-bold rounded-xl border border-emerald-200 flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
         >
-          <Download className="w-3.5 h-3.5 text-emerald-600" /> Sample Excel Template
+          <Download className="w-4 h-4 text-emerald-600" /> Download {currentDeviceType?.name || 'Device'} Template
         </button>
       </div>
 
@@ -258,6 +276,22 @@ export default function PurchaseUploadPage({ onUploadSuccess }) {
                   ))}
                 </select>
               )}
+
+              {/* Show Configured Template Columns Badge */}
+              {currentDeviceType && !isNewType && (
+                <div className="mt-2 p-2 bg-slate-50 border border-slate-200 rounded-lg">
+                  <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block mb-1">
+                    Configured Excel Format ({currentDeviceType.template_columns?.length || 0} Columns):
+                  </span>
+                  <div className="flex flex-wrap gap-1">
+                    {(currentDeviceType.template_columns || []).map((col, idx) => (
+                      <span key={idx} className="text-[10px] bg-white border border-slate-200 px-1.5 py-0.5 rounded text-slate-700 font-medium">
+                        {col}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div>
@@ -304,20 +338,35 @@ export default function PurchaseUploadPage({ onUploadSuccess }) {
         <div className="glass-panel p-6 rounded-2xl space-y-5">
           
           {/* Validation Header Summary */}
-          <div className="grid grid-cols-3 gap-3 text-center">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-center">
             <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
               <span className="text-xs text-slate-500 block">Total Rows</span>
               <span className="text-lg font-bold text-slate-900 font-mono">{previewData.totalRows}</span>
             </div>
             <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200">
-              <span className="text-xs text-emerald-700 block font-semibold">Valid Devices</span>
-              <span className="text-lg font-bold text-emerald-700 font-mono">{validRowCount}</span>
+              <span className="text-xs text-emerald-700 block font-semibold">New Stock</span>
+              <span className="text-lg font-bold text-emerald-700 font-mono">{newRowCount}</span>
+            </div>
+            <div className="p-3 bg-blue-50 rounded-xl border border-blue-200">
+              <span className="text-xs text-blue-700 block font-semibold">Existing to Update</span>
+              <span className="text-lg font-bold text-blue-700 font-mono">{existingRowCount}</span>
             </div>
             <div className="p-3 bg-red-50 rounded-xl border border-red-200">
-              <span className="text-xs text-red-700 block font-semibold">Duplicates / Invalid</span>
+              <span className="text-xs text-red-700 block font-semibold">Missing IMEI</span>
               <span className="text-lg font-bold text-red-700 font-mono">{previewData.totalRows - validRowCount}</span>
             </div>
           </div>
+
+          {/* Upsert Option */}
+          <label className="flex items-center gap-2 p-3 bg-blue-50/70 border border-blue-200 rounded-xl text-xs font-semibold text-blue-900 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={updateExisting}
+              onChange={(e) => setUpdateExisting(e.target.checked)}
+              className="w-4 h-4 text-blue-600 rounded cursor-pointer"
+            />
+            <span>Update existing inventory devices with new spreadsheet values (SIM, Price, Location, Custom fields)</span>
+          </label>
 
           {/* Interactive Smart Column Auto-Mapper Card */}
           <div className="p-4 bg-purple-50/40 rounded-2xl border border-purple-200/80 space-y-3">
@@ -354,7 +403,7 @@ export default function PurchaseUploadPage({ onUploadSuccess }) {
                 <select
                   value={columnMapping.sim}
                   onChange={(e) => setColumnMapping({ ...columnMapping, sim: e.target.value })}
-                  className="w-full bg-white border border-slate-300 rounded-xl p-2 text-xs font-mono text-slate-900 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                  className="w-full bg-white border border-purple-300 rounded-xl p-2 text-xs font-mono text-slate-900 focus:outline-none focus:ring-1 focus:ring-purple-500"
                 >
                   <option value="">-- None / Auto --</option>
                   {(previewData.headers || []).map((h, i) => (
@@ -371,7 +420,7 @@ export default function PurchaseUploadPage({ onUploadSuccess }) {
                 <select
                   value={columnMapping.price}
                   onChange={(e) => setColumnMapping({ ...columnMapping, price: e.target.value })}
-                  className="w-full bg-white border border-slate-300 rounded-xl p-2 text-xs font-mono text-slate-900 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                  className="w-full bg-white border border-purple-300 rounded-xl p-2 text-xs font-mono text-slate-900 focus:outline-none focus:ring-1 focus:ring-purple-500"
                 >
                   <option value="">-- None / Auto --</option>
                   {(previewData.headers || []).map((h, i) => (
@@ -403,8 +452,8 @@ export default function PurchaseUploadPage({ onUploadSuccess }) {
                   <th className="p-2.5 font-bold">Row</th>
                   <th className="p-2.5 font-bold font-mono">Mapped IMEI</th>
                   <th className="p-2.5 font-bold font-mono">Mapped SIM</th>
-                  <th className="p-2.5 font-bold">Status</th>
-                  <th className="p-2.5 font-bold">Validation Notes</th>
+                  <th className="p-2.5 font-bold">Action</th>
+                  <th className="p-2.5 font-bold">Status Notes</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -414,13 +463,21 @@ export default function PurchaseUploadPage({ onUploadSuccess }) {
                     <td className="p-2.5 font-mono text-purple-700 font-bold">{row.detected_imei || 'EMPTY'}</td>
                     <td className="p-2.5 font-mono text-slate-600">{row.detected_sim || '-'}</td>
                     <td className="p-2.5">
-                      {row.valid ? (
-                        <span className="px-2 py-0.5 rounded-full text-[10px] bg-emerald-50 text-emerald-700 font-semibold border border-emerald-200">Valid</span>
+                      {!row.valid ? (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] bg-red-50 text-red-700 font-semibold border border-red-200">Invalid</span>
+                      ) : row.is_existing ? (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] bg-blue-50 text-blue-700 font-semibold border border-blue-200">Update Stock</span>
                       ) : (
-                        <span className="px-2 py-0.5 rounded-full text-[10px] bg-red-50 text-red-700 font-semibold border border-red-200">Failed</span>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] bg-emerald-50 text-emerald-700 font-semibold border border-emerald-200">New Item</span>
                       )}
                     </td>
-                    <td className="p-2.5 text-slate-600 text-[11px]">{row.errors.join(', ') || 'Ready for import'}</td>
+                    <td className="p-2.5 text-slate-600 text-[11px]">
+                      {row.errors.length > 0
+                        ? row.errors.join(', ')
+                        : row.is_existing
+                        ? 'IMEI exists — will update stock & attributes'
+                        : 'New device — will create record'}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -440,7 +497,7 @@ export default function PurchaseUploadPage({ onUploadSuccess }) {
               className="flex-1 py-2.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white font-semibold text-xs rounded-xl flex items-center justify-center gap-2 shadow-xs transition-colors cursor-pointer"
             >
               {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-              Confirm Import ({validRowCount} Devices) into Unassigned Stock
+              Confirm Import ({validRowCount} Devices: {newRowCount} New, {existingRowCount} Updates)
             </button>
           </div>
 
@@ -453,18 +510,24 @@ export default function PurchaseUploadPage({ onUploadSuccess }) {
           <div className="w-16 h-16 bg-emerald-100 text-emerald-700 rounded-full flex items-center justify-center mx-auto border border-emerald-300 shadow-xs">
             <Check className="w-8 h-8" />
           </div>
-          
-          <h3 className="text-xl font-bold text-slate-900">Purchase Batch Successfully Created!</h3>
-          <p className="text-xs text-slate-600 max-w-md mx-auto">
-            Added <strong className="text-emerald-700 font-mono">{importResult.totalCount}</strong> device records to Unassigned Stock with status <code className="text-emerald-700 font-semibold">IN_WAREHOUSE</code> under Batch #{importResult.batchId}.
-          </p>
+          <div>
+            <h3 className="text-base font-bold text-emerald-950">Inventory Upload Successfully Completed!</h3>
+            <p className="text-xs text-emerald-700 mt-1">
+              Processed {importResult.totalCount || 0} device records ({importResult.createdCount || 0} new inserted, {importResult.updatedCount || 0} existing updated).
+            </p>
+          </div>
 
-          <div className="pt-4 flex justify-center gap-3">
+          <div className="pt-3 flex justify-center gap-3">
             <button
-              onClick={() => { setStep(1); setFile(null); setPreviewData(null); }}
-              className="px-4 py-2 bg-white hover:bg-slate-50 text-slate-800 border border-slate-200 text-xs font-semibold rounded-xl shadow-xs"
+              onClick={() => {
+                setStep(1);
+                setFile(null);
+                setPreviewData(null);
+                setImportResult(null);
+              }}
+              className="px-4 py-2 bg-slate-900 text-white text-xs font-semibold rounded-xl hover:bg-slate-800 transition-colors shadow-xs"
             >
-              Upload Another Batch
+              Upload Another Stock File
             </button>
           </div>
         </div>

@@ -105,6 +105,17 @@ export async function createDeviceType(payload) {
   return res.json();
 }
 
+export async function updateDeviceType(id, payload) {
+  const res = await fetch(`${API_BASE}/device-types/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) throw new Error(data.error || 'Failed to update device type');
+  return data;
+}
+
 export async function addDeviceColumn(deviceTypeId, columnName) {
   const res = await fetch(`${API_BASE}/device-types/columns/add`, {
     method: 'POST',
