@@ -62,7 +62,7 @@ export default function BarcodeScannerModal({
         const preferred = res.data.find(d => /vamo/i.test(d.name)) || res.data.find(d => /track/i.test(d.name)) || res.data[0];
         if (preferred) setSelectedDeviceTypeId(preferred.id);
       }
-    }).catch(() => {});
+    }).catch(() => { });
   }, []);
 
   const scannerRef = useRef(null);
@@ -72,7 +72,7 @@ export default function BarcodeScannerModal({
   const lastKeyTimeRef = useRef(0);
 
   const SIMULATED_IMEIS = [
-    '864920050019101', '864920050019102', '864920050019103', 
+    '864920050019101', '864920050019102', '864920050019103',
     '864920050019104', '864920050019105', '864920050019106'
   ];
 
@@ -91,13 +91,13 @@ export default function BarcodeScannerModal({
       gain.connect(ctx.destination);
       osc.start();
       osc.stop(ctx.currentTime + 0.08);
-    } catch (e) {}
+    } catch (e) { }
 
     try {
       if (navigator.vibrate) {
         navigator.vibrate([40]);
       }
-    } catch (e) {}
+    } catch (e) { }
   };
 
   // Add Scanned IMEI
@@ -178,7 +178,7 @@ export default function BarcodeScannerModal({
       if (res.success && Array.isArray(res.data)) {
         setKnownStockPlaces(res.data.map(d => d.stock_place).filter(Boolean));
       }
-    } catch (e) {}
+    } catch (e) { }
   };
 
   const initCameraListAndStart = async () => {
@@ -207,7 +207,7 @@ export default function BarcodeScannerModal({
         try {
           await scannerRef.current.stop();
           scannerRef.current.clear();
-        } catch (e) {}
+        } catch (e) { }
       }
 
       setTimeout(() => {
@@ -252,14 +252,14 @@ export default function BarcodeScannerModal({
           (decodedText) => {
             addImei(decodedText);
           },
-          () => {}
+          () => { }
         ).then(() => {
           try {
             const capabilities = html5QrCode.getRunningTrackCapabilities?.();
             if (capabilities && capabilities.torch) {
               setHasTorch(true);
             }
-          } catch (e) {}
+          } catch (e) { }
         }).catch(err => {
           console.warn('Camera start error:', err);
           setCameraError('Camera access blocked or in use. Use manual input or simulated scan.');
@@ -279,7 +279,7 @@ export default function BarcodeScannerModal({
       try {
         await scannerRef.current.stop();
         scannerRef.current.clear();
-      } catch (e) {}
+      } catch (e) { }
       scannerRef.current = null;
     }
     setIsScanning(false);
@@ -379,7 +379,7 @@ export default function BarcodeScannerModal({
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
       <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl animate-in zoom-in-95 duration-150">
-        
+
         {/* Header */}
         <div className="p-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
           <div className="flex items-center space-x-3">
@@ -406,10 +406,10 @@ export default function BarcodeScannerModal({
 
         {/* Body Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4">
-          
+
           {/* Camera Scan Window & Controls */}
           <div className="space-y-3">
-            
+
             {/* Viewfinder Frame */}
             <div className="relative bg-slate-950 rounded-2xl overflow-hidden border-2 border-blue-500/50 min-h-[220px] flex items-center justify-center shadow-inner group">
               <div id="barcode-reader" className="w-full"></div>
@@ -424,9 +424,8 @@ export default function BarcodeScannerModal({
                 <button
                   type="button"
                   onClick={toggleTorch}
-                  className={`absolute top-2 right-2 p-2 rounded-xl backdrop-blur-md z-20 transition-all cursor-pointer ${
-                    isFlashOn ? 'bg-amber-400 text-slate-950 shadow-md' : 'bg-slate-900/60 text-white hover:bg-slate-800'
-                  }`}
+                  className={`absolute top-2 right-2 p-2 rounded-xl backdrop-blur-md z-20 transition-all cursor-pointer ${isFlashOn ? 'bg-amber-400 text-slate-950 shadow-md' : 'bg-slate-900/60 text-white hover:bg-slate-800'
+                    }`}
                   title="Toggle Flashlight"
                 >
                   <Flashlight className="w-4 h-4" />
@@ -591,7 +590,7 @@ export default function BarcodeScannerModal({
 
         {/* Footer Action Bar */}
         <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          
+
           {/* Left helper actions */}
           <div className="flex items-center gap-2">
             {scannedImeis.length > 0 && (
@@ -657,7 +656,7 @@ export default function BarcodeScannerModal({
       {showDealerModal && (
         <div className="fixed inset-0 z-60 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-md p-6 space-y-4 shadow-2xl animate-in zoom-in-95 duration-150">
-            
+
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div className="flex items-center gap-2 text-indigo-700 font-bold text-base">
                 <Truck className="w-5 h-5 text-indigo-600" />

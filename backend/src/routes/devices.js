@@ -5,7 +5,7 @@ const db = require('../db/database');
 // GET devices list with search & filter
 router.get('/', (req, res) => {
   try {
-    const { status, current_status, device_type_id, purchase_batch_id, holder_type, holder_name, dealer_name, search } = req.query;
+    const { status, current_status, device_type_id, purchase_batch_id, holder_type, holder_name, dealer_name, stock_place, search } = req.query;
     let query = `
       SELECT d.*, dt.name as device_type_name, dt.category as device_type_category
       FROM devices d
@@ -31,9 +31,10 @@ router.get('/', (req, res) => {
       query += ` AND d.current_holder_type = ?`;
       params.push(holder_type);
     }
-    if (dealer_name) {
+    const targetDealer = dealer_name || stock_place;
+    if (targetDealer) {
       query += ` AND (d.current_holder_name LIKE ? OR d.additional_attributes LIKE ?)`;
-      params.push(`%${dealer_name}%`, `%${dealer_name}%`);
+      params.push(`%${targetDealer}%`, `%${targetDealer}%`);
     } else if (holder_name) {
       query += ` AND d.current_holder_name LIKE ?`;
       params.push(`%${holder_name}%`);
@@ -692,7 +693,26 @@ router.put('/:id', (req, res) => {
 
     let newAttrsStr = existing.additional_attributes;
     if (additional_attributes !== undefined) {
-      newAttrsStr = typeof additional_attributes === 'object' ? JSON.stringify(additional_attributes) : additional_attributes;
+      let parsedAttrs = typeof additional_attributes === 'object' ? { ...additional_attributes } : JSON.parse(additional_attributes || '{}');
+      
+      // Auto-normalize any Excel serial date numbers to readable DD-MM-YYYY format
+      Object.keys(parsedAttrs).forEach(k => {
+        if (/date|month|validity/i.test(k) && parsedAttrs[k] !== undefined && parsedAttrs[k] !== null) {
+          const val = parsedAttrs[k];
+          const num = Number(val);
+          if (!isNaN(num) && num > 30000 && num < 65000) {
+            try {
+              const d = new Date(Math.round((num - 25569) * 86400 * 1000));
+              let day = d.getUTCDate();
+              let month = d.getUTCMonth() + 1;
+              const year = d.getUTCFullYear();
+              parsedAttrs[k] = `${String(day).padStart(2, '0')}-${String(month).padStart(2, '0')}-${year}`;
+            } catch {}
+          }
+        }
+      });
+
+      newAttrsStr = JSON.stringify(parsedAttrs);
     }
 
     db.prepare(`

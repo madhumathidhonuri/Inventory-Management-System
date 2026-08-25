@@ -224,7 +224,24 @@ router.post('/confirm', (req, res) => {
         if (!imei) continue;
 
         try {
-          const extraAttrs = item.additional_attributes || {};
+          const extraAttrs = { ...(item.additional_attributes || {}) };
+          // Auto-normalize any Excel serial date numbers to readable DD-MM-YYYY format
+          Object.keys(extraAttrs).forEach(k => {
+            if (/date|month|validity/i.test(k) && extraAttrs[k] !== undefined && extraAttrs[k] !== null) {
+              const val = extraAttrs[k];
+              const num = Number(val);
+              if (!isNaN(num) && num > 30000 && num < 65000) {
+                try {
+                  const d = new Date(Math.round((num - 25569) * 86400 * 1000));
+                  let day = d.getUTCDate();
+                  let month = d.getUTCMonth() + 1;
+                  const year = d.getUTCFullYear();
+                  extraAttrs[k] = `${String(day).padStart(2, '0')}-${String(month).padStart(2, '0')}-${year}`;
+                } catch {}
+              }
+            }
+          });
+
           const result = insertDeviceStmt.run(
             imei,
             item.sim || null,

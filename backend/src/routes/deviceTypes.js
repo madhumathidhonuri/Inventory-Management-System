@@ -70,20 +70,33 @@ function parseCustomFields(raw) {
 // POST /api/device-types/columns/add - Add custom column to device type schema
 router.post('/columns/add', (req, res) => {
   const { device_type_id, column_name } = req.body;
-  if (!device_type_id || !column_name || !column_name.trim()) {
-    return res.status(400).json({ success: false, error: 'Device type ID and column name are required' });
+  if (!column_name || !column_name.trim()) {
+    return res.status(400).json({ success: false, error: 'Column name is required' });
   }
   const name = column_name.trim();
   try {
-    const dt = db.prepare('SELECT * FROM device_types WHERE id = ?').get(device_type_id);
-    if (!dt) return res.status(404).json({ success: false, error: 'Device type not found' });
+    if (device_type_id && device_type_id !== 'ALL') {
+      const dt = db.prepare('SELECT * FROM device_types WHERE id = ? OR LOWER(name) = LOWER(?)').get(device_type_id, String(device_type_id));
+      if (!dt) return res.status(404).json({ success: false, error: 'Device type not found' });
 
-    let fields = parseCustomFields(dt.custom_fields);
-    if (!fields.includes(name)) {
-      fields.push(name);
-      db.prepare('UPDATE device_types SET custom_fields = ? WHERE id = ?').run(JSON.stringify(fields), device_type_id);
+      let fields = parseCustomFields(dt.custom_fields);
+      if (!fields.includes(name)) {
+        fields.push(name);
+        db.prepare('UPDATE device_types SET custom_fields = ? WHERE id = ?').run(JSON.stringify(fields), dt.id);
+      }
+      res.json({ success: true, custom_fields: fields, message: `Column "${name}" added to ${dt.name}` });
+    } else {
+      // Add to ALL device types
+      const types = db.prepare('SELECT * FROM device_types').all();
+      types.forEach(dt => {
+        let fields = parseCustomFields(dt.custom_fields);
+        if (!fields.includes(name)) {
+          fields.push(name);
+          db.prepare('UPDATE device_types SET custom_fields = ? WHERE id = ?').run(JSON.stringify(fields), dt.id);
+        }
+      });
+      res.json({ success: true, message: `Column "${name}" added to all device lists` });
     }
-    res.json({ success: true, custom_fields: fields });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }

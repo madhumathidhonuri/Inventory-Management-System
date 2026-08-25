@@ -147,6 +147,7 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
   // Column Schema Management Modals State
   const [isAddColModalOpen, setIsAddColModalOpen] = useState(false);
   const [newColName, setNewColName] = useState('');
+  const [newColTargetType, setNewColTargetType] = useState('ALL');
 
   const [renamingCol, setRenamingCol] = useState(null);
   const [newHeaderName, setNewHeaderName] = useState('');
@@ -178,8 +179,26 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
   useEffect(() => {
     loadData();
     refreshDeviceTypes();
+    loadPurchaseBatches();
     loadDealersSummary();
   }, [statusFilter, typeFilter, batchFilter]);
+
+  const refreshDeviceTypes = async () => {
+    try {
+      const res = await fetchDeviceTypes();
+      if (res.success) {
+        setDeviceTypes(res.data || []);
+      }
+    } catch (e) {
+      console.warn('Failed to refresh device types:', e);
+    }
+  };
+
+  const loadPurchaseBatches = () => {
+    fetchPurchaseBatches().then(res => {
+      if (res.success) setBatches(res.data);
+    }).catch(err => console.error(err));
+  };
 
   // Handle incoming initialFilter from scanner
   useEffect(() => {
@@ -199,15 +218,6 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
       if (res.success && Array.isArray(res.data)) {
         setDealersSummary(res.data);
       }
-    }).catch(err => console.error(err));
-  };
-
-  const refreshDeviceTypes = () => {
-    fetchDeviceTypes().then(res => {
-      if (res.success) setDeviceTypes(res.data);
-    });
-    fetchPurchaseBatches().then(res => {
-      if (res.success) setBatches(res.data);
     }).catch(err => console.error(err));
   };
 
@@ -234,37 +244,109 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
     }
   };
 
-  // Determine dynamic custom column headers
-  const customColumns = useMemo(() => {
-    const keysSet = new Set();
+  // Check if a single specific list / brand is selected
+  const isSingleListView = Boolean(typeFilter || batchFilter || (devices.length > 0 && new Set(devices.map(d => d.device_type_id)).size === 1));
 
-    if (typeFilter) {
-      const targetDt = deviceTypes.find(dt => dt.id.toString() === typeFilter.toString());
-      if (targetDt && targetDt.custom_fields) {
-        const fields = Array.isArray(targetDt.custom_fields)
-          ? targetDt.custom_fields
-          : Object.keys(targetDt.custom_fields);
-        fields.forEach(f => {
-          if (f && f !== 'original_row') keysSet.add(f);
-        });
+  // Determine dynamic custom column headers accurately scoped to the active Device Type / Upload List
+  const customColumns = useMemo(() => {
+    let activeTypeId = typeFilter ? typeFilter.toString() : '';
+
+    if (!activeTypeId && batchFilter) {
+      const selectedBatch = batches.find(b => b.id.toString() === batchFilter.toString());
+      if (selectedBatch && selectedBatch.device_type_id) {
+        activeTypeId = selectedBatch.device_type_id.toString();
       }
     }
+
+    if (!activeTypeId && devices.length > 0) {
+      const uniqueTypeIds = new Set(devices.map(d => d.device_type_id).filter(Boolean));
+      if (uniqueTypeIds.size === 1) {
+        activeTypeId = Array.from(uniqueTypeIds)[0].toString();
+      }
+    }
+
+    // CASE 1: A specific Device Type is active (e.g. VOLTY, TRACKNOW, or VAMOSYS)
+    if (activeTypeId) {
+      const targetDt = deviceTypes.find(dt => dt.id.toString() === activeTypeId || dt.name.toLowerCase() === activeTypeId.toLowerCase());
+      const keysList = [];
+      const seen = new Set();
+
+      // Prioritize the exact registered Excel columns for this device type in their exact uploaded sequence
+      if (targetDt && targetDt.custom_fields) {
+        let fields = [];
+        if (Array.isArray(targetDt.custom_fields)) {
+          fields = targetDt.custom_fields;
+        } else if (typeof targetDt.custom_fields === 'string') {
+          try {
+            const p = JSON.parse(targetDt.custom_fields);
+            fields = Array.isArray(p) ? p : Object.keys(p);
+          } catch {
+            fields = [];
+          }
+        } else if (typeof targetDt.custom_fields === 'object' && targetDt.custom_fields !== null) {
+          fields = Object.keys(targetDt.custom_fields);
+        }
+        fields.forEach(f => {
+          if (f && f !== 'original_row' && !/require.*sim/i.test(f) && !seen.has(f)) {
+            seen.add(f);
+            keysList.push(f);
+          }
+        });
+      }
+
+      // Also include any other attributes actually present on devices belonging to this type
+      devices.forEach(dev => {
+        if (dev.device_type_id && dev.device_type_id.toString() === activeTypeId && dev.additional_attributes && typeof dev.additional_attributes === 'object') {
+          Object.keys(dev.additional_attributes).forEach(k => {
+            if (k && k !== 'original_row' && !/require.*sim/i.test(k) && !seen.has(k)) {
+              seen.add(k);
+              keysList.push(k);
+            }
+          });
+        }
+      });
+
+      return keysList;
+    }
+
+    // CASE 2: All Types / Mixed View
+    const commonPriority = [
+      'STOCK PLACE',
+      'DATE',
+      'STOCK PLACE DATE',
+      'VEHICLE NUMBER',
+      'CUSTOMER NAME',
+      'CUSTOMER PHONE NUMBER',
+      'AADHAR NUMBER',
+      'CHASIS NUMBER',
+      'ENGINE NUMBER',
+      'SALES MANAGER',
+      'SALES PERSON NAME',
+      'RTO LOCATION',
+      'COST',
+      'TOTAL COST',
+      'AMOUNT RECEIVED',
+      'CERTIFICATE ISSUED DATE'
+    ];
+
+    const keysSet = new Set();
+    commonPriority.forEach(k => keysSet.add(k));
 
     devices.forEach(dev => {
       if (dev.additional_attributes && typeof dev.additional_attributes === 'object') {
         Object.keys(dev.additional_attributes).forEach(k => {
-          if (k && k !== 'original_row') keysSet.add(k);
+          if (k && k !== 'original_row' && !/require.*sim/i.test(k)) {
+            const val = dev.additional_attributes[k];
+            if (val !== undefined && val !== null && String(val).trim() !== '' && String(val).trim() !== '-') {
+              keysSet.add(k);
+            }
+          }
         });
       }
     });
 
-    if (keysSet.size === 0 && devices.length > 0) {
-      keysSet.add('STOCK PLACE');
-      keysSet.add('STOCK PLACE DATE');
-    }
-
     return Array.from(keysSet);
-  }, [typeFilter, deviceTypes, devices]);
+  }, [typeFilter, batchFilter, batches, deviceTypes, devices]);
 
   // Dynamic Column Preset Filtering
   const displayedColumns = useMemo(() => {
@@ -321,11 +403,17 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
 
   const openEditRowModal = (dev) => {
     setEditingRowDevice(dev);
+    const draft = dev.additional_attributes ? { ...dev.additional_attributes } : {};
+    Object.keys(draft).forEach(k => {
+      if (/date|month|validity/i.test(k) && draft[k] !== undefined && draft[k] !== null) {
+        draft[k] = formatDisplayCellValue(k, draft[k]);
+      }
+    });
     setRowFormData({
       imei_number: dev.imei_number || '',
       sim_number: dev.sim_number || '',
       purchase_price: dev.purchase_price !== null && dev.purchase_price !== undefined ? dev.purchase_price.toString() : '',
-      additional_attributes: dev.additional_attributes ? { ...dev.additional_attributes } : {}
+      additional_attributes: draft
     });
   };
 
@@ -333,11 +421,18 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
     if (!editingRowDevice) return;
     setSavingRow(true);
     try {
+      const cleanedAttrs = { ...rowFormData.additional_attributes };
+      Object.keys(cleanedAttrs).forEach(k => {
+        if (/date|month|validity/i.test(k) && cleanedAttrs[k]) {
+          cleanedAttrs[k] = formatDisplayCellValue(k, cleanedAttrs[k]);
+        }
+      });
+
       const payload = {
         imei_number: rowFormData.imei_number,
         sim_number: rowFormData.sim_number,
         purchase_price: rowFormData.purchase_price ? parseFloat(rowFormData.purchase_price) : null,
-        additional_attributes: rowFormData.additional_attributes,
+        additional_attributes: cleanedAttrs,
         performed_by: user?.name || user?.role || 'Admin'
       };
 
@@ -450,6 +545,31 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
       alert(err.message || 'Failed to delete selected devices');
     } finally {
       setDeletingLoading(false);
+    }
+  };
+
+  const handleAddCustomColumnSubmit = async (e) => {
+    e.preventDefault();
+    if (!newColName.trim()) {
+      alert('Please enter a column name');
+      return;
+    }
+    setActionLoading(true);
+    try {
+      const colNameClean = newColName.trim().toUpperCase();
+      const targetId = newColTargetType === 'ALL' ? 'ALL' : (newColTargetType || typeFilter || 'ALL');
+      await addDeviceColumn(targetId, colNameClean);
+      
+      await refreshDeviceTypes();
+      await loadData();
+      
+      setIsAddColModalOpen(false);
+      setNewColName('');
+      alert(`✅ Column "${colNameClean}" added successfully to stock inventory!`);
+    } catch (err) {
+      alert('Failed to add custom column: ' + err.message);
+    } finally {
+      setActionLoading(false);
     }
   };
 
@@ -704,6 +824,10 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
   // Operational Multi-Filter Filtering Engine
   const filteredDevices = useMemo(() => {
     return devices.filter(dev => {
+      // 0. Primary Upload List & Device Type Filters
+      if (batchFilter && String(dev.purchase_batch_id) !== String(batchFilter)) return false;
+      if (typeFilter && String(dev.device_type_id) !== String(typeFilter)) return false;
+
       const attrs = dev.additional_attributes || {};
 
       // Vehicle & Installed status
@@ -785,7 +909,7 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
 
       return true;
     });
-  }, [devices, quickPreset, dealerFilter, stockPlaceFilter, paymentFilter, deploymentFilter, salesPersonFilter, rtoFilter, activationFilter, agingFilter, rmaFilter]);
+  }, [devices, batchFilter, typeFilter, quickPreset, dealerFilter, stockPlaceFilter, paymentFilter, deploymentFilter, salesPersonFilter, rtoFilter, activationFilter, agingFilter, rmaFilter]);
 
   // Reset all active filters
   const handleResetAllFilters = () => {
@@ -930,36 +1054,15 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
     };
 
     // Determine final ordered, deduplicated columns
-    const exportColumns = [];
-    const seenNormKeys = new Set();
+    const isSingleListView = Boolean(typeFilter || batchFilter);
+    let exportColumns = [];
 
-    // 1. Ensure IMEI is always the first column
-    exportColumns.push('IMEI Number');
-    seenNormKeys.add('IMEI');
-    seenNormKeys.add('IMEINUMBER');
-    seenNormKeys.add('DEVICEIMEI');
-
-    // 2. Add device type
-    exportColumns.push('Device Type');
-    seenNormKeys.add('DEVICETYPE');
-    seenNormKeys.add('DEVICENAME');
-
-    // 3. Add SIM Number if not in custom columns
-    const hasSimInCustom = customColumns.some(c => /^sim|simno|sim1/i.test(c));
-    if (!hasSimInCustom) {
-      exportColumns.push('SIM Number');
-      seenNormKeys.add('SIM');
-      seenNormKeys.add('SIMNUMBER');
+    if (isSingleListView) {
+      // Exactly the uploaded Excel sheet columns in their 100% original sequence
+      exportColumns = [...displayedColumns];
+    } else {
+      exportColumns = ['Device IMEI', 'Device Type', ...displayedColumns];
     }
-
-    // 4. Add all custom sheet columns without duplicate normalizations
-    customColumns.forEach(col => {
-      const norm = col.trim().toUpperCase().replace(/[\s_-]+/g, '');
-      if (!seenNormKeys.has(norm)) {
-        seenNormKeys.add(norm);
-        exportColumns.push(col);
-      }
-    });
 
     // Build CSV Content
     const csvRows = [];
@@ -969,14 +1072,14 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
       const attrs = dev.additional_attributes || {};
       const row = exportColumns.map(header => {
         let val = '';
-        if (header === 'IMEI Number') {
-          val = dev.imei_number || '';
+        if (header === 'Device IMEI' || header === 'IMEI Number' || /vltdsno|^serial\s*number$|^imei|device\s*imei|^uid$/i.test(header.trim())) {
+          val = dev.imei_number || (attrs[header] !== undefined && attrs[header] !== null ? String(attrs[header]) : '');
         } else if (header === 'Device Type') {
           val = dev.device_type_name || '';
-        } else if (header === 'SIM Number') {
-          val = dev.sim_number || '';
-        } else if (attrs[header] !== undefined && attrs[header] !== null) {
+        } else if (attrs[header] !== undefined && attrs[header] !== null && String(attrs[header]).trim() !== '') {
           val = formatExportValue(header, attrs[header]);
+        } else if (/^sim\s*1$|^simno1$|^iccid$|^sim\s*number$/i.test(header.trim())) {
+          val = dev.sim_number || '';
         } else {
           // Case-insensitive fallback
           const matchingKey = Object.keys(attrs).find(
@@ -1231,19 +1334,32 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
   // Start Inline Editing for a row
   const handleStartInlineEdit = (dev) => {
     setInlineEditId(dev.id);
-    setInlineDraftAttrs({ ...(dev.additional_attributes || {}) });
+    const draft = { ...(dev.additional_attributes || {}) };
+    Object.keys(draft).forEach(k => {
+      if (/date|month|validity/i.test(k) && draft[k] !== undefined && draft[k] !== null) {
+        draft[k] = formatDisplayCellValue(k, draft[k]);
+      }
+    });
+    setInlineDraftAttrs(draft);
   };
 
   // Save Inline Editing
   const handleSaveInlineEdit = async (devId) => {
     setInlineSaving(true);
     try {
+      const cleanedAttrs = { ...inlineDraftAttrs };
+      Object.keys(cleanedAttrs).forEach(k => {
+        if (/date|month|validity/i.test(k) && cleanedAttrs[k]) {
+          cleanedAttrs[k] = formatDisplayCellValue(k, cleanedAttrs[k]);
+        }
+      });
+
       const res = await updateDevice(devId, {
-        additional_attributes: inlineDraftAttrs,
-        performed_by: user?.username || 'Admin'
+        additional_attributes: cleanedAttrs,
+        performed_by: user?.username || user?.name || 'Admin'
       });
       if (res.success) {
-        setDevices(prev => prev.map(d => d.id === devId ? { ...d, additional_attributes: inlineDraftAttrs } : d));
+        setDevices(prev => prev.map(d => d.id === devId ? { ...d, additional_attributes: cleanedAttrs } : d));
         setInlineEditId(null);
       }
     } catch (err) {
@@ -1310,7 +1426,10 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
 
           {canDelete && (
             <button
-              onClick={() => setIsAddColModalOpen(true)}
+              onClick={() => {
+                setNewColTargetType(typeFilter ? typeFilter.toString() : 'ALL');
+                setIsAddColModalOpen(true);
+              }}
               className="px-3.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold rounded-xl border border-blue-200 flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
             >
               <Plus className="w-4 h-4 text-blue-600" /> Add Custom Column
@@ -1670,10 +1789,14 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
                     />
                   </th>
 
-                  <th className="p-3.5 font-bold font-mono">Device IMEI</th>
-                  <th className="p-3.5 font-bold">Device Type</th>
+                  {!isSingleListView && (
+                    <>
+                      <th className="p-3.5 font-bold font-mono">Device IMEI</th>
+                      <th className="p-3.5 font-bold">Device Type</th>
+                    </>
+                  )}
 
-                  {/* Excel Sheet Columns */}
+                  {/* Excel Sheet Columns in 100% Exact Original Uploaded Order */}
                   {displayedColumns.map((col) => (
                     <th key={col} className="p-3.5 font-bold border-l border-slate-200/80 bg-slate-100/50 text-slate-800 group">
                       <div className="flex items-center justify-between gap-2">
@@ -1733,37 +1856,50 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
                         />
                       </td>
                       
-                      {/* IMEI Column */}
-                      <td className="p-3.5 font-mono text-purple-700 font-bold">
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setDetailCardImei(dev.imei_number);
-                              setIsDetailCardOpen(true);
-                            }}
-                            className="hover:underline font-bold text-purple-700 hover:text-purple-900 cursor-pointer flex items-center gap-1 text-left"
-                            title="Click to view complete Device Specification Card & Lifecycle History"
-                          >
-                            <span>{dev.imei_number}</span>
-                          </button>
-                          {isRecentlyUpdated && (
-                            <span className="px-1.5 py-0.2 rounded-full bg-emerald-100 text-emerald-800 text-[9px] font-bold uppercase tracking-wider">
-                              Updated
-                            </span>
-                          )}
-                        </div>
-                      </td>
+                      {!isSingleListView && (
+                        <>
+                          {/* Primary Device IMEI Cell */}
+                          <td className="p-3.5 font-mono text-purple-700 font-bold bg-purple-50/20 border-r border-purple-100/60">
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setDetailCardImei(dev.imei_number);
+                                  setIsDetailCardOpen(true);
+                                }}
+                                className="hover:underline font-bold text-purple-700 hover:text-purple-900 cursor-pointer flex items-center gap-1 text-left"
+                                title="Click to view complete Device Specification Card & Lifecycle History"
+                              >
+                                <span>{dev.imei_number}</span>
+                              </button>
+                              {isRecentlyUpdated && (
+                                <span className="px-1.5 py-0.2 rounded-full bg-emerald-100 text-emerald-800 text-[9px] font-bold uppercase tracking-wider">
+                                  Updated
+                                </span>
+                              )}
+                            </div>
+                          </td>
 
-                      {/* Device Type */}
-                      <td className="p-3.5 text-slate-800 font-medium">{dev.device_type_name}</td>
+                          <td className="p-3.5 text-slate-800 font-medium">{dev.device_type_name}</td>
+                        </>
+                      )}
 
-                      {/* Dynamic Custom Attributes Cells */}
+                      {/* Dynamic Custom Attributes Cells in 100% Original Uploaded Order */}
                       {displayedColumns.map((col) => {
                         const canEditCol = canUserEditField(user, col);
-                        const cellVal = isInlineEditing
-                          ? (inlineDraftAttrs[col] !== undefined ? inlineDraftAttrs[col] : '')
-                          : (dev.additional_attributes && dev.additional_attributes[col] !== undefined && dev.additional_attributes[col] !== null ? String(dev.additional_attributes[col]) : '-');
+                        const isImeiCol = /vltdsno|^serial\s*number$|^imei|device\s*imei|^uid$/i.test(col.trim());
+                        const isSimCol = /^sim\s*1$|^simno1$|^iccid$|^sim\s*number$/i.test(col.trim());
+
+                        let cellVal = '-';
+                        if (isInlineEditing) {
+                          cellVal = inlineDraftAttrs[col] !== undefined ? inlineDraftAttrs[col] : '';
+                        } else if (dev.additional_attributes && dev.additional_attributes[col] !== undefined && dev.additional_attributes[col] !== null && String(dev.additional_attributes[col]).trim() !== '') {
+                          cellVal = String(dev.additional_attributes[col]);
+                        } else if (isImeiCol && dev.imei_number) {
+                          cellVal = String(dev.imei_number);
+                        } else if (isSimCol && dev.sim_number) {
+                          cellVal = String(dev.sim_number);
+                        }
 
                         const isPaymentCol = /amount.*received|payment/i.test(col);
 
@@ -1782,6 +1918,25 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
                                   <span>🔒 {cellVal || '-'}</span>
                                 </div>
                               )
+                            ) : isImeiCol && cellVal !== '-' ? (
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setDetailCardImei(cellVal || dev.imei_number);
+                                    setIsDetailCardOpen(true);
+                                  }}
+                                  className="hover:underline font-bold text-purple-700 hover:text-purple-900 cursor-pointer flex items-center gap-1 text-left"
+                                  title="Click to view complete Device Specification Card & Lifecycle History"
+                                >
+                                  <span>{cellVal}</span>
+                                </button>
+                                {isRecentlyUpdated && (
+                                  <span className="px-1.5 py-0.2 rounded-full bg-emerald-100 text-emerald-800 text-[9px] font-bold uppercase tracking-wider">
+                                    Updated
+                                  </span>
+                                )}
+                              </div>
                             ) : isPaymentCol && cellVal !== '-' ? (
                               canUserEditField(user, 'AMOUNT RECEIVED') ? (
                                 <button
@@ -3130,6 +3285,101 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
         }}
         onSuccess={loadData}
       />
+
+      {/* Add Custom Column Modal */}
+      {isAddColModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-md p-6 space-y-4 shadow-2xl animate-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2.5 text-slate-900 font-bold text-base">
+                <div className="p-2 bg-blue-50 text-blue-700 rounded-xl">
+                  <Plus className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-slate-900 font-bold text-sm">Add Custom Column to Stock Grid</h3>
+                  <p className="text-xs text-slate-500 font-normal">Add custom attributes like Installation Charges, Pan, etc.</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAddColModalOpen(false)}
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleAddCustomColumnSubmit} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Column Name / Header *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. INSTALLATION CHARGES, PAN NUMBER, DRIVER NAME"
+                  value={newColName}
+                  onChange={(e) => setNewColName(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-900 font-bold uppercase focus:outline-none focus:border-blue-600 focus:bg-white"
+                />
+              </div>
+
+              {/* Quick Suggestion Chips */}
+              <div>
+                <span className="block text-[11px] font-bold text-slate-500 mb-1.5">Common Column Presets:</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {['INSTALLATION CHARGES', 'PAN NUMBER', 'AADHAR NUMBER', 'DRIVER NAME', 'INSURANCE VALIDITY', 'FASTAG ID', 'SALE PRICE'].map(preset => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setNewColName(preset)}
+                      className="px-2 py-1 bg-slate-100 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200 text-slate-700 rounded-lg text-[10px] font-bold border border-slate-200 transition-colors cursor-pointer"
+                    >
+                      + {preset}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Apply To List / Model *
+                </label>
+                <select
+                  value={newColTargetType}
+                  onChange={(e) => setNewColTargetType(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-900 font-semibold focus:outline-none focus:border-blue-600 focus:bg-white"
+                >
+                  <option value="ALL">🌐 All Lists & Models (Global Stock Grid)</option>
+                  {deviceTypes.map(dt => (
+                    <option key={dt.id} value={dt.id.toString()}>
+                      📱 Only {dt.name} List
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex gap-2 justify-end pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsAddColModalOpen(false)}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={actionLoading || !newColName.trim()}
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-xs flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  {actionLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                  {actionLoading ? 'Adding...' : 'Add Column to Grid'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
     </div>
   );

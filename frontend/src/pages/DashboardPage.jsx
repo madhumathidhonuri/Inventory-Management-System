@@ -13,6 +13,7 @@ import {
   CheckCircle2,
   AlertCircle,
   Users,
+  User,
   DollarSign,
   TrendingUp,
   CreditCard,
@@ -29,19 +30,78 @@ import {
   Filter,
   Check,
   X,
-  RotateCcw,
   Cpu,
   Tag,
-  Receipt,
-  Calendar,
   Table,
-  MessageSquare
+  MessageSquare,
+  QrCode,
+  FileText,
+  Sparkles,
+  ExternalLink,
+  ShieldCheck,
+  LayoutGrid,
+  List,
+  Zap,
+  Share2,
+  Target,
+  Award,
+  TrendingDown,
+  Receipt,
+  Calendar
 } from 'lucide-react';
-import { fetchStats, fetchPurchaseBatches, fetchDeviceTypes, fetchAgingAnalysis, fetchSimValidity, resetDealerStock } from '../services/api';
+import * as XLSX from 'xlsx';
+import { fetchStats, fetchPurchaseBatches, fetchDeviceTypes, fetchAgingAnalysis, fetchSimValidity, updateQuickPayment, fetchDevices, recordInstallation, updateDealerTarget } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import DealerDetailModal from '../components/DealerDetailModal';
 import FitmentReceiptModal from '../components/FitmentReceiptModal';
-import { buildPaymentDueReminderWhatsAppMessage } from '../utils/whatsapp';
+import PaymentQrModal from '../components/PaymentQrModal';
+import { buildPaymentDueReminderWhatsAppMessage, buildCustomerCredentialsWhatsAppMessage } from '../utils/whatsapp';
+
+// Model-specific Excel template columns allowed during vehicle fitment
+const MODEL_EXCEL_COLUMNS = {
+  VOLTY: [
+    'VEHICLE NUMBER',
+    'CUSTOMER NAME',
+    'CUSTOMER PHONE NUMBER',
+    'AADHAR NUMBER',
+    'CHASIS NUMBER',
+    'ENGINE NUMBER',
+    'RTO LOCATION',
+    'COST',
+    'AMOUNT RECEIVED',
+    'SALES PERSON NAME',
+    'DATE'
+  ],
+  VAMOSYS: [
+    'VEHICLE NUMBER',
+    'CUSTOMER NAME',
+    'CUSTOMER PHONE NUMBER',
+    'AADHAAR NUMBER',
+    'PAN NUMBER',
+    'CHASIS NUMBER',
+    'ENGINE NUMBER',
+    'RTO LOCATION',
+    'COST',
+    'AMOUNT RECEIVED',
+    'SALES PERSON NAME',
+    'CERTIFICATE ISSUED DATE'
+  ],
+  TRACKNOW: [
+    'VEHICLE NUMBER',
+    'CUSTOMER NAME',
+    'CUSTOMER PHONE NUMBER',
+    'AADHAR NUMBER',
+    'CHASIS NUMBER',
+    'ENGINE NUMBER',
+    'RTO LOCATION',
+    'COST',
+    'TAX',
+    'TOTAL COST',
+    'AMOUNT RECEIVED',
+    'SALES PERSON',
+    'DATE'
+  ]
+};
 
 export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
   const { user } = useAuth();
@@ -58,6 +118,125 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
   const [selectedMonth, setSelectedMonth] = useState('ALL');
   const [selectedDealerModal, setSelectedDealerModal] = useState(null);
   const [selectedReceiptDevice, setSelectedReceiptDevice] = useState(null);
+  const [selectedPaymentQrDevice, setSelectedPaymentQrDevice] = useState(null);
+  const [updatingPaymentId, setUpdatingPaymentId] = useState(null);
+  const [dealerSearch, setDealerSearch] = useState('');
+  const [dealerPaymentFilter, setDealerPaymentFilter] = useState('ALL'); // 'ALL' | 'PENDING' | 'PAID'
+  const [dealerViewMode, setDealerViewMode] = useState('CARDS'); // 'CARDS' | 'TABLE'
+  const [isFastFitmentOpen, setIsFastFitmentOpen] = useState(false);
+  const [inStockDevices, setInStockDevices] = useState([]);
+  const [submittingFitment, setSubmittingFitment] = useState(false);
+  const [copiedImei, setCopiedImei] = useState('');
+  const [imeiSearchQuery, setImeiSearchQuery] = useState('');
+  const [fitmentModelFilter, setFitmentModelFilter] = useState('ALL');
+  const [fastFitmentForm, setFastFitmentForm] = useState({
+    imei_number: '',
+    vehicle_number: '',
+    customer_name: '',
+    customer_phone: '',
+    sale_price: '5000',
+    payment_status: 'RECEIVED',
+    installation_location: '',
+    software_user_id: '',
+    software_password: 'User@123'
+  });
+
+  const filteredInStockDevices = useMemo(() => {
+    return inStockDevices.filter(d => {
+      const a = d.additional_attributes || {};
+      const model = (d.device_type_name || '').toUpperCase();
+      if (fitmentModelFilter !== 'ALL' && !model.includes(fitmentModelFilter)) {
+        return false;
+      }
+      if (!imeiSearchQuery.trim()) return true;
+      const q = imeiSearchQuery.trim().toLowerCase();
+      const imei = (d.imei_number || '').toLowerCase();
+      const sim = (d.sim_number || a.simno1 || a['Sim 1'] || '').toString().toLowerCase();
+      const iccid = (a.ICCID || a.iccid || '').toString().toLowerCase();
+      const vltd = (a.vltdsno || a['Vahan ID'] || '').toString().toLowerCase();
+      return imei.includes(q) || sim.includes(q) || iccid.includes(q) || vltd.includes(q);
+    });
+  }, [inStockDevices, fitmentModelFilter, imeiSearchQuery]);
+
+  const monthlyTarget = stats?.monthly_target || Number(user?.monthly_target) || 50;
+  const [isExportingDealerFitments, setIsExportingDealerFitments] = useState(false);
+
+  const handleExportDealerFitments = async () => {
+    setIsExportingDealerFitments(true);
+    try {
+      const dealerQuery = user?.name || 'Allabakshu (GUNTUR)';
+      const res = await fetchDevices({ stock_place: dealerQuery, limit: 1000 });
+      const allDevs = res.data || [];
+      const installedDevs = allDevs.filter(d => {
+        const a = d.additional_attributes || {};
+        return d.current_status === 'INSTALLED' || Boolean(String(a['VEHICLE NUMBER'] || '').trim());
+      });
+
+      if (installedDevs.length === 0) {
+        alert('No installed vehicle records found for this branch yet.');
+        return;
+      }
+
+      const rows = installedDevs.map((d, idx) => {
+        const a = d.additional_attributes || {};
+        return {
+          'SL NO': idx + 1,
+          'INSTALLATION DATE': a['CERTIFICATE ISSUED DATE'] || a['DATE'] || d.updated_at?.split('T')[0] || '',
+          'DEVICE MODEL': d.device_type_name || 'GPS',
+          'IMEI NUMBER': d.imei_number,
+          'SIM 1': d.sim_number || a['simno1'] || a['Sim 1'] || '',
+          'SIM 2': a['simn02'] || a['Sim 2'] || '',
+          'ICCID / VLTD': a['ICCID'] || a['vltdsno'] || a['Vahan ID'] || '',
+          'VEHICLE NUMBER': a['VEHICLE NUMBER'] || a['VEHICLE NO'] || '',
+          'CUSTOMER NAME': a['CUSTOMER NAME'] || a['CERTIFICATE ISSUED TO'] || d.current_holder_name || '',
+          'CUSTOMER PHONE': a['CUSTOMER PHONE NUMBER'] || a['PHONE NUMBER'] || '',
+          'AADHAAR / AADHAR': a['AADHAAR NUMBER'] || a['AADHAR NUMBER'] || '',
+          'PAN NUMBER': a['PAN NUMBER'] || '',
+          'CHASSIS NUMBER': a['CHASIS NUMBER'] || a['CHASSIS NUMBER'] || '',
+          'ENGINE NUMBER': a['ENGINE NUMBER'] || '',
+          'RTO LOCATION': a['RTO LOCATION'] || '',
+          'FITMENT PRICE (₹)': Number(a['COST'] || a['TOTAL COST'] || 5000),
+          'PAYMENT STATUS': (a['AMOUNT RECEIVED'] === 'RECEIVED' || a['payment_status'] === 'PAID') ? 'RECEIVED' : 'PENDING',
+          'SALES PERSON': a['SALES PERSON NAME'] || a['SALES PERSON'] || user?.name || '',
+          'BRANCH / STOCK PLACE': a['STOCK PLACE'] || dealerQuery
+        };
+      });
+
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const colWidths = [
+        { wch: 8 },  // SL NO
+        { wch: 18 }, // DATE
+        { wch: 14 }, // MODEL
+        { wch: 18 }, // IMEI
+        { wch: 16 }, // SIM 1
+        { wch: 16 }, // SIM 2
+        { wch: 22 }, // ICCID
+        { wch: 16 }, // VEHICLE
+        { wch: 24 }, // CUSTOMER
+        { wch: 16 }, // PHONE
+        { wch: 18 }, // AADHAAR
+        { wch: 14 }, // PAN
+        { wch: 22 }, // CHASSIS
+        { wch: 18 }, // ENGINE
+        { wch: 16 }, // RTO
+        { wch: 18 }, // PRICE
+        { wch: 16 }, // STATUS
+        { wch: 20 }, // SALES
+        { wch: 22 }  // BRANCH
+      ];
+      ws['!cols'] = colWidths;
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Dealer Fitments');
+      const branchClean = (user?.name || 'Branch').replace(/[^a-zA-Z0-9]/g, '_');
+      const today = new Date().toISOString().split('T')[0];
+      XLSX.writeFile(wb, `Dealer_Fitments_${branchClean}_${today}.xlsx`);
+    } catch (err) {
+      alert('Failed to export fitments: ' + err.message);
+    } finally {
+      setIsExportingDealerFitments(false);
+    }
+  };
 
   // Aging Analysis Modal States
   const [isAgingModalOpen, setIsAgingModalOpen] = useState(false);
@@ -205,7 +384,214 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
     });
   }, [batches, selectedDeviceTypeId]);
 
-  const isFiltered = Boolean(selectedDeviceTypeId || selectedBatchId || locationFilter || selectedMonth !== 'ALL');
+  const isFiltered = Boolean(selectedDeviceTypeId || selectedBatchId || locationFilter);
+
+  const filteredDealerInstallations = useMemo(() => {
+    if (!stats?.recentActivity) return [];
+    return stats.recentActivity.filter(act => {
+      if (dealerPaymentFilter === 'PAID' && act.payment_status !== 'PAID') return false;
+      if (dealerPaymentFilter === 'PENDING' && act.payment_status === 'PAID') return false;
+      if (dealerSearch.trim()) {
+        const q = dealerSearch.trim().toLowerCase();
+        const matchVeh = String(act.vehicle_number || '').toLowerCase().includes(q);
+        const matchImei = String(act.imei_number || '').toLowerCase().includes(q);
+        const matchCust = String(act.customer_name || '').toLowerCase().includes(q);
+        const matchPhone = String(act.customer_phone || '').includes(q);
+        const matchRto = String(act.rto_location || '').toLowerCase().includes(q);
+        if (!matchVeh && !matchImei && !matchCust && !matchPhone && !matchRto) return false;
+      }
+      return true;
+    });
+  }, [stats?.recentActivity, dealerPaymentFilter, dealerSearch]);
+
+  const handleToggleDealerPayment = async (act) => {
+    const devId = act.device_id || act.id;
+    if (!devId) return;
+    const currentIsPaid = act.payment_status === 'PAID';
+    const newStatus = currentIsPaid ? 'NOT RECEIVED' : 'RECEIVED';
+    setUpdatingPaymentId(devId);
+    try {
+      const res = await updateQuickPayment(devId, {
+        payment_status: newStatus,
+        amount_received: newStatus === 'RECEIVED' ? (act.cost || 5000) : 0
+      });
+      if (res && res.success) {
+        setStats(prev => {
+          if (!prev || !prev.recentActivity) return prev;
+          const updatedActs = prev.recentActivity.map(a => {
+            if ((a.device_id || a.id) === devId) {
+              return {
+                ...a,
+                payment_status: newStatus === 'RECEIVED' ? 'PAID' : 'PENDING'
+              };
+            }
+            return a;
+          });
+          const newPaidCount = updatedActs.filter(a => a.payment_status === 'PAID').length;
+          const newPendingCount = updatedActs.length - newPaidCount;
+          return {
+            ...prev,
+            recentActivity: updatedActs,
+            financials: {
+              ...prev.financials,
+              payment_received_count: newPaidCount,
+              payment_pending_count: newPendingCount
+            }
+          };
+        });
+      }
+    } catch (err) {
+      console.error('Failed to toggle payment status:', err);
+    } finally {
+      setUpdatingPaymentId(null);
+    }
+  };
+
+  const handleCopyImei = (imei) => {
+    if (!imei) return;
+    navigator.clipboard?.writeText(imei);
+    setCopiedImei(imei);
+    setTimeout(() => setCopiedImei(''), 2000);
+  };
+
+  const handleSelectDevice = (imei) => {
+    const dev = inStockDevices.find(d => d.imei_number === imei);
+    const attrs = dev?.additional_attributes || {};
+    setFastFitmentForm(prev => ({
+      ...prev,
+      imei_number: imei,
+      vehicle_number: attrs['VEHICLE NUMBER'] || attrs['VEHICLE NO'] || prev.vehicle_number || '',
+      customer_name: attrs['CUSTOMER NAME'] || attrs['CERTIFICATE ISSUED TO'] || prev.customer_name || '',
+      customer_phone: String(attrs['CUSTOMER PHONE NUMBER'] || attrs['MOBILE NUMBER'] || prev.customer_phone || ''),
+      aadhar_number: String(attrs['AADHAAR NUMBER'] || attrs['AADHAR NUMBER'] || prev.aadhar_number || ''),
+      pan_number: attrs['PAN NUMBER'] || prev.pan_number || '',
+      chasis_number: attrs['CHASIS NUMBER'] || attrs['CHASSIS NUMBER'] || prev.chasis_number || '',
+      engine_number: attrs['ENGINE NUMBER'] || prev.engine_number || '',
+      rto_location: attrs['RTO LOCATION'] || prev.rto_location || user?.region || 'GUNTUR',
+      installation_location: attrs['RTO LOCATION'] || prev.installation_location || user?.region || 'GUNTUR',
+      sale_price: String(attrs['TOTAL COST'] || attrs['COST'] || prev.sale_price || '5000'),
+      payment_status: attrs['AMOUNT RECEIVED'] === 'RECEIVED' ? 'RECEIVED' : (prev.payment_status || 'RECEIVED'),
+      sales_person: attrs['SALES PERSON NAME'] || prev.sales_person || user?.name || 'ALLABAKSHU',
+      additional_attributes: { ...attrs }
+    }));
+  };
+
+  const handleOpenFastFitment = async (defaultImei = '') => {
+    setIsFastFitmentOpen(true);
+    try {
+      const dealerQuery = isDealer ? (user?.name || 'Allabakshu') : '';
+      const params = {};
+      if (dealerQuery) params.dealer_name = dealerQuery;
+      const res = await fetchDevices(params);
+      if (res.success && res.data) {
+        const available = res.data.filter(d => {
+          const a = d.additional_attributes || {};
+          const isInstalled = d.current_status === 'INSTALLED' || Boolean(String(a['VEHICLE NUMBER'] || '').trim()) || Boolean(String(a['CERTIFICATE ISSUED TO'] || '').trim());
+          if (isInstalled) return false;
+          if (isDealer) {
+            const place = String(a['STOCK PLACE'] || a['STOCK LOCATION'] || d.current_holder_name || '').toUpperCase();
+            const dealerKey = (user?.name || '').toUpperCase();
+            return place.includes(dealerKey) || (user?.region && place.includes(user.region.toUpperCase()));
+          }
+          return true;
+        });
+        setInStockDevices(available);
+        const selected = defaultImei || (available.length > 0 ? available[0].imei_number : '');
+        const selectedDev = available.find(d => d.imei_number === selected) || available[0];
+        const attrs = selectedDev?.additional_attributes || {};
+        setFastFitmentForm(prev => ({
+          ...prev,
+          imei_number: selected,
+          vehicle_number: attrs['VEHICLE NUMBER'] || '',
+          customer_name: attrs['CUSTOMER NAME'] || attrs['CERTIFICATE ISSUED TO'] || '',
+          customer_phone: String(attrs['CUSTOMER PHONE NUMBER'] || attrs['MOBILE NUMBER'] || ''),
+          aadhar_number: String(attrs['AADHAAR NUMBER'] || attrs['AADHAR NUMBER'] || ''),
+          pan_number: attrs['PAN NUMBER'] || '',
+          chasis_number: attrs['CHASIS NUMBER'] || attrs['CHASSIS NUMBER'] || '',
+          engine_number: attrs['ENGINE NUMBER'] || '',
+          installation_location: attrs['RTO LOCATION'] || user?.region || user?.name || 'GUNTUR',
+          rto_location: attrs['RTO LOCATION'] || user?.region || 'GUNTUR',
+          sales_manager: attrs['SALES MANAGER NAME'] || user?.name || 'ALLABAKSHU',
+          sales_person: attrs['SALES PERSON NAME'] || user?.name || 'ALLABAKSHU',
+          sale_price: String(attrs['TOTAL COST'] || attrs['COST'] || '5000'),
+          additional_attributes: { ...attrs }
+        }));
+      }
+    } catch (err) {
+      console.error('Failed to load in-stock devices:', err);
+    }
+  };
+
+  const handleSaveFastFitment = async (e) => {
+    e.preventDefault();
+    if (!fastFitmentForm.imei_number || !fastFitmentForm.vehicle_number || !fastFitmentForm.customer_name || !fastFitmentForm.customer_phone) {
+      alert('Please enter IMEI, Vehicle Number, Customer Name, and Customer Phone.');
+      return;
+    }
+    setSubmittingFitment(true);
+    try {
+      const payload = {
+        imei_number: fastFitmentForm.imei_number.trim(),
+        vehicle_number: fastFitmentForm.vehicle_number.trim().toUpperCase(),
+        vehicle_type: fastFitmentForm.vehicle_type || 'Commercial Vehicle',
+        chasis_number: fastFitmentForm.chasis_number ? fastFitmentForm.chasis_number.trim().toUpperCase() : '',
+        engine_number: fastFitmentForm.engine_number ? fastFitmentForm.engine_number.trim().toUpperCase() : '',
+        aadhar_number: fastFitmentForm.aadhar_number ? fastFitmentForm.aadhar_number.trim() : '',
+        pan_number: fastFitmentForm.pan_number ? fastFitmentForm.pan_number.trim().toUpperCase() : '',
+        customer_name: fastFitmentForm.customer_name.trim(),
+        customer_phone: fastFitmentForm.customer_phone.trim(),
+        customer_address: fastFitmentForm.customer_address ? fastFitmentForm.customer_address.trim() : '',
+        sale_price: parseFloat(fastFitmentForm.sale_price) || 5000,
+        payment_status: fastFitmentForm.payment_status || 'RECEIVED',
+        installed_by: user?.name || 'Authorized Dealer',
+        sales_manager: fastFitmentForm.sales_manager || user?.name || 'ALLABAKSHU',
+        sales_person: fastFitmentForm.sales_person || user?.name || 'ALLABAKSHU',
+        installation_location: fastFitmentForm.installation_location || fastFitmentForm.rto_location || user?.region || 'GUNTUR',
+        installation_date: new Date().toLocaleDateString('en-GB').replace(/\//g, '-'),
+        software_user_id: fastFitmentForm.software_user_id || fastFitmentForm.vehicle_number.trim().toUpperCase(),
+        software_password: fastFitmentForm.software_password || 'User@123',
+        additional_attributes: fastFitmentForm.additional_attributes || {}
+      };
+
+      const res = await recordInstallation(payload);
+      if (res.success) {
+        setIsFastFitmentOpen(false);
+        setFastFitmentForm({
+          imei_number: '',
+          vehicle_number: '',
+          vehicle_type: 'Commercial Vehicle',
+          chasis_number: '',
+          engine_number: '',
+          rto_location: '',
+          customer_name: '',
+          customer_phone: '',
+          aadhar_number: '',
+          pan_number: '',
+          customer_address: '',
+          sale_price: '5000',
+          payment_status: 'RECEIVED',
+          sales_manager: '',
+          sales_person: '',
+          installation_location: user?.region || 'GUNTUR',
+          software_user_id: '',
+          software_password: 'User@123'
+        });
+        await loadData();
+        // Automatically open fitment receipt slip for immediate preview / print!
+        setSelectedReceiptDevice({
+          imei_number: payload.imei_number,
+          vehicle_number: payload.vehicle_number,
+          customer_name: payload.customer_name,
+          customer_phone: payload.customer_phone,
+          password: payload.software_password
+        });
+      }
+    } catch (err) {
+      alert('Failed to record fitment: ' + err.message);
+    } finally {
+      setSubmittingFitment(false);
+    }
+  };
 
   const handleResetFilters = () => {
     setSelectedDeviceTypeId('');
@@ -327,284 +713,651 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
     window.open(url, '_blank');
   };
 
-  const handleResetDealerHolding = async (dealerName) => {
-    if (!window.confirm(`Reset all holding stock for ${dealerName} and return units to Central Warehouse?`)) {
-      return;
-    }
-    try {
-      const res = await resetDealerStock({ dealer_name: dealerName });
-      if (res.success) {
-        alert(res.message);
-        loadData();
-      }
-    } catch (err) {
-      alert('Failed to reset dealer stock: ' + err.message);
-    }
-  };
-
   if (isDealer) {
+    const totalInstCount = stats?.recentActivity?.length || 0;
+    const paidInstCount = (stats?.recentActivity || []).filter(a => a.payment_status === 'PAID').length;
+    const pendingInstCount = totalInstCount - paidInstCount;
+    const targetAchievedPct = Math.min(100, Math.round((installed / (monthlyTarget || 1)) * 100));
+    const totalRevenue = installed * 5000;
+    const collectedRevenue = financials?.payment_received_amount || (paidInstCount * 5000);
+    const pendingRevenue = Math.max(0, totalRevenue - collectedRevenue);
+    const daysRemainingInMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate() - new Date().getDate();
+
     return (
       <div className="space-y-6">
-        {/* Dealer Welcome & Quick Action Header */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs">
+        
+        {/* Simple Clean Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs">
           <div>
-            <div className="flex items-center gap-2 mb-1.5">
+            <div className="flex items-center gap-2 mb-1">
               <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
-                🏪 Authorized Dealer Branch
+                Dealer Branch
               </span>
-              <span className="text-xs font-semibold text-slate-500">
+              <span className="text-xs text-slate-500 font-medium">
                 {user?.region ? `${user.region} Region` : 'Active Hub'}
               </span>
             </div>
-            <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
-              <Boxes className="w-5 h-5 text-amber-600" /> Welcome, {user?.name || 'Dealer Partner'}
-            </h2>
+            <h1 className="text-xl font-bold text-slate-900">
+              Welcome, {user?.name || 'Dealer Partner'}
+            </h1>
             <p className="text-xs text-slate-500 mt-0.5">
-              Your branch workspace for stock fitment, vehicle installations, and payment confirmations. Total assigned stock: <strong className="text-amber-800">{totalDevices} units</strong>.
+              Overview of your allocated devices, vehicle fitments & monthly goals.
             </p>
           </div>
 
-          {/* Dealer Actions */}
-          <div className="flex flex-wrap items-center gap-2.5">
+          {/* Action Buttons with 1-Click Excel Export (Feature 6) */}
+          <div className="flex flex-wrap items-center gap-2">
             <button
-              onClick={() => onNavigateTab('installations')}
-              className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+              onClick={() => handleOpenFastFitment()}
+              className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
             >
-              <Plus className="w-4 h-4" /> Record Vehicle Installation
+              <Zap className="w-4 h-4" />
+              <span>Record Fitment</span>
             </button>
             <button
-              onClick={() => onNavigateTab('dispatches')}
-              className="px-3.5 py-2.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+              onClick={handleExportDealerFitments}
+              disabled={isExportingDealerFitments}
+              className="px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+              title="Download full fitment log Excel for accounting"
             >
-              <Truck className="w-4 h-4 text-amber-600" /> My Dispatches & DCN ({totalDevices})
+              {isExportingDealerFitments ? (
+                <RefreshCw className="w-4 h-4 animate-spin text-emerald-600" />
+              ) : (
+                <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+              )}
+              <span>{isExportingDealerFitments ? 'Exporting...' : 'Download Fitments (Excel)'}</span>
             </button>
             <button
               onClick={() => onNavigateTab('inventory')}
-              className="px-3.5 py-2.5 bg-blue-50 hover:bg-blue-100 text-blue-800 border border-blue-200 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+              className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer border border-slate-200"
             >
-              <Boxes className="w-4 h-4 text-blue-600" /> View My Stock
+              <Boxes className="w-4 h-4 text-slate-600" />
+              <span>Stock List ({withDealer || inStockCount})</span>
+            </button>
+            <button
+              onClick={() => loadData()}
+              className="p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-xl border border-slate-200 transition-colors cursor-pointer"
+              title="Refresh Stats"
+            >
+              <RefreshCw className="w-4 h-4" />
             </button>
           </div>
         </div>
 
-        {/* Dealer KPI Metric Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {/* 1. Total Allocated Stock */}
-          <div
-            onClick={() => onNavigateTab('inventory')}
-            className="glass-panel p-4.5 rounded-2xl hover:border-amber-400 transition-all cursor-pointer group shadow-2xs"
-          >
-            <div className="flex items-center justify-between text-slate-500 mb-2">
-              <span className="text-[11px] font-bold uppercase tracking-wider">Total Allocated Stock</span>
-              <div className="p-2 rounded-xl bg-amber-50 text-amber-600 group-hover:bg-amber-600 group-hover:text-white transition-colors">
-                <Boxes className="w-4 h-4" />
+        {/* Feature 2: Monthly Target & Earnings Progress Bar */}
+        <div className="bg-linear-to-r from-slate-900 via-slate-850 to-indigo-950 text-white p-5 rounded-2xl border border-slate-800 shadow-sm relative overflow-hidden">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5 relative z-10">
+            {/* Left: Monthly Fitment Target Progress */}
+            <div className="flex-1 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                    <Target className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-sm text-slate-100 flex items-center gap-2">
+                      <span>Monthly Fitment Target</span>
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                        {daysRemainingInMonth} days left
+                      </span>
+                    </h3>
+                    <p className="text-[11px] text-slate-400">
+                      Goal for {new Date().toLocaleString('default', { month: 'long' })}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-bold font-mono text-emerald-400">
+                    {installed} <span className="text-xs text-slate-400 font-normal">/ {monthlyTarget} Vehicles</span>
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-800 text-slate-300 border border-slate-700 flex items-center gap-1">
+                    <ShieldCheck className="w-3 h-3 text-emerald-400" />
+                    <span>Admin Assigned Target</span>
+                  </span>
+                </div>
+              </div>
+
+              {/* Visual Progress Bar */}
+              <div className="space-y-1">
+                <div className="w-full h-3 bg-slate-800 rounded-full overflow-hidden p-0.5 border border-slate-700">
+                  <div
+                    className="h-full bg-linear-to-r from-emerald-500 to-teal-400 rounded-full transition-all duration-500 shadow-xs"
+                    style={{ width: `${Math.min(100, targetAchievedPct)}%` }}
+                  />
+                </div>
+                <div className="flex items-center justify-between text-[10px] text-slate-400">
+                  <span>0 Installed</span>
+                  <span className="font-bold text-emerald-400">
+                    {targetAchievedPct}% Achieved {targetAchievedPct >= 100 ? '🎉 Goal Completed!' : ''}
+                  </span>
+                  <span>{monthlyTarget} Target</span>
+                </div>
+
+                {/* Device Type Target Breakdown Pills */}
+                {Object.entries(stats?.device_targets || {}).filter(([_, v]) => Number(v) > 0).length > 0 && (
+                  <div className="pt-2 flex flex-wrap items-center gap-2 border-t border-slate-800/80 mt-1.5">
+                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Model Quotas:</span>
+                    {Object.entries(stats?.device_targets || {}).filter(([_, v]) => Number(v) > 0).map(([model, quota]) => (
+                      <div key={model} className="px-2 py-0.5 bg-slate-800/90 text-slate-200 border border-slate-700 rounded-lg text-[10px] font-mono flex items-center gap-1.5">
+                        <span className="font-bold text-amber-400">{model}:</span>
+                        <strong className="text-emerald-400 font-bold">{quota} units</strong>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
-            <div className="text-2xl font-bold font-mono text-slate-900">{totalDevices} <span className="text-xs font-normal text-slate-500">Units</span></div>
-            <div className="text-[11px] text-slate-500 mt-1 flex items-center justify-between">
-              <span>Dispatched to your branch</span>
-              <ArrowUpRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-amber-600" />
+
+            {/* Right: Revenue Breakdown Meter */}
+            <div className="grid grid-cols-3 gap-2 sm:gap-3 lg:w-96 shrink-0 bg-slate-800/60 p-3 rounded-xl border border-slate-700/60">
+              <div className="space-y-0.5">
+                <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Total Fitted</span>
+                <div className="text-sm sm:text-base font-bold font-mono text-slate-100">
+                  ₹{totalRevenue.toLocaleString()}
+                </div>
+                <span className="text-[10px] text-slate-400">{installed} vehicles</span>
+              </div>
+              <div className="space-y-0.5 border-l border-slate-700 pl-2 sm:pl-3">
+                <span className="text-[10px] uppercase tracking-wider text-emerald-400 font-bold">Collected</span>
+                <div className="text-sm sm:text-base font-bold font-mono text-emerald-400">
+                  ₹{collectedRevenue.toLocaleString()}
+                </div>
+                <span className="text-[10px] text-emerald-500 font-semibold">{paidInstCount} Paid</span>
+              </div>
+              <div className="space-y-0.5 border-l border-slate-700 pl-2 sm:pl-3">
+                <span className="text-[10px] uppercase tracking-wider text-amber-400 font-bold">Due / Pending</span>
+                <div className="text-sm sm:text-base font-bold font-mono text-amber-400">
+                  ₹{pendingRevenue.toLocaleString()}
+                </div>
+                <span className="text-[10px] text-amber-500 font-semibold">{pendingInstCount} Due</span>
+              </div>
             </div>
           </div>
+        </div>
 
-          {/* 2. In-Stock Ready for Fitment */}
+        {/* 4 Clean Metric Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          
+          {/* 1. In-Stock Ready */}
           <div
             onClick={() => onNavigateTab('inventory')}
-            className="glass-panel p-4.5 rounded-2xl hover:border-blue-400 transition-all cursor-pointer group shadow-2xs"
+            className="bg-white p-4.5 rounded-2xl border border-slate-200 hover:border-emerald-400 transition-all cursor-pointer shadow-2xs group"
           >
             <div className="flex items-center justify-between text-slate-500 mb-2">
-              <span className="text-[11px] font-bold uppercase tracking-wider">In-Stock (Uninstalled)</span>
-              <div className="p-2 rounded-xl bg-blue-50 text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-600">In-Stock (Available)</span>
+              <div className="p-2 rounded-xl bg-emerald-50 text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
                 <CheckCircle2 className="w-4 h-4" />
               </div>
             </div>
-            <div className="text-2xl font-bold font-mono text-blue-900">{withDealer || inStockCount} <span className="text-xs font-normal text-slate-500">Units</span></div>
-            <div className="text-[11px] text-slate-500 mt-1 flex items-center justify-between">
-              <span>Available for vehicle fitment</span>
+            <div className="text-2xl font-bold font-mono text-slate-900">
+              {withDealer || inStockCount} <span className="text-xs font-normal text-slate-500">Units</span>
+            </div>
+            <div className="text-[11px] text-emerald-700 font-semibold mt-1 flex items-center justify-between">
+              <span>Ready for fitment</span>
+              <ArrowUpRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-emerald-600" />
+            </div>
+          </div>
+
+          {/* 2. Installed Vehicles */}
+          <div
+            onClick={() => onNavigateTab('installations')}
+            className="bg-white p-4.5 rounded-2xl border border-slate-200 hover:border-blue-400 transition-all cursor-pointer shadow-2xs group"
+          >
+            <div className="flex items-center justify-between text-slate-500 mb-2">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-600">Installed Vehicles</span>
+              <div className="p-2 rounded-xl bg-blue-50 text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                <Car className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="text-2xl font-bold font-mono text-slate-900">
+              {installed} <span className="text-xs font-normal text-slate-500">Vehicles</span>
+            </div>
+            <div className="text-[11px] text-blue-700 font-semibold mt-1 flex items-center justify-between">
+              <span>Active on road</span>
               <ArrowUpRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-blue-600" />
             </div>
           </div>
 
-          {/* 3. Installed In Vehicles */}
+          {/* 3. Payment Received */}
           <div
             onClick={() => onNavigateTab('installations')}
-            className="glass-panel p-4.5 rounded-2xl hover:border-emerald-400 transition-all cursor-pointer group shadow-2xs"
+            className="bg-white p-4.5 rounded-2xl border border-slate-200 hover:border-amber-400 transition-all cursor-pointer shadow-2xs group"
           >
             <div className="flex items-center justify-between text-slate-500 mb-2">
-              <span className="text-[11px] font-bold uppercase tracking-wider">Installed Vehicles</span>
-              <div className="p-2 rounded-xl bg-emerald-50 text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
-                <Car className="w-4 h-4" />
-              </div>
-            </div>
-            <div className="text-2xl font-bold font-mono text-emerald-850">{installed} <span className="text-xs font-normal text-slate-500">Vehicles</span></div>
-            <div className="text-[11px] text-slate-500 mt-1 flex items-center justify-between">
-              <span>Active on road</span>
-              <ArrowUpRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-emerald-600" />
-            </div>
-          </div>
-
-          {/* 4. Payment Collected */}
-          <div
-            onClick={() => onNavigateTab('installations')}
-            className="glass-panel p-4.5 rounded-2xl hover:border-emerald-400 transition-all cursor-pointer group shadow-2xs"
-          >
-            <div className="flex items-center justify-between text-slate-500 mb-2">
-              <span className="text-[11px] font-bold uppercase tracking-wider">Payment Received</span>
-              <div className="p-2 rounded-xl bg-emerald-50 text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-600">Payment Status</span>
+              <div className="p-2 rounded-xl bg-amber-50 text-amber-600 group-hover:bg-amber-600 group-hover:text-white transition-colors">
                 <DollarSign className="w-4 h-4" />
               </div>
             </div>
-            <div className="text-2xl font-bold font-mono text-emerald-900">
-              ₹{(financials?.payment_received_amount || 0).toLocaleString()}
+            <div className="text-2xl font-bold font-mono text-slate-900">
+              ₹{(financials?.payment_received_amount || (paidInstCount * 5000)).toLocaleString()}
             </div>
             <div className="text-[11px] text-slate-500 mt-1 flex items-center justify-between">
-              <span>{financials?.payment_received_count || 0} Paid • {financials?.payment_pending_count || 0} Pending</span>
-              <ArrowUpRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-emerald-600" />
+              <span>{paidInstCount} Paid • {pendingInstCount} Due</span>
+              <ArrowUpRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-amber-600" />
             </div>
           </div>
+
+          {/* 4. Total Dispatches */}
+          <div
+            onClick={() => onNavigateTab('dispatches')}
+            className="bg-white p-4.5 rounded-2xl border border-slate-200 hover:border-purple-400 transition-all cursor-pointer shadow-2xs group"
+          >
+            <div className="flex items-center justify-between text-slate-500 mb-2">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-600">Total Allocated</span>
+              <div className="p-2 rounded-xl bg-purple-50 text-purple-600 group-hover:bg-purple-600 group-hover:text-white transition-colors">
+                <Truck className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="text-2xl font-bold font-mono text-slate-900">
+              {totalDevices} <span className="text-xs font-normal text-slate-500">Units</span>
+            </div>
+            <div className="text-[11px] text-purple-700 font-semibold mt-1 flex items-center justify-between">
+              <span>Total branch stock</span>
+              <ArrowUpRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-purple-600" />
+            </div>
+          </div>
+
         </div>
 
-        {/* Dealer Stock Model Breakdown & Recent Installations */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left: Dealer Stock Model Breakdown */}
-          <div className="glass-panel p-5 rounded-2xl space-y-4 shadow-2xs">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-2 text-slate-900 font-bold text-sm">
-                <Layers className="w-4 h-4 text-amber-600" />
-                <span>My Stock Models</span>
-              </div>
-              <span className="text-xs text-slate-400 font-mono font-bold">{totalDevices} Units</span>
+        {/* Clean Simple Stock Models Table */}
+        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+            <div className="flex items-center gap-2 text-slate-900 font-bold text-sm">
+              <Layers className="w-4 h-4 text-amber-600" />
+              <span>Stock Models Summary</span>
             </div>
+            <button
+              onClick={() => onNavigateTab('inventory')}
+              className="text-xs text-blue-700 font-bold hover:underline flex items-center gap-1 cursor-pointer"
+            >
+              <span>View Full Inventory</span>
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
 
-            <div className="space-y-3">
-              {typeCounts.length === 0 ? (
-                <div className="text-center py-6 text-xs text-slate-400">
-                  No active device models assigned yet.
-                </div>
-              ) : (
-                typeCounts.map((t) => (
-                  <div key={t.id} className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
-                    <div className="flex items-center justify-between text-xs">
-                      <div className="font-bold text-slate-900 flex items-center gap-2">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs border-collapse">
+              <thead className="bg-slate-50 text-slate-700 border-b border-slate-200">
+                <tr>
+                  <th className="p-3 font-bold">Model Name</th>
+                  <th className="p-3 font-bold">Category</th>
+                  <th className="p-3 font-bold">Available in Stock</th>
+                  <th className="p-3 font-bold">Installed</th>
+                  <th className="p-3 font-bold">Total Assigned</th>
+                  <th className="p-3 font-bold text-right">Quick Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {typeCounts.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="text-center py-6 text-slate-400">
+                      No device models assigned yet.
+                    </td>
+                  </tr>
+                ) : (
+                  typeCounts.map((t) => (
+                    <tr key={t.id} className="hover:bg-slate-50/80 transition-colors">
+                      <td className="p-3 font-bold text-slate-900 flex items-center gap-2">
+                        <Boxes className="w-3.5 h-3.5 text-slate-400" />
                         <span>{t.device_type}</span>
-                        <span className="px-1.5 py-0.5 rounded text-[10px] bg-slate-200 text-slate-700">{t.category}</span>
-                      </div>
-                      <span className="font-mono font-bold text-amber-700">{t.total_count} Units</span>
-                    </div>
-
-                    <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden flex">
-                      <div
-                        className="bg-emerald-500 h-1.5"
-                        style={{ width: `${t.total_count > 0 ? (t.installed_count / t.total_count) * 100 : 0}%` }}
-                      />
-                      <div
-                        className="bg-amber-500 h-1.5"
-                        style={{ width: `${t.total_count > 0 ? (t.with_dealer_count / t.total_count) * 100 : 0}%` }}
-                      />
-                    </div>
-
-                    <div className="flex items-center justify-between text-[11px] text-slate-500">
-                      <span className="text-emerald-700">● Installed: {t.installed_count}</span>
-                      <span className="text-amber-700">● Available: {t.with_dealer_count}</span>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-
-          {/* Right: Recent Installed Vehicles / Quick Actions */}
-          <div className="lg:col-span-2 glass-panel p-5 rounded-2xl space-y-4 shadow-2xs flex flex-col">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-2 text-slate-900 font-bold text-sm">
-                <Car className="w-4 h-4 text-emerald-600" />
-                <span>Recent Vehicle Installations & Actions</span>
-              </div>
-              <button
-                onClick={() => onNavigateTab('installations')}
-                className="text-xs text-emerald-700 font-bold hover:underline flex items-center gap-1 cursor-pointer"
-              >
-                All Installations <ChevronRight className="w-3.5 h-3.5" />
-              </button>
-            </div>
-
-            <div className="flex-1 space-y-3">
-              {(!stats?.recentActivity || stats.recentActivity.length === 0) ? (
-                <div className="text-center py-10 text-xs text-slate-400">
-                  No recent vehicle installations recorded yet. Click "Record Vehicle Installation" above to deploy your first device!
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs border-collapse">
-                    <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
-                      <tr>
-                        <th className="p-2.5 font-bold">Vehicle #</th>
-                        <th className="p-2.5 font-bold">Customer</th>
-                        <th className="p-2.5 font-bold">IMEI</th>
-                        <th className="p-2.5 font-bold">Payment</th>
-                        <th className="p-2.5 font-bold text-right">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {stats.recentActivity.slice(0, 6).map((act, i) => (
-                        <tr key={i} className="hover:bg-slate-50 transition-colors">
-                          <td className="p-2.5 font-mono font-bold text-slate-900">{act.vehicle_number || '-'}</td>
-                          <td className="p-2.5 text-slate-700">
-                            <div>{act.customer_name || '-'}</div>
-                            <div className="text-[10px] text-slate-400 font-mono">{act.customer_phone || ''}</div>
-                          </td>
-                          <td className="p-2.5 font-mono text-[11px] text-blue-700">
-                            <button
-                              onClick={() => onOpenTraceDrawer(act.imei_number)}
-                              className="hover:underline text-left cursor-pointer"
-                            >
-                              {act.imei_number}
-                            </button>
-                          </td>
-                          <td className="p-2.5">
-                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                              act.payment_status === 'PAID' 
-                                ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' 
-                                : 'bg-amber-50 text-amber-800 border border-amber-200'
-                            }`}>
-                              {act.payment_status || 'PENDING'}
-                            </span>
-                          </td>
-                          <td className="p-2.5 text-right flex items-center justify-end gap-1.5">
-                            {act.customer_phone && (
-                              <button
-                                onClick={() => {
-                                  const msg = buildPaymentDueReminderWhatsAppMessage({
-                                    customerName: act.customer_name,
-                                    vehicleNumber: act.vehicle_number,
-                                    imei: act.imei_number,
-                                    amountDue: act.cost || 0
-                                  });
-                                  window.open(`https://wa.me/91${act.customer_phone.replace(/\D/g, '')}?text=${encodeURIComponent(msg)}`, '_blank');
-                                }}
-                                className="p-1 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
-                                title="Send WhatsApp Payment Nudge"
-                              >
-                                <MessageSquare className="w-3.5 h-3.5" />
-                              </button>
-                            )}
-                            <button
-                              onClick={() => onOpenTraceDrawer(act.imei_number)}
-                              className="p-1 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
-                              title="Trace Device Lifecycle"
-                            >
-                              <ArrowUpRight className="w-3.5 h-3.5" />
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
+                      </td>
+                      <td className="p-3">
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200">
+                          {t.category}
+                        </span>
+                      </td>
+                      <td className="p-3">
+                        <span className="font-mono font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                          {t.with_dealer_count} Units
+                        </span>
+                      </td>
+                      <td className="p-3">
+                        <span className="font-mono font-bold text-slate-700">
+                          {t.installed_count} Units
+                        </span>
+                      </td>
+                      <td className="p-3 font-mono font-bold text-slate-900">
+                        {t.total_count} Units
+                      </td>
+                      <td className="p-3 text-right">
+                        {t.with_dealer_count > 0 ? (
+                          <button
+                            onClick={() => handleOpenFastFitment()}
+                            className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg text-xs font-bold transition-colors cursor-pointer"
+                          >
+                            + Fit Device
+                          </button>
+                        ) : (
+                          <span className="text-[11px] font-semibold text-slate-400">
+                            All Fitted
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
+
+        {/* 4. Interactive "Fast Vehicle Fitment" Modal with Full Vehicle & KYC Fields */}
+        {isFastFitmentOpen && (
+          <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] flex flex-col overflow-hidden shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-200">
+              {/* Modal Header */}
+              <div className="p-4.5 bg-slate-900 text-white flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-xl bg-emerald-500 text-slate-950">
+                    <Zap className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-sm">Record Vehicle Fitment & Customer Details</h3>
+                    <p className="text-[11px] text-slate-400">Enter AIS-140 vehicle, chassis, engine & customer KYC details</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setIsFastFitmentOpen(false)}
+                  className="p-1 hover:bg-white/10 rounded-lg text-slate-300 hover:text-white cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Fitment Form with Scrollable Dynamic Excel Columns Content */}
+              <form onSubmit={handleSaveFastFitment} className="p-5 space-y-4 text-xs overflow-y-auto">
+                
+                {/* 1. Smart Searchable GPS Device Selector */}
+                <div className="space-y-2 p-3 bg-slate-50 border border-slate-200 rounded-2xl">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <label className="block font-bold text-slate-800 text-xs">
+                      Select GPS Device ({inStockDevices.length} In-Stock with You) *
+                    </label>
+                    <span className="text-[11px] text-slate-500 font-medium">
+                      Showing {filteredInStockDevices.length} of {inStockDevices.length} available units
+                    </span>
+                  </div>
+
+                  {/* Fast Search Input Bar (By Last 4 Digits / Full IMEI / SIM / ICCID) */}
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      type="text"
+                      placeholder="🔍 Type last 4-6 digits of IMEI (e.g. 4084), full IMEI, SIM or ICCID..."
+                      value={imeiSearchQuery}
+                      onChange={(e) => {
+                        const q = e.target.value;
+                        setImeiSearchQuery(q);
+                        // Auto-select if exact 1 match or exact 15 digit IMEI
+                        if (q.trim().length >= 4) {
+                          const exactMatch = inStockDevices.find(d => 
+                            d.imei_number.endsWith(q.trim()) || 
+                            d.imei_number === q.trim() || 
+                            d.imei_number.includes(q.trim())
+                          );
+                          if (exactMatch && exactMatch.imei_number !== fastFitmentForm.imei_number) {
+                            handleSelectDevice(exactMatch.imei_number);
+                          }
+                        }
+                      }}
+                      className="w-full pl-8.5 pr-8 py-2 bg-white border border-slate-200 rounded-xl font-mono text-xs focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+                    />
+                    {imeiSearchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setImeiSearchQuery('')}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Model Quick Filter Pills */}
+                  <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                    {['ALL', 'VOLTY', 'VAMOSYS', 'TRACKNOW'].map((m) => {
+                      const count = m === 'ALL' 
+                        ? inStockDevices.length 
+                        : inStockDevices.filter(d => (d.device_type_name || '').toUpperCase().includes(m)).length;
+                      if (count === 0 && m !== 'ALL') return null;
+                      const active = fitmentModelFilter === m;
+                      return (
+                        <button
+                          key={m}
+                          type="button"
+                          onClick={() => setFitmentModelFilter(m)}
+                          className={`px-2 py-0.5 rounded-lg text-[10px] font-bold border transition-colors cursor-pointer ${
+                            active
+                              ? 'bg-slate-900 text-white border-slate-900'
+                              : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                          }`}
+                        >
+                          {m === 'ALL' ? 'All Models' : m} ({count})
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Device Dropdown with Live Filtered Options */}
+                  {filteredInStockDevices.length === 0 ? (
+                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-center text-amber-800 text-xs">
+                      No in-stock device found matching "{imeiSearchQuery}".
+                    </div>
+                  ) : (
+                    <select
+                      value={fastFitmentForm.imei_number}
+                      onChange={(e) => handleSelectDevice(e.target.value)}
+                      className="w-full p-2.5 bg-white border border-slate-200 rounded-xl font-mono text-xs focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 font-semibold"
+                      required
+                    >
+                      {filteredInStockDevices.map(d => {
+                        const a = d.additional_attributes || {};
+                        const sim = d.sim_number || a.simno1 || a['Sim 1'] || '';
+                        return (
+                          <option key={d.id} value={d.imei_number}>
+                            {d.imei_number} — {d.device_type_name || 'GPS'} {sim ? `(SIM: ${sim})` : ''} ({a['STOCK PLACE'] || 'In Stock'})
+                          </option>
+                        );
+                      })}
+                    </select>
+                  )}
+                </div>
+
+                {/* 2. Dynamic Excel Hardware Specs Summary */}
+                {(() => {
+                  const selDev = inStockDevices.find(d => d.imei_number === fastFitmentForm.imei_number) || inStockDevices[0];
+                  if (!selDev) return null;
+                  const a = selDev.additional_attributes || {};
+                  return (
+                    <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5">
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className="font-bold text-slate-800 flex items-center gap-1.5">
+                          <Boxes className="w-3.5 h-3.5 text-blue-600" />
+                          <span>{selDev.device_type_name || 'GPS'} Excel Hardware Parameters</span>
+                        </span>
+                        <span className="text-[10px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                          {a['STOCK PLACE'] || 'In Stock'}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-slate-600">
+                        {(a['simno1'] || a['Sim 1'] || selDev.sim_number) && (
+                          <span className="bg-white px-2 py-0.5 rounded border border-slate-200 font-mono">
+                            SIM 1: {a['simno1'] || a['Sim 1'] || selDev.sim_number}
+                          </span>
+                        )}
+                        {(a['simn02'] || a['Sim 2']) && (
+                          <span className="bg-white px-2 py-0.5 rounded border border-slate-200 font-mono">
+                            SIM 2: {a['simn02'] || a['Sim 2']}
+                          </span>
+                        )}
+                        {a['ICCID'] && (
+                          <span className="bg-white px-2 py-0.5 rounded border border-slate-200 font-mono">
+                            ICCID: {a['ICCID']}
+                          </span>
+                        )}
+                        {a['vltdsno'] && (
+                          <span className="bg-white px-2 py-0.5 rounded border border-slate-200 font-mono">
+                            VLTD: {a['vltdsno']}
+                          </span>
+                        )}
+                        {(a['SIM VALIDITY'] || a['SIM VALIDIDTY']) && (
+                          <span className="bg-emerald-50 text-emerald-800 px-2 py-0.5 rounded border border-emerald-200 font-semibold">
+                            Validity: {a['SIM VALIDITY'] || a['SIM VALIDIDTY']}
+                          </span>
+                        )}
+                        {(a['ACTIVATION STATUS'] || a['IS DEVICE ACTIVATED']) && (
+                          <span className="bg-blue-50 text-blue-800 px-2 py-0.5 rounded border border-blue-200 font-semibold">
+                            Activated: {a['ACTIVATION STATUS'] || a['IS DEVICE ACTIVATED']}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* 3. Pure Dynamic Excel Fields Grid based on Model Columns */}
+                {(() => {
+                  const selDev = inStockDevices.find(d => d.imei_number === fastFitmentForm.imei_number) || inStockDevices[0];
+                  const rawAttrs = selDev?.additional_attributes || {};
+                  const currentAttrs = fastFitmentForm.additional_attributes || rawAttrs;
+                  
+                  // Exclude hardware metadata keys
+                  const hardwareKeys = new Set([
+                    'vltdsno', 'simno1', 'simn02', 'Sim 1', 'Sim 2', 'ICCID', 'SERIAL NUMBER', 
+                    'UID', 'Vahan ID', 'SN', 'SIM VALIDITY', 'SIM VALIDIDTY', 'IS DEVICE ACTIVATED', 
+                    'ACTIVATION STATUS', 'STOCK PLACE', 'STOCK PLACE DATE', 'customer', 'DEVICE NAME'
+                  ]);
+
+                  // Determine columns to display from model template + any extra Excel attributes
+                  const modelKey = (selDev?.device_type_name || '').toUpperCase().trim();
+                  const baseTemplate = MODEL_EXCEL_COLUMNS[modelKey] || [
+                    'VEHICLE NUMBER', 'CUSTOMER NAME', 'CUSTOMER PHONE NUMBER', 
+                    'AADHAAR NUMBER', 'CHASIS NUMBER', 'ENGINE NUMBER', 
+                    'RTO LOCATION', 'COST', 'AMOUNT RECEIVED', 'SALES PERSON NAME', 'DATE'
+                  ];
+                  const extraKeys = Object.keys(rawAttrs).filter(k => !hardwareKeys.has(k) && !k.startsWith('__EMPTY') && !baseTemplate.includes(k));
+                  const fitmentColumns = [...baseTemplate, ...extraKeys];
+
+                  return (
+                    <div className="space-y-3 pt-1">
+                      <div className="flex items-center justify-between pb-1 border-b border-slate-200 text-slate-900 font-bold text-[11px] uppercase tracking-wider">
+                        <span className="flex items-center gap-1.5">
+                          <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>Excel Columns for {selDev?.device_type_name || 'Device'}</span>
+                        </span>
+                        <span className="text-[10px] text-slate-400 font-normal normal-case">
+                          {fitmentColumns.length} fields allowed
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {fitmentColumns.map((colKey) => {
+                          const val = currentAttrs[colKey] !== undefined ? currentAttrs[colKey] : '';
+                          const isAmountReceived = /amount.*received/i.test(colKey);
+                          const isCost = /cost|price|tax/i.test(colKey);
+                          const isPhone = /phone|mobile|contact/i.test(colKey);
+                          const isVehicle = /vehicle/i.test(colKey);
+                          const isAadhar = /aadhar/i.test(colKey);
+                          const isPan = /pan/i.test(colKey);
+                          const isChasis = /chasis|chassis|engine/i.test(colKey);
+
+                          const handleColChange = (newVal) => {
+                            const updated = { ...currentAttrs, [colKey]: newVal };
+                            setFastFitmentForm(prev => {
+                              const next = { ...prev, additional_attributes: updated };
+                              if (isVehicle) next.vehicle_number = String(newVal).toUpperCase();
+                              if (/customer.*name|issued.*to/i.test(colKey)) next.customer_name = String(newVal);
+                              if (isPhone) next.customer_phone = String(newVal);
+                              if (isAadhar) next.aadhar_number = String(newVal);
+                              if (isPan) next.pan_number = String(newVal).toUpperCase();
+                              if (/chasis|chassis/i.test(colKey)) next.chasis_number = String(newVal).toUpperCase();
+                              if (/engine/i.test(colKey)) next.engine_number = String(newVal).toUpperCase();
+                              if (/rto|location/i.test(colKey)) next.installation_location = String(newVal);
+                              if (/sales.*person/i.test(colKey)) next.sales_person = String(newVal);
+                              if (isCost && !/tax/i.test(colKey)) next.sale_price = String(newVal);
+                              if (isAmountReceived) next.payment_status = newVal === 'RECEIVED' ? 'RECEIVED' : 'NOT RECEIVED';
+                              return next;
+                            });
+                          };
+
+                          if (isAmountReceived) {
+                            return (
+                              <div key={colKey}>
+                                <label className="block font-bold text-slate-700 mb-1">{colKey}</label>
+                                <select
+                                  value={val === 'RECEIVED' ? 'RECEIVED' : 'NOT RECEIVED'}
+                                  onChange={(e) => handleColChange(e.target.value)}
+                                  className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold"
+                                >
+                                  <option value="RECEIVED">RECEIVED (Paid)</option>
+                                  <option value="NOT RECEIVED">NOT RECEIVED (Pending)</option>
+                                </select>
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <div key={colKey}>
+                              <label className="block font-bold text-slate-700 mb-1">
+                                {colKey} {isVehicle || /customer.*name/i.test(colKey) || isPhone ? '*' : ''}
+                              </label>
+                              <input
+                                type={isCost || isPhone ? 'text' : 'text'}
+                                placeholder={`Enter ${colKey}`}
+                                value={val}
+                                onChange={(e) => handleColChange(isVehicle || isPan || isChasis ? e.target.value.toUpperCase() : e.target.value)}
+                                className={`w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 ${
+                                  isVehicle || isChasis || isPan || isPhone || isAadhar ? 'font-mono' : ''
+                                } ${isVehicle ? 'font-bold uppercase' : ''}`}
+                                required={isVehicle || /customer.*name/i.test(colKey) || isPhone}
+                              />
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Submit Action Buttons */}
+                <div className="pt-4 border-t border-slate-100 flex items-center justify-end gap-2.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setIsFastFitmentOpen(false)}
+                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={submittingFitment}
+                    className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-sm"
+                  >
+                    {submittingFitment ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                    <span>Save & Generate Slip</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Official Fitment Slip Modal */}
+        <FitmentReceiptModal
+          isOpen={Boolean(selectedReceiptDevice)}
+          onClose={() => setSelectedReceiptDevice(null)}
+          deviceData={selectedReceiptDevice}
+        />
+
+        {/* Payment QR Modal */}
+        <PaymentQrModal
+          isOpen={Boolean(selectedPaymentQrDevice)}
+          onClose={() => setSelectedPaymentQrDevice(null)}
+          paymentData={selectedPaymentQrDevice}
+          onPaymentUpdated={() => loadData()}
+        />
       </div>
     );
   }
@@ -803,31 +1556,8 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
             })}
           </div>
 
-          {/* Clean Month & Upload Batch Dropdowns */}
+          {/* Upload Batch Dropdown */}
           <div className="flex flex-wrap items-center gap-2">
-            
-            {/* 1. Month Filter Dropdown */}
-            <div className={`flex items-center gap-1.5 border rounded-xl px-3 py-1.5 text-xs transition-colors shadow-2xs ${
-              selectedMonth !== 'ALL'
-                ? 'bg-indigo-50 border-indigo-300 text-indigo-900 font-bold'
-                : 'bg-slate-50 border-slate-200 text-slate-700 hover:border-slate-300'
-            }`}>
-              <Calendar className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-              <select
-                value={selectedMonth}
-                onChange={(e) => setSelectedMonth(e.target.value)}
-                className="bg-transparent text-xs font-bold text-slate-800 focus:outline-none cursor-pointer"
-              >
-                <option value="ALL">📅 All Months / All Time</option>
-                {(stats?.available_months || []).map(m => (
-                  <option key={m.key} value={m.key}>
-                    {m.label} ({m.count} records)
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* 2. Specific Upload List / Excel Batch Dropdown */}
             <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 hover:border-slate-300 rounded-xl px-3 py-1.5 text-xs text-slate-700 shadow-2xs">
               <FileSpreadsheet className="w-3.5 h-3.5 text-slate-500 shrink-0" />
               <select
@@ -848,7 +1578,6 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
                 ))}
               </select>
             </div>
-
           </div>
         </div>
 
@@ -860,11 +1589,10 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
               <span>
                 Viewing Dashboard for:{' '}
                 <strong className="font-bold text-purple-900">
-                  {selectedMonth !== 'ALL' ? `Month of ${selectedMonth}` : ''}
                   {selectedBatchObj
-                    ? ` (Upload List "${selectedBatchObj.notes || selectedBatchObj.source_file}")`
+                    ? `Upload List "${selectedBatchObj.notes || selectedBatchObj.source_file}"`
                     : selectedTypeObj
-                    ? ` (Device List "${selectedTypeObj.name}")`
+                    ? `Device List "${selectedTypeObj.name}"`
                     : ''}
                 </strong>
                 {locationFilter ? ` at ${locationFilter}` : ''}
@@ -1105,17 +1833,6 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
                       <span className="font-mono font-bold text-indigo-700 text-sm">{d.total}</span>
                       <div className="text-[10px] text-slate-400">Total Units</div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleResetDealerHolding(d.dealer);
-                      }}
-                      title={`Reset ${d.dealer} holding stock back to Central Warehouse`}
-                      className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
-                    >
-                      <RotateCcw className="w-3.5 h-3.5" />
-                    </button>
                     <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-indigo-600 transition-colors" />
                   </div>
                 </div>
@@ -1312,7 +2029,6 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
                   <th className="p-3">IMEI & Device</th>
                   <th className="p-3">Vehicle & Customer</th>
                   <th className="p-3">Change Details / Diff</th>
-                  <th className="p-3 text-right">Commercials</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 bg-white">
@@ -1369,56 +2085,6 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
                           )) : (
                             <span>Record updated</span>
                           )}
-                        </div>
-                      </td>
-
-                      {/* Commercials & Receipt Action */}
-                      <td className="p-3 text-right">
-                        <div className="font-bold text-slate-900">
-                          {act.cost && act.cost !== '-' ? `₹${act.cost}` : '-'}
-                        </div>
-                        <div className="flex items-center justify-end gap-1.5 mt-1">
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                            String(act.payment_status).toUpperCase().includes('REC') || String(act.payment_status).toUpperCase().includes('PAID')
-                              ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                              : 'bg-red-50 text-red-700 border border-red-200'
-                          }`}>
-                            {act.payment_status || 'PENDING'}
-                          </span>
-
-                          {(!String(act.payment_status).toUpperCase().includes('REC') && !String(act.payment_status).toUpperCase().includes('PAID')) && (
-                            <button
-                              onClick={() => {
-                                let phone = act.customer_phone || act.phone_number || '';
-                                if (!phone) {
-                                  const inputPhone = prompt(`Customer phone number is not found for vehicle "${act.vehicle_number || act.imei_number}".\n\nPlease enter the customer phone number:`);
-                                  if (!inputPhone) return;
-                                  phone = inputPhone.trim();
-                                }
-                                const { url } = buildPaymentDueReminderWhatsAppMessage({
-                                  phone,
-                                  customerName: act.customer_name || 'Customer',
-                                  vehicleNumber: act.vehicle_number || '',
-                                  amount: act.cost && act.cost !== '-' ? act.cost : 5000,
-                                  imei: act.imei_number,
-                                  stockPlace: act.stock_place || ''
-                                });
-                                window.open(url, '_blank');
-                              }}
-                              className="px-2 py-0.5 rounded-md bg-amber-50 hover:bg-amber-100 text-amber-700 text-[10px] font-bold border border-amber-200 transition-colors cursor-pointer flex items-center gap-1"
-                              title="Send 1-Click WhatsApp Payment Due Reminder"
-                            >
-                              <span>🔔</span> Remind
-                            </button>
-                          )}
-
-                          <button
-                            onClick={() => setSelectedReceiptDevice(act)}
-                            className="px-2 py-0.5 rounded-md bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[10px] font-bold border border-indigo-200 transition-colors cursor-pointer flex items-center gap-1"
-                            title="Generate Official Fitment & Payment Receipt"
-                          >
-                            <span>🧾</span> Receipt
-                          </button>
                         </div>
                       </td>
                     </tr>
@@ -1773,6 +2439,14 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
         isOpen={Boolean(selectedReceiptDevice)}
         onClose={() => setSelectedReceiptDevice(null)}
         deviceData={selectedReceiptDevice}
+      />
+
+      {/* Customer UPI Payment QR Code Generator Modal */}
+      <PaymentQrModal
+        isOpen={Boolean(selectedPaymentQrDevice)}
+        onClose={() => setSelectedPaymentQrDevice(null)}
+        paymentData={selectedPaymentQrDevice}
+        onPaymentUpdated={() => loadData()}
       />
 
     </div>

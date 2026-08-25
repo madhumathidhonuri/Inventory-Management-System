@@ -183,14 +183,26 @@ export function AuthProvider({ children }) {
       console.warn('User fetch during login fallback:', e);
     }
 
-    const cleanEmail = String(email || '').toLowerCase().trim();
+    const cleanInput = String(email || '').toLowerCase().trim();
     const cleanPass = String(password || '').trim();
 
-    const userMatch = allUsers.find(
-      u => (u.email && u.email.toLowerCase() === cleanEmail) || 
-           (u.phone && u.phone.toLowerCase() === cleanEmail) ||
-           (u.name && u.name.toLowerCase() === cleanEmail)
-    );
+    // Flexible matching for Super Admin aliases
+    const isSuperAdminAlias = cleanInput === 'admin@fueltracks.com' || 
+                              cleanInput === 'admin@fueltracks.in' || 
+                              cleanInput === 'admin' || 
+                              cleanInput === 'superadmin' || 
+                              cleanInput === 'owner@fueltracks.in';
+
+    const userMatch = allUsers.find(u => {
+      if (isSuperAdminAlias && u.role === 'SUPER_ADMIN') return true;
+      const uEmail = (u.email || '').toLowerCase().trim();
+      const uPhone = (u.phone || '').toLowerCase().trim();
+      const uName = (u.name || '').toLowerCase().trim();
+      return uEmail === cleanInput || 
+             uPhone === cleanInput || 
+             uName === cleanInput ||
+             (cleanInput.includes('@') && uEmail.split('@')[0] === cleanInput.split('@')[0]);
+    });
 
     if (
       userMatch &&

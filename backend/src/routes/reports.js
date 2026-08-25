@@ -9,61 +9,82 @@ const MONTH_NAMES = [
   'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER'
 ];
 
+// Helper: Parse exact Month name from date string, month string, or Excel serial
+function parseMonthFromValue(val) {
+  if (!val) return null;
+  
+  // 1. If it is already a Month name (e.g. "JULY", "JUNE", "August", "Jul", etc.)
+  const str = String(val).trim().toUpperCase();
+  if (MONTH_NAMES.includes(str)) return str;
+  const directMatch = MONTH_NAMES.find(m => str.startsWith(m) || m.startsWith(str));
+  if (directMatch && str.length >= 3) return directMatch;
+
+  // 2. Excel serial integer (e.g. 46089, 46030, etc.)
+  const num = Number(val);
+  if (!isNaN(num) && num > 30000 && num < 65000 && !String(val).includes('-') && !String(val).includes('/')) {
+    const d = new Date(Math.round((num - 25569) * 86400 * 1000));
+    const m = d.getUTCMonth();
+    if (m >= 0 && m <= 11) return MONTH_NAMES[m];
+  }
+
+  // 3. String date formats: DD-MM-YYYY, YYYY-MM-DD, DD/MM/YYYY, etc.
+  const parts = String(val).trim().split(/[-/]/);
+  if (parts.length === 3) {
+    let m = NaN;
+    if (parts[0].length === 4) {
+      // YYYY-MM-DD
+      m = parseInt(parts[1], 10);
+    } else if (parts[2].length === 4 || parts[2].length === 2) {
+      // DD-MM-YYYY
+      m = parseInt(parts[1], 10);
+    }
+    if (!isNaN(m) && m >= 1 && m <= 12) {
+      return MONTH_NAMES[m - 1];
+    }
+  }
+
+  return null;
+}
+
 // Helper: Extract accurate operational Month from device attributes, certificate dates, or created dates
 function getDeviceMonth(device = {}, attrs = {}) {
   // 1. Highest Priority: Explicit MONTH / RECEIVEDMONTH column in spreadsheet
   for (const k of Object.keys(attrs)) {
     if (/^month$|^received.*month$/i.test(k.trim()) && attrs[k]) {
-      const val = String(attrs[k]).toUpperCase().trim();
-      if (MONTH_NAMES.includes(val)) return val;
-      const found = MONTH_NAMES.find(m => m.startsWith(val) || val.startsWith(m));
-      if (found) return found;
+      const parsed = parseMonthFromValue(attrs[k]);
+      if (parsed) return parsed;
     }
   }
 
-  // 2. Extract from CERTIFICATE ISSUED DATE / STOCK PLACE DATE / INSTALLATION DATE / DATE
-  const dateKeys = Object.keys(attrs).filter(k => /date/i.test(k));
-  for (const k of dateKeys) {
-    const val = attrs[k];
-    if (!val) continue;
+  // 2. Key operational date columns in priority order
+  const priorityDateKeys = [
+    'PAYMENT RECEIVED DATE',
+    'PAYMENT DATE',
+    'CERTIFICATE ISSUED DATE',
+    'CERTIFICATE ISSUED',
+    'INSTALLATION DATE',
+    'SIM ACTIVATION DATE',
+    'SIM ACTIVATED DATE',
+    'DATE',
+    'STOCK PLACE DATE'
+  ];
 
-    // Excel serial integer (e.g. 46030, 46089, 46364...)
-    if (typeof val === 'number' || /^\d{5}$/.test(String(val).trim())) {
-      const num = Number(val);
-      if (num > 30000 && num < 60000) {
-        const d = new Date(Math.round((num - 25569) * 86400 * 1000));
-        const day = d.getUTCDate();
-        const year = d.getUTCFullYear();
-
-        // If day in US Excel is 8, Indian date was DD/08/2026 (August)
-        if (day === 8 && year === 2026) return 'AUGUST';
-        if (day === 7 && year === 2026) return 'JULY';
-        if (day === 6 && year === 2026) return 'JUNE';
-
-        const m = d.getUTCMonth();
-        if (m < 5) return 'AUGUST';
-        return MONTH_NAMES[m];
-      }
-    }
-
-    // String date
-    const str = String(val).trim();
-    const parts = str.split(/[-/]/);
-    if (parts.length === 3) {
-      let month;
-      if (parts[0].length === 4) {
-        month = parseInt(parts[1], 10);
-      } else {
-        month = parseInt(parts[1], 10);
-      }
-      if (month >= 1 && month <= 12) {
-        if (month < 6) return 'AUGUST';
-        return MONTH_NAMES[month - 1];
-      }
+  for (const k of priorityDateKeys) {
+    if (attrs[k]) {
+      const parsed = parseMonthFromValue(attrs[k]);
+      if (parsed) return parsed;
     }
   }
 
-  // 3. Fallback: check device serial number (e.g. VAMO1AA0626... -> 06/26 = JUNE)
+  // Check any remaining attribute containing "date" or "month"
+  for (const k of Object.keys(attrs)) {
+    if (/date|month/i.test(k) && attrs[k]) {
+      const parsed = parseMonthFromValue(attrs[k]);
+      if (parsed) return parsed;
+    }
+  }
+
+  // 3. Fallback: check device serial number (e.g. VAMO1AA0626 -> 06 = JUNE)
   const serialKey = Object.keys(attrs).find(k => /vltdsno|serial/i.test(k));
   if (serialKey && attrs[serialKey]) {
     const s = String(attrs[serialKey]);
@@ -707,14 +728,18 @@ router.get('/export', (req, res) => {
 
 // Helper: Extract normalized YYYY-MM-DD certificate date from device & attributes
 function extractDeviceCertificateDate(dev = {}, attrs = {}) {
-  const dateKeys = [
+  const isInstalled = dev.current_status === 'INSTALLED' || 
+    Boolean(String(attrs['VEHICLE NUMBER'] || attrs['VEHICLE NO'] || attrs['vehicle_number'] || '').trim()) ||
+    Boolean(String(attrs['CERTIFICATE ISSUED TO'] || attrs['CERTIFICATE ISSUED'] || '').trim()) ||
+    Boolean(String(attrs['CUSTOMER NAME'] || attrs['CUSTOMER'] || '').trim());
+
+  const directCertKeys = [
     'CERTIFICATE ISSUED DATE', 'Certificate Issued Date', 'certificate_issued_date',
     'CERTIFICATE DATE', 'Certificate Date', 'certificate_date',
-    'INSTALLATION DATE', 'Installation Date', 'installation_date',
-    'DATE', 'Date', 'date', 'STOCK PLACE DATE'
+    'INSTALLATION DATE', 'Installation Date', 'installation_date'
   ];
 
-  for (const k of dateKeys) {
+  for (const k of directCertKeys) {
     if (attrs[k] !== undefined && attrs[k] !== null && String(attrs[k]).trim() !== '') {
       const val = attrs[k];
 
@@ -723,7 +748,9 @@ function extractDeviceCertificateDate(dev = {}, attrs = {}) {
         const num = Number(val);
         if (num > 30000 && num < 60000) {
           const d = new Date(Math.round((num - 25569) * 86400 * 1000));
-          return d.toISOString().split('T')[0];
+          if (!isNaN(d.getTime())) {
+            return d.toISOString().split('T')[0];
+          }
         }
       }
 
@@ -747,14 +774,34 @@ function extractDeviceCertificateDate(dev = {}, attrs = {}) {
       }
 
       const parsed = new Date(str);
-      if (!isNaN(parsed.getTime()) && parsed.getFullYear() > 2020) {
+      if (!isNaN(parsed.getTime()) && parsed.getFullYear() > 2020 && parsed.getFullYear() < 2100) {
         return parsed.toISOString().split('T')[0];
       }
     }
   }
 
-  if (dev.current_status === 'INSTALLED' && dev.updated_at) {
-    return dev.updated_at.split('T')[0].split(' ')[0];
+  // Only if the device is actually installed / has vehicle, fallback to general date
+  if (isInstalled) {
+    for (const k of ['DATE', 'Date', 'date']) {
+      if (attrs[k] !== undefined && attrs[k] !== null && String(attrs[k]).trim() !== '') {
+        const val = attrs[k];
+        if (typeof val === 'number' || /^\d{5}$/.test(String(val).trim())) {
+          const num = Number(val);
+          if (num > 30000 && num < 60000) {
+            const d = new Date(Math.round((num - 25569) * 86400 * 1000));
+            if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
+          }
+        }
+        const str = String(val).trim();
+        const dmy = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+        if (dmy) return `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
+        const ymd = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+        if (ymd) return `${ymd[1]}-${ymd[2].padStart(2, '0')}-${ymd[3].padStart(2, '0')}`;
+      }
+    }
+    if (dev.updated_at && dev.current_status === 'INSTALLED') {
+      return dev.updated_at.split('T')[0].split(' ')[0];
+    }
   }
 
   return null;
@@ -794,6 +841,7 @@ function computeDailyDistributionMatrix(requestedDate = null) {
       device_name: dt.name,
       locations: {},
       certificates_issued_today: 0,
+      total_installed: 0,
       total_certificates_issued: 0,
       in_stock_total: 0,
       purchased_total: batchMap[dt.id] || 0
@@ -811,34 +859,52 @@ function computeDailyDistributionMatrix(requestedDate = null) {
         device_name: devName,
         locations: {},
         certificates_issued_today: 0,
+        total_installed: 0,
         total_certificates_issued: 0,
         in_stock_total: 0,
         purchased_total: 0
       };
     }
 
-    const vehNo = attrs['VEHICLE NUMBER'] || attrs['VEHICLE NO'] || attrs['vehicle_number'] || attrs['vehicle_no'] || '';
-    const isInstalled = dev.current_status === 'INSTALLED' || Boolean(String(vehNo).trim());
+    const vehNo = String(attrs['VEHICLE NUMBER'] || attrs['VEHICLE NO'] || attrs['vehicle_number'] || attrs['vehicle_no'] || '').trim();
+    const hasVehicle = Boolean(vehNo && vehNo !== '-' && vehNo !== '—' && vehNo !== 'NULL');
+    const isInstalled = dev.current_status === 'INSTALLED' || hasVehicle;
     const certDate = extractDeviceCertificateDate(dev, attrs);
 
     const isIssuedToday = Boolean(certDate && certDate === targetDate);
 
     if (isIssuedToday) {
       matrix[devName].certificates_issued_today++;
+      const phone = attrs['CUSTOMER PHONE NUMBER'] || attrs['CUSTOMER PHONE'] || attrs['CUSTOMER CONTACT'] ||
+        attrs['Customer Phone Number'] || attrs['Customer Phone'] || attrs['Customer Contact'] ||
+        attrs['MOBILE'] || attrs['MOBILE NUMBER'] || attrs['PHONE'] || attrs['PHONE NUMBER'] ||
+        attrs['customer_phone'] || attrs['customer_phone_number'] || attrs['customer_contact'] ||
+        attrs['phone_number'] || attrs['phone'] || attrs['mobile'] || '-';
+
+      const custName = attrs['CUSTOMER NAME'] || attrs['CERTIFICATE ISSUED TO'] || attrs['CUSTOMER'] ||
+        attrs['Customer Name'] || attrs['customer_name'] || '-';
+
+      const chasis = attrs['CHASIS NUMBER'] || attrs['CHASSIS NUMBER'] || attrs['CHASIS NO'] ||
+        attrs['CHASSIS NO'] || attrs['chasis_number'] || attrs['chassis_number'] || '-';
+
+      const engine = attrs['ENGINE NUMBER'] || attrs['ENGINE NO'] || attrs['engine_number'] || '-';
+
       todayIssuedDevices.push({
         id: dev.id,
         imei_number: dev.imei_number,
         device_name: devName,
         vehicle_number: vehNo || '-',
-        customer_name: attrs['CUSTOMER NAME'] || attrs['CUSTOMER'] || attrs['customer_name'] || '-',
-        customer_phone: attrs['MOBILE'] || attrs['PHONE'] || attrs['customer_phone'] || '-',
+        customer_name: custName,
+        customer_phone: phone,
         certificate_issued_date: certDate,
-        chasis_number: attrs['CHASIS NUMBER'] || attrs['CHASSIS NUMBER'] || attrs['chasis_number'] || '-',
-        engine_number: attrs['ENGINE NUMBER'] || attrs['engine_number'] || '-'
+        chasis_number: chasis,
+        engine_number: engine,
+        rto_location: attrs['RTO LOCATION'] || attrs['RTO Location'] || attrs['rto_location'] || attrs['STOCK PLACE'] || attrs['LOCATION'] || ''
       });
     }
 
     if (isInstalled) {
+      matrix[devName].total_installed++;
       matrix[devName].total_certificates_issued++;
     } else {
       let place = attrs['STOCK PLACE'] || attrs['STOCK LOCATION'] || dev.current_holder_name || 'OFFICE';
@@ -851,8 +917,37 @@ function computeDailyDistributionMatrix(requestedDate = null) {
     }
   });
 
-  // Dynamic locations sorting
-  const priority = ['OFFICE', 'RESIDENCE', 'CHENNAI', 'TESTING CHENNAI'];
+  // Calculate certificates issued text summary for each device
+  Object.keys(matrix).forEach(devName => {
+    const devCerts = todayIssuedDevices.filter(item => item.device_name === devName);
+    const locCounts = {};
+    devCerts.forEach(item => {
+      let loc = item.rto_location || item.stock_place || item.location || '';
+      loc = String(loc).trim().toUpperCase();
+      const shortDev = devName.length > 5 ? devName.slice(0, 4) : devName;
+      const key = loc ? `${loc} ${shortDev}` : devName;
+      locCounts[key] = (locCounts[key] || 0) + 1;
+    });
+    const summaryList = Object.entries(locCounts).map(([k, cnt]) => `${k} ${cnt}`);
+    matrix[devName].certificates_issued_summary = summaryList.join(', ');
+  });
+
+  // Dynamic locations sorting with exact priority order
+  const priority = [
+    'OFFICE',
+    'RESIDENCE',
+    'SWIFT CAR',
+    'ADONI',
+    'GUNTUR',
+    'KALWAKURTHY',
+    'KUKATPALLY',
+    'RAJAMANDRY',
+    'SURYAPET',
+    'VIJAYAWADA',
+    'VIZAG',
+    'ZAHEERABHAD',
+    'JAIPAL REDDY'
+  ];
   const allLocations = Array.from(locationsSet).sort((a, b) => {
     const pA = priority.indexOf(a);
     const pB = priority.indexOf(b);
@@ -866,6 +961,7 @@ function computeDailyDistributionMatrix(requestedDate = null) {
   const columnTotals = {
     locations: {},
     certificates_issued_today: 0,
+    total_installed: 0,
     total_certificates_issued: 0,
     in_stock_total: 0,
     purchased_total: 0
@@ -880,6 +976,7 @@ function computeDailyDistributionMatrix(requestedDate = null) {
 
   Object.values(matrix).forEach(m => {
     columnTotals.certificates_issued_today += m.certificates_issued_today;
+    columnTotals.total_installed += (m.total_installed || 0);
     columnTotals.total_certificates_issued += m.total_certificates_issued;
     columnTotals.in_stock_total += m.in_stock_total;
     columnTotals.purchased_total += m.purchased_total;
@@ -933,8 +1030,8 @@ router.get('/export-daily-distribution', async (req, res) => {
       'DEVICE',
       ...locations,
       'CERTIFICATES ISSUED TODAY',
-      'TOTAL INSTALLED',
-      'IN-STOCK TOTAL',
+      'INSTALLED',
+      'TOTAL',
       'PURCHASED'
     ];
     const headerRow = ws.addRow(headers);
@@ -956,25 +1053,17 @@ router.get('/export-daily-distribution', async (req, res) => {
       };
     });
 
-    // Highlight 'CERTIFICATES ISSUED TODAY' header column in dark emerald
-    const certTodayColIdx = locations.length + 2;
-    headerRow.getCell(certTodayColIdx).fill = {
-      type: 'pattern',
-      pattern: 'solid',
-      fgColor: { argb: 'FF0D5C3A' } // Dark Emerald Green
-    };
-
     rows.forEach(r => {
       const rowValues = [
         r.device_name,
         ...locations.map(loc => r.locations[loc] || ''),
         r.certificates_issued_today || 0,
-        r.total_certificates_issued || 0,
+        r.total_installed || 0,
         r.in_stock_total || 0,
         r.purchased_total || 0
       ];
       const dataRow = ws.addRow(rowValues);
-      dataRow.height = 22;
+      dataRow.height = 24;
 
       dataRow.eachCell((cell, colNumber) => {
         cell.font = { size: 10, name: 'Calibri' };
@@ -988,9 +1077,12 @@ router.get('/export-daily-distribution', async (req, res) => {
 
         if (colNumber === 1) {
           cell.font = { bold: true, name: 'Calibri', size: 10, color: { argb: 'FF1A202C' } };
-        } else if (colNumber === certTodayColIdx) {
+        } else if (colNumber === locations.length + 2) {
+          // CERTIFICATES ISSUED TODAY column
           cell.font = { bold: true, color: { argb: 'FF0D5C3A' }, name: 'Calibri' };
-          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE6F4EA' } }; // Light Emerald
+        } else if (colNumber === locations.length + 3) {
+          // INSTALLED column
+          cell.font = { bold: true, name: 'Calibri', size: 10 };
         }
       });
     });
@@ -998,11 +1090,11 @@ router.get('/export-daily-distribution', async (req, res) => {
     // Orange Summary Totals Footer Row
     const totalRowValues = [
       'TOTAL',
-      ...locations.map(loc => columnTotals.locations[loc] || 0),
-      columnTotals.certificates_issued_today || 0,
-      columnTotals.total_certificates_issued || 0,
-      columnTotals.in_stock_total || 0,
-      columnTotals.purchased_total || 0
+      ...locations.map(loc => `TOTAL = ${columnTotals.locations[loc] || 0}`),
+      `TOTAL = ${columnTotals.certificates_issued_today || 0}`,
+      `TOTAL = ${columnTotals.total_installed || 0}`,
+      `TOTAL = ${columnTotals.in_stock_total || 0}`,
+      `TOTAL = ${columnTotals.purchased_total || 0}`
     ];
     const totalRow = ws.addRow(totalRowValues);
     totalRow.height = 26;
@@ -1013,7 +1105,7 @@ router.get('/export-daily-distribution', async (req, res) => {
         pattern: 'solid',
         fgColor: { argb: 'FFED7D31' } // Orange
       };
-      cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 10, name: 'Calibri' };
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 9, name: 'Calibri' };
       cell.alignment = { vertical: 'middle', horizontal: 'center' };
       cell.border = {
         top: { style: 'medium', color: { argb: 'FFC65911' } },
@@ -1025,7 +1117,7 @@ router.get('/export-daily-distribution', async (req, res) => {
 
     ws.columns = [
       { width: 22 },
-      ...locations.map(() => ({ width: 15 })),
+      ...locations.map(() => ({ width: 16 })),
       { width: 26 },
       { width: 18 },
       { width: 16 },
@@ -1125,105 +1217,7 @@ router.get('/export-daily-distribution', async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
-      cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 10, name: 'Calibri' };
-      cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
-      cell.border = {
-        top: { style: 'thin', color: { argb: 'FFB0C4DE' } },
-        left: { style: 'thin', color: { argb: 'FFB0C4DE' } },
-        bottom: { style: 'medium', color: { argb: 'FF1F497D' } },
-        right: { style: 'thin', color: { argb: 'FFB0C4DE' } }
-      };
-    });
 
-    // Data rows for each device model
-    rows.forEach(r => {
-      const rowValues = [
-        r.device_name,
-        ...locations.map(loc => r.locations[loc] || ''),
-        r.certificates_issued || 0,
-        r.in_stock_total || 0,
-        r.purchased_total || 0
-      ];
-
-      const row = ws.addRow(rowValues);
-      row.height = 24;
-
-      row.eachCell((cell, colNum) => {
-        const isDeviceCol = colNum === 1;
-        const isSummaryCol = colNum >= headers.length - 2;
-
-        cell.font = {
-          size: 10,
-          name: 'Calibri',
-          bold: isDeviceCol || isSummaryCol,
-          color: { argb: isSummaryCol ? 'FF1E293B' : 'FF334155' }
-        };
-        cell.alignment = {
-          vertical: 'middle',
-          horizontal: isDeviceCol ? 'left' : 'center'
-        };
-        cell.border = {
-          top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
-          left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
-          bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
-          right: { style: 'thin', color: { argb: 'FFE2E8F0' } }
-        };
-
-        if (isSummaryCol) {
-          cell.fill = {
-            type: 'pattern',
-            pattern: 'solid',
-            fgColor: { argb: 'FFF8FAFC' }
-          };
-        }
-      });
-    });
-
-    // Footer Orange Total Row
-    const footerValues = [
-      'TOTAL',
-      ...locations.map(loc => `TOTAL = ${columnTotals.locations[loc] || 0}`),
-      `TOTAL = ${columnTotals.certificates_issued || 0}`,
-      `TOTAL = ${columnTotals.in_stock_total || 0}`,
-      `TOTAL = ${columnTotals.purchased_total || 0}`
-    ];
-
-    const footerRow = ws.addRow(footerValues);
-    footerRow.height = 26;
-
-    footerRow.eachCell((cell, colNum) => {
-      cell.fill = {
-        type: 'pattern',
-        pattern: 'solid',
-        fgColor: { argb: 'FFED7D31' } // Vibrant Orange Footer Row
-      };
-      cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 9, name: 'Calibri' };
-      cell.alignment = { vertical: 'middle', horizontal: 'center' };
-      cell.border = {
-        top: { style: 'medium', color: { argb: 'FFFFFFFF' } },
-        left: { style: 'thin', color: { argb: 'FFFFFFFF' } },
-        bottom: { style: 'medium', color: { argb: 'FFFFFFFF' } },
-        right: { style: 'thin', color: { argb: 'FFFFFFFF' } }
-      };
-    });
-
-    // Set responsive column widths
-    ws.columns.forEach((col, index) => {
-      if (index === 0) col.width = 16;
-      else if (index >= headers.length - 3) col.width = 20;
-      else col.width = 15;
-    });
-
-    const filename = `Daily_Master_Inventory_Report_${new Date().toISOString().split('T')[0]}`;
-    const buffer = await wb.xlsx.writeBuffer();
-
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}.xlsx"`);
-    res.send(buffer);
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
 
 /**
  * Helper to fetch consolidated customer directory records from both installations & device records

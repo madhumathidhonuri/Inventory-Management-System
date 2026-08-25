@@ -9,7 +9,7 @@ export default function DeviceTypesPage() {
   
   const [name, setName] = useState('');
   const [category, setCategory] = useState('GPS Tracker');
-  const [customFieldsJson, setCustomFieldsJson] = useState('{\n  "require_sim": true,\n  "voltage": "9-36V"\n}');
+  const [customFieldsJson, setCustomFieldsJson] = useState('{\n  "voltage": "9-36V"\n}');
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {

@@ -40,9 +40,9 @@ function seedDatabase() {
     VALUES (?, ?, ?)
   `);
 
-  const t1 = insertType.run('VAMOSYS', 'GPS Tracker', JSON.stringify({ require_sim: true })).lastInsertRowid;
-  const t2 = insertType.run('TRACKNOW', 'GPS Tracker', JSON.stringify({ require_sim: true })).lastInsertRowid;
-  const t3 = insertType.run('VOLTY', 'GPS Tracker', JSON.stringify({ require_sim: true })).lastInsertRowid;
+  const t1 = insertType.run('VAMOSYS', 'GPS Tracker', JSON.stringify({})).lastInsertRowid;
+  const t2 = insertType.run('TRACKNOW', 'GPS Tracker', JSON.stringify({})).lastInsertRowid;
+  const t3 = insertType.run('VOLTY', 'GPS Tracker', JSON.stringify({})).lastInsertRowid;
 
   // Insert Purchase Batches
   const insertBatch = db.prepare(`

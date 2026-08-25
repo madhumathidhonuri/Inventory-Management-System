@@ -150,19 +150,50 @@ router.post('/', (req, res) => {
     let attrs = {};
     try { attrs = JSON.parse(dev.additional_attributes || '{}'); } catch {}
 
+    if (req.body.additional_attributes && typeof req.body.additional_attributes === 'object') {
+      attrs = { ...attrs, ...req.body.additional_attributes };
+    }
+
     const vehKey = Object.keys(attrs).find(k => /vehicle|veh_no|reg_no/i.test(k)) || 'VEHICLE NUMBER';
     const custKey = Object.keys(attrs).find(k => /customer.*name|client.*name/i.test(k)) || 'CUSTOMER NAME';
     const phoneKey = Object.keys(attrs).find(k => /customer.*phone|mobile|contact/i.test(k)) || 'CUSTOMER PHONE NUMBER';
-    const dateKey = Object.keys(attrs).find(k => /install.*date|installation/i.test(k)) || 'INSTALLATION DATE';
+    const dateKey = Object.keys(attrs).find(k => /install.*date|installation/i.test(k)) || (attrs['CERTIFICATE ISSUED DATE'] !== undefined ? 'CERTIFICATE ISSUED DATE' : 'DATE');
     const payKey = Object.keys(attrs).find(k => /amount.*received|payment/i.test(k)) || 'AMOUNT RECEIVED';
+    const costKey = Object.keys(attrs).find(k => /total.*cost|cost/i.test(k)) || 'COST';
 
     attrs[vehKey] = cleanVehicle;
     attrs[custKey] = customer_name.trim();
     attrs[phoneKey] = cleanPhone;
     attrs[dateKey] = instDate;
     attrs[payKey] = cleanPayStatus;
-    if (cleanSoftwareUser) attrs['SOFTWARE LOGIN ID'] = cleanSoftwareUser;
-    if (cleanSoftwarePass) attrs['SOFTWARE PASSWORD'] = cleanSoftwarePass;
+    if (sale_price) attrs[costKey] = parseFloat(sale_price);
+
+    if (cleanAadhar) {
+      const aadharKey = Object.keys(attrs).find(k => /aadhar/i.test(k)) || 'AADHAAR NUMBER';
+      attrs[aadharKey] = cleanAadhar;
+    }
+    if (cleanChasis) {
+      const chasisKey = Object.keys(attrs).find(k => /chasis|chassis/i.test(k)) || 'CHASIS NUMBER';
+      attrs[chasisKey] = cleanChasis;
+    }
+    if (cleanEngine) {
+      const engineKey = Object.keys(attrs).find(k => /engine/i.test(k)) || 'ENGINE NUMBER';
+      attrs[engineKey] = cleanEngine;
+    }
+    if (cleanPan) {
+      const panKey = Object.keys(attrs).find(k => /pan/i.test(k)) || 'PAN NUMBER';
+      attrs[panKey] = cleanPan;
+    }
+    if (installation_location) {
+      const rtoKey = Object.keys(attrs).find(k => /rto|location/i.test(k)) || 'RTO LOCATION';
+      attrs[rtoKey] = installation_location;
+    }
+    if (sales_person) {
+      const salesKey = Object.keys(attrs).find(k => /sales.*person/i.test(k)) || 'SALES PERSON NAME';
+      attrs[salesKey] = sales_person;
+    }
+    if (cleanSoftwareUser) attrs['USERNAME'] = cleanSoftwareUser;
+    if (cleanSoftwarePass) attrs['PASSWORD'] = cleanSoftwarePass;
 
     db.prepare(`
       UPDATE devices

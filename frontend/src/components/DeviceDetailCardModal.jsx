@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   X, Copy, Check, QrCode, Cpu, Radio, Truck, User, Phone, 
   MapPin, Calendar, CreditCard, ShieldCheck, Wrench, Clock, 
-  ArrowRight, FileSpreadsheet, Printer, ExternalLink, Sparkles, Trash2, Send
+  ArrowRight, FileSpreadsheet, Printer, ExternalLink, Sparkles, Trash2, Send, Lock
 } from 'lucide-react';
 import { fetchDeviceByImei } from '../services/api';
 import { buildCustomerCredentialsWhatsAppMessage, buildPaymentQrWhatsAppMessage, formatDisplayCellValue } from '../utils/whatsapp';

@@ -36,6 +36,7 @@ export default function ReportsPage() {
   const [loadingOptions, setLoadingOptions] = useState(true);
   const [dailyMatrixLoading, setDailyMatrixLoading] = useState(false);
   const [dailyMatrix, setDailyMatrix] = useState(null);
+  const [dailyMatrixDate, setDailyMatrixDate] = useState(() => new Date().toISOString().split('T')[0]);
 
   // Customer Directory State
   const [customerDirectory, setCustomerDirectory] = useState([]);
@@ -101,10 +102,10 @@ export default function ReportsPage() {
     updatePreview();
   }, [filters]);
 
-  const loadDailyMatrix = async () => {
+  const loadDailyMatrix = async (dateParam = dailyMatrixDate) => {
     setDailyMatrixLoading(true);
     try {
-      const res = await fetchDailyDistributionReport();
+      const res = await fetchDailyDistributionReport(dateParam);
       if (res.success) {
         setDailyMatrix(res.data);
       }
@@ -117,7 +118,8 @@ export default function ReportsPage() {
 
   const handleExportDailyMatrix = () => {
     setDownloading('daily_matrix');
-    window.location.href = '/api/reports/export-daily-distribution';
+    const query = dailyMatrixDate ? `?date=${encodeURIComponent(dailyMatrixDate)}` : '';
+    window.location.href = `/api/reports/export-daily-distribution${query}`;
     setTimeout(() => setDownloading(null), 2500);
   };
 
@@ -507,13 +509,28 @@ export default function ReportsPage() {
                 </span>
               </div>
               <p className="text-xs text-slate-500 mt-1">
-                Auto-prepared daily distribution matrix across all dynamic locations, dealer holders, and vehicle installations.
+                Auto-prepared daily distribution matrix across all stock locations and certificate issuance dates.
               </p>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* Date Filter Picker */}
+              <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl border border-slate-200">
+                <Calendar className="w-3.5 h-3.5 text-slate-500 ml-1.5" />
+                <input
+                  type="date"
+                  value={dailyMatrixDate}
+                  onChange={(e) => {
+                    setDailyMatrixDate(e.target.value);
+                    loadDailyMatrix(e.target.value);
+                  }}
+                  className="bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs text-slate-800 font-medium focus:outline-none focus:border-blue-500 cursor-pointer"
+                  title="Filter Certificate Issued Date"
+                />
+              </div>
+
               <button
-                onClick={loadDailyMatrix}
+                onClick={() => loadDailyMatrix(dailyMatrixDate)}
                 disabled={dailyMatrixLoading}
                 className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition-colors cursor-pointer"
                 title="Refresh Matrix"
@@ -544,27 +561,27 @@ export default function ReportsPage() {
               <div className="overflow-x-auto rounded-xl border border-slate-300 shadow-2xs">
                 <table className="w-full text-center border-collapse text-xs">
                   
-                  {/* Sky / Steel Blue Header Row (#366092) */}
+                  {/* Steel Blue Header Row (#366092) */}
                   <thead>
                     <tr className="bg-[#366092] text-white font-bold text-[11px] uppercase tracking-wider">
                       <th className="p-3 text-left border-r border-[#2a4d77] whitespace-nowrap sticky left-0 bg-[#366092] z-10">
                         DEVICE
                       </th>
                       {dailyMatrix.locations.map(loc => (
-                        <th key={loc} className="p-3 border-r border-[#2a4d77] whitespace-nowrap min-w-[100px]">
+                        <th key={loc} className="p-3 border-r border-[#2a4d77] whitespace-nowrap min-w-[90px]">
                           {loc}
                         </th>
                       ))}
-                      <th className="p-3 border-r border-[#1e543e] whitespace-nowrap bg-[#0D5C3A] text-emerald-100">
+                      <th className="p-3 border-r border-[#1e543e] whitespace-nowrap min-w-[170px] bg-[#0D5C3A] text-emerald-100">
                         CERTIFICATES ISSUED TODAY
                       </th>
-                      <th className="p-3 border-r border-[#2a4d77] whitespace-nowrap bg-[#2c5380]">
-                        TOTAL INSTALLED
+                      <th className="p-3 border-r border-[#2a4d77] whitespace-nowrap min-w-[100px]">
+                        INSTALLED
                       </th>
-                      <th className="p-3 border-r border-[#2a4d77] whitespace-nowrap bg-[#2c5380]">
-                        IN-STOCK TOTAL
+                      <th className="p-3 border-r border-[#2a4d77] whitespace-nowrap min-w-[80px]">
+                        TOTAL
                       </th>
-                      <th className="p-3 whitespace-nowrap bg-[#2c5380]">
+                      <th className="p-3 whitespace-nowrap min-w-[90px]">
                         PURCHASED
                       </th>
                     </tr>
@@ -573,29 +590,29 @@ export default function ReportsPage() {
                   {/* Device Data Rows */}
                   <tbody className="divide-y divide-slate-200 bg-white">
                     {dailyMatrix.rows.map(r => (
-                      <tr key={r.device_name} className="hover:bg-blue-50/30 transition-colors">
+                      <tr key={r.device_name} className="hover:bg-blue-50/30 transition-colors font-medium">
                         <td className="p-3 text-left font-bold text-slate-900 border-r border-slate-200 sticky left-0 bg-white z-10 whitespace-nowrap">
                           {r.device_name}
                         </td>
                         {dailyMatrix.locations.map(loc => (
-                          <td key={loc} className="p-3 font-mono font-medium text-slate-700 border-r border-slate-200">
+                          <td key={loc} className="p-3 font-mono text-slate-800 border-r border-slate-200">
                             {r.locations[loc] ? (
                               <span className="font-bold text-slate-900">{r.locations[loc]}</span>
                             ) : (
-                              <span className="text-slate-300">—</span>
+                              <span className="text-slate-300"></span>
                             )}
                           </td>
                         ))}
                         <td className="p-3 font-mono font-bold text-emerald-900 bg-emerald-100/70 border-r border-slate-200">
                           {r.certificates_issued_today || 0}
                         </td>
-                        <td className="p-3 font-mono font-bold text-slate-700 bg-slate-50 border-r border-slate-200">
-                          {r.total_certificates_issued || 0}
+                        <td className="p-3 font-mono font-bold text-slate-900 border-r border-slate-200">
+                          {r.total_installed || 0}
                         </td>
-                        <td className="p-3 font-mono font-bold text-blue-900 bg-blue-50/40 border-r border-slate-200">
+                        <td className="p-3 font-mono font-bold text-slate-900 border-r border-slate-200">
                           {r.in_stock_total || 0}
                         </td>
-                        <td className="p-3 font-mono font-bold text-slate-800 bg-slate-50 border-r border-slate-200">
+                        <td className="p-3 font-mono font-bold text-slate-900">
                           {r.purchased_total || 0}
                         </td>
                       </tr>
@@ -605,24 +622,24 @@ export default function ReportsPage() {
                   {/* Vibrant Orange Summary Footer Row (#ED7D31) */}
                   <tfoot>
                     <tr className="bg-[#ED7D31] text-white font-bold text-[11px] shadow-sm">
-                      <td className="p-3 text-left border-r border-orange-400 sticky left-0 bg-[#ED7D31] z-10 uppercase tracking-wider">
+                      <td className="p-3 text-left border-r border-[#f4b183]/60 sticky left-0 bg-[#ED7D31] z-10 uppercase tracking-wider">
                         TOTAL
                       </td>
                       {dailyMatrix.locations.map(loc => (
-                        <td key={loc} className="p-3 border-r border-orange-400 font-mono whitespace-nowrap">
+                        <td key={loc} className="p-3 border-r border-[#f4b183]/60 font-mono whitespace-nowrap">
                           TOTAL = {dailyMatrix.columnTotals.locations[loc] || 0}
                         </td>
                       ))}
-                      <td className="p-3 border-r border-orange-400 font-mono whitespace-nowrap bg-emerald-800/90 text-emerald-100">
+                      <td className="p-3 border-r border-[#f4b183]/60 font-mono whitespace-nowrap bg-[#c65911]">
                         TOTAL = {dailyMatrix.columnTotals.certificates_issued_today || 0}
                       </td>
-                      <td className="p-3 border-r border-orange-400 font-mono whitespace-nowrap bg-orange-700/80">
-                        TOTAL = {dailyMatrix.columnTotals.total_certificates_issued || 0}
+                      <td className="p-3 border-r border-[#f4b183]/60 font-mono whitespace-nowrap">
+                        TOTAL = {dailyMatrix.columnTotals.total_installed || 0}
                       </td>
-                      <td className="p-3 border-r border-orange-400 font-mono whitespace-nowrap bg-orange-700/80">
+                      <td className="p-3 border-r border-[#f4b183]/60 font-mono whitespace-nowrap">
                         TOTAL = {dailyMatrix.columnTotals.in_stock_total || 0}
                       </td>
-                      <td className="p-3 font-mono whitespace-nowrap bg-orange-700/80">
+                      <td className="p-3 font-mono whitespace-nowrap">
                         TOTAL = {dailyMatrix.columnTotals.purchased_total || 0}
                       </td>
                     </tr>
@@ -679,9 +696,11 @@ export default function ReportsPage() {
                             <td className="p-3 text-slate-800 font-semibold">{item.device_name}</td>
                             <td className="p-3 font-mono font-bold text-slate-900">{item.vehicle_number}</td>
                             <td className="p-3 text-slate-900 font-medium">{item.customer_name}</td>
-                            <td className="p-3 font-mono text-slate-600">{item.customer_phone}</td>
-                            <td className="p-3 font-mono text-slate-500">{item.chasis_number}</td>
-                            <td className="p-3 font-mono text-slate-500">{item.engine_number}</td>
+                            <td className="p-3 font-mono font-medium text-emerald-800">
+                              {item.customer_phone && item.customer_phone !== '-' ? item.customer_phone : '-'}
+                            </td>
+                            <td className="p-3 font-mono text-slate-600">{item.chasis_number}</td>
+                            <td className="p-3 font-mono text-slate-600">{item.engine_number}</td>
                           </tr>
                         ))}
                       </tbody>

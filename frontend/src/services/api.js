@@ -13,6 +13,17 @@ export async function fetchDealerSummary(dealerName) {
   return res.json();
 }
 
+export async function updateDealerTarget(payload) {
+  const res = await fetch(`${API_BASE}/users/target`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) throw new Error(data.error || 'Failed to update dealer target');
+  return data;
+}
+
 export async function fetchDevices(params = {}) {
   const query = new URLSearchParams(params).toString();
   const res = await fetch(`${API_BASE}/devices?${query}`);
@@ -337,8 +348,9 @@ export async function fetchReportPreview(params = {}) {
   return res.json();
 }
 
-export async function fetchDailyDistributionReport() {
-  const res = await fetch(`${API_BASE}/reports/daily-distribution`);
+export async function fetchDailyDistributionReport(date = null) {
+  const url = date ? `${API_BASE}/reports/daily-distribution?date=${encodeURIComponent(date)}` : `${API_BASE}/reports/daily-distribution`;
+  const res = await fetch(url);
   if (!res.ok) throw new Error('Failed to fetch daily distribution report');
   return res.json();
 }

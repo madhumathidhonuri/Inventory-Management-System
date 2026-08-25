@@ -413,7 +413,35 @@ router.get('/stats', (req, res) => {
       }
     }
 
-    const dealerAllocations = Object.values(dealerMap).sort((a, b) => b.total - a.total);
+    const allUsers = db.prepare('SELECT id, name, monthly_target, device_targets FROM users').all();
+    const dealerAllocations = Object.values(dealerMap).map(d => {
+      const cleanName = d.dealer.replace(/\s*\(.*?\)/, '').trim().toLowerCase();
+      let matchedTarget = 50;
+      let matchedDevTargets = {};
+      for (const u of allUsers) {
+        if (d.dealer.toLowerCase().includes(u.name.toLowerCase()) || u.name.toLowerCase().includes(cleanName)) {
+          matchedTarget = u.monthly_target || 50;
+          try { matchedDevTargets = JSON.parse(u.device_targets || '{}'); } catch {}
+          break;
+        }
+      }
+      return {
+        ...d,
+        monthly_target: matchedTarget,
+        device_targets: matchedDevTargets
+      };
+    }).sort((a, b) => b.total - a.total);
+
+    let dealerTarget = 50;
+    let dealerDeviceTargets = {};
+    if (dealer_name) {
+      const cleanName = dealer_name.replace(/\s*\(.*?\)/, '').trim().toLowerCase();
+      const matched = allUsers.find(u => dealer_name.toLowerCase().includes(u.name.toLowerCase()) || u.name.toLowerCase().includes(cleanName));
+      if (matched) {
+        dealerTarget = matched.monthly_target || 50;
+        try { dealerDeviceTargets = JSON.parse(matched.device_targets || '{}'); } catch {}
+      }
+    }
 
     // 7. Upcoming 30-Day SIM & Warranty & Certificate Expiries Alert Center
     const todayDate = new Date();
@@ -486,38 +514,73 @@ router.get('/stats', (req, res) => {
     // Sort by soonest expiry
     upcomingExpiries.sort((a, b) => a.days_remaining - b.days_remaining);
 
-    // 8. Live Operations Activity Feed with Full Record Details
-    const recentActivityRaw = db.prepare(`
-      SELECT dh.*, dt.name as device_type_name, d.current_status, d.vendor_name, d.sim_number, d.additional_attributes
-      FROM device_history dh
-      JOIN devices d ON dh.device_id = d.id
-      JOIN device_types dt ON d.device_type_id = dt.id
-      ${whereClause}
-      ORDER BY dh.id DESC, dh.event_date DESC
-      LIMIT 50
-    `).all(...queryParams);
+    // 8. Live Operations Activity & Dealer Installation Feed
+    let recentActivityRaw = [];
+    if (dealer_name) {
+      recentActivityRaw = db.prepare(`
+        SELECT d.id as device_id, d.id, d.imei_number, dt.name as device_type_name, d.current_status, d.vendor_name, d.sim_number, d.additional_attributes, d.updated_at as event_date
+        FROM devices d
+        JOIN device_types dt ON d.device_type_id = dt.id
+        WHERE (d.current_holder_name LIKE ? OR d.additional_attributes LIKE ?)
+          AND (d.current_status = 'INSTALLED' OR d.additional_attributes LIKE '%VEHICLE%')
+        ORDER BY d.updated_at DESC, d.id DESC
+        LIMIT 60
+      `).all(`%${dealer_name}%`, `%${dealer_name}%`);
+    } else {
+      recentActivityRaw = db.prepare(`
+        SELECT dh.*, dt.name as device_type_name, d.current_status, d.vendor_name, d.sim_number, d.additional_attributes
+        FROM device_history dh
+        JOIN devices d ON dh.device_id = d.id
+        JOIN device_types dt ON d.device_type_id = dt.id
+        ${whereClause}
+        ORDER BY dh.id DESC, dh.event_date DESC
+        LIMIT 50
+      `).all(...queryParams);
+    }
 
     const recentActivity = recentActivityRaw.map(act => {
       let attrs = {};
       try { attrs = JSON.parse(act.additional_attributes || '{}'); } catch {}
 
-      const vehKey = Object.keys(attrs).find(k => /vehicle.*num|vehicle/i.test(k));
-      const custKey = Object.keys(attrs).find(k => /customer.*name|customer/i.test(k));
-      const phoneKey = Object.keys(attrs).find(k => /phone|contact|mobile/i.test(k));
-      const costKey = Object.keys(attrs).find(k => /^cost$/i.test(k) || /purchase_price/i.test(k));
-      const taxKey = Object.keys(attrs).find(k => /tax/i.test(k));
-      const payKey = Object.keys(attrs).find(k => /amount.*rec|payment/i.test(k));
+      const vehKey = Object.keys(attrs).find(k => /vehicle.*num|vehicle|veh_no|reg_no/i.test(k));
+      const vehNo = vehKey && attrs[vehKey] ? String(attrs[vehKey]).trim() : '-';
+
+      let custName = attrs['CUSTOMER NAME'] || attrs['CERTIFICATE ISSUED TO'] || attrs['PARTY NAME'] || attrs['Customer Name'] || '';
+      if (!custName && attrs['CUSTOMER'] && !/fuelview/i.test(String(attrs['CUSTOMER']))) {
+        custName = String(attrs['CUSTOMER']).trim();
+      }
+      if (!custName || custName === '-') custName = attrs['CUSTOMER'] || 'Valued Customer';
+
+      const phone = attrs['CUSTOMER PHONE NUMBER'] || attrs['CUSTOMER PHONE'] || attrs['CUSTOMER CONTACT'] || attrs['MOBILE'] || attrs['PHONE'] || attrs['customer_phone'] || '';
+
+      const rto = attrs['RTO LOCATION'] || attrs['RTO Location'] || attrs['STOCK PLACE'] || attrs['LOCATION'] || '';
+      const chasis = attrs['CHASIS NUMBER'] || attrs['CHASSIS NUMBER'] || attrs['chasis_number'] || '-';
+      const engine = attrs['ENGINE NUMBER'] || attrs['engine_number'] || '-';
+      const dateVal = attrs['CERTIFICATE ISSUED DATE'] || attrs['INSTALLATION DATE'] || attrs['DATE'] || act.event_date || '';
+
+      const costVal = extractCostValue(attrs, act.purchase_price) || 5000;
+      const isPaid = isPaymentReceived(attrs, act.current_status);
+      const username = attrs['USERNAME'] || attrs['Username'] || attrs['USER ID'] || attrs['Software User ID'] || '';
+      const password = attrs['PASSWORD'] || attrs['Password'] || '123456';
       const placeKey = Object.keys(attrs).find(k => /stock.*place|place/i.test(k));
 
       return {
         ...act,
+        id: act.device_id || act.id,
+        device_id: act.device_id || act.id,
         additional_attributes: attrs,
-        vehicle_number: (vehKey && attrs[vehKey]) || '-',
-        customer_name: (custKey && attrs[custKey]) || '-',
-        customer_phone: (phoneKey && attrs[phoneKey]) || '-',
-        cost: (costKey && attrs[costKey]) || '-',
-        tax: (taxKey && attrs[taxKey]) || '-',
-        payment_status: (payKey && attrs[payKey]) || 'PENDING',
+        vehicle_number: vehNo,
+        customer_name: custName,
+        customer_phone: phone && phone !== '-' ? String(phone).replace(/[^0-9]/g, '') : '',
+        rto_location: rto,
+        chasis_number: chasis,
+        engine_number: engine,
+        installation_date: dateVal,
+        cost: costVal,
+        tax: attrs['TAX'] || Math.round(costVal * 0.18),
+        payment_status: isPaid ? 'PAID' : 'PENDING',
+        username: username || 'User',
+        password: password,
         stock_place: (placeKey && attrs[placeKey]) || act.to_holder || 'Central Warehouse'
       };
     });
@@ -572,6 +635,8 @@ router.get('/stats', (req, res) => {
       success: true,
       data: {
         statusCounts,
+        monthly_target: dealerTarget,
+        device_targets: dealerDeviceTargets,
         available_months: availableMonths,
         selected_month: activeMonthFilter || 'ALL',
         financials: {

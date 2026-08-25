@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   UserCheck, Plus, Shield, Phone, Mail, MapPin, RefreshCw, Key, 
   Check, Copy, Edit2, Trash2, X, CheckCircle2, Lock, Eye, EyeOff, 
-  Sparkles, Sliders, Layers, DollarSign, Car, Building, Boxes
+  Sparkles, Sliders, Layers, DollarSign, Car, Building, Boxes, Target
 } from 'lucide-react';
 import { fetchUsers, createUser, updateUser, deleteUser, fetchDeviceTypes } from '../services/api';
 import { ROLES, DEFAULT_ROLE_COLUMNS } from '../context/AuthContext';
@@ -67,6 +67,7 @@ const STANDARD_COLUMN_GROUPS = [
 
 export default function UserManagementPage() {
   const [users, setUsers] = useState([]);
+  const [deviceTypes, setDeviceTypes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [copiedMsg, setCopiedMsg] = useState('');
   
@@ -85,6 +86,11 @@ export default function UserManagementPage() {
   const [selectedColumns, setSelectedColumns] = useState(DEFAULT_ROLE_COLUMNS.ADMIN_TEAM);
   const [submitting, setSubmitting] = useState(false);
 
+  // Target fields
+  const [targetMode, setTargetMode] = useState('OVERALL'); // 'OVERALL' | 'BY_DEVICE'
+  const [monthlyTarget, setMonthlyTarget] = useState(50);
+  const [deviceTargets, setDeviceTargets] = useState({});
+
   // Delete confirmation
   const [deletingUser, setDeletingUser] = useState(null);
 
@@ -95,9 +101,15 @@ export default function UserManagementPage() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const res = await fetchUsers();
-      if (res.success) {
-        setUsers(res.data || []);
+      const [usersRes, devTypesRes] = await Promise.all([
+        fetchUsers(),
+        fetchDeviceTypes().catch(() => ({ success: false }))
+      ]);
+      if (usersRes.success) {
+        setUsers(usersRes.data || []);
+      }
+      if (devTypesRes.success) {
+        setDeviceTypes(devTypesRes.data || []);
       }
     } catch (err) {
       console.error('Error fetching users:', err);
@@ -112,9 +124,12 @@ export default function UserManagementPage() {
     setPhone('');
     setEmail('');
     setPassword('123456');
-    setRole('ADMIN_TEAM');
+    setRole('DEALER');
     setRegion('All India');
-    setSelectedColumns(DEFAULT_ROLE_COLUMNS.ADMIN_TEAM);
+    setSelectedColumns(DEFAULT_ROLE_COLUMNS.DEALER || []);
+    setTargetMode('OVERALL');
+    setMonthlyTarget(50);
+    setDeviceTargets({});
     setShowModal(true);
   };
 
@@ -127,6 +142,13 @@ export default function UserManagementPage() {
     setRole(user.role || 'ADMIN_TEAM');
     setRegion(user.region || 'All India');
     
+    // Fitment targets
+    const dTargets = user.device_targets || {};
+    const hasDeviceTargets = Object.values(dTargets).some(v => Number(v) > 0);
+    setTargetMode(hasDeviceTargets ? 'BY_DEVICE' : 'OVERALL');
+    setMonthlyTarget(user.monthly_target || 50);
+    setDeviceTargets(dTargets);
+
     // If user has specific allowed_columns set, use them; otherwise use role defaults
     const currentCols = Array.isArray(user.allowed_columns) && user.allowed_columns.length > 0
       ? user.allowed_columns
@@ -199,6 +221,12 @@ export default function UserManagementPage() {
 
     setSubmitting(true);
     try {
+      let calculatedTarget = Number(monthlyTarget) || 50;
+      if (targetMode === 'BY_DEVICE') {
+        const sumDev = Object.values(deviceTargets).reduce((sum, val) => sum + (Number(val) || 0), 0);
+        if (sumDev > 0) calculatedTarget = sumDev;
+      }
+
       const payload = {
         name: name.trim(),
         phone: phone.trim() || `USR-${Date.now().toString().slice(-6)}`,
@@ -206,7 +234,9 @@ export default function UserManagementPage() {
         password: password.trim() || '123456',
         role,
         region: region.trim() || 'All India',
-        allowed_columns: selectedColumns
+        allowed_columns: selectedColumns,
+        monthly_target: calculatedTarget,
+        device_targets: targetMode === 'BY_DEVICE' ? deviceTargets : {}
       };
 
       if (editingUserId) {
@@ -317,6 +347,7 @@ export default function UserManagementPage() {
                   <th className="p-3.5">Team Member</th>
                   <th className="p-3.5">Assigned Role</th>
                   <th className="p-3.5">Login Email / Username</th>
+                  <th className="p-3.5">Monthly Target</th>
                   <th className="p-3.5">Password</th>
                   <th className="p-3.5">Editable Columns Access</th>
                   <th className="p-3.5 text-right">Actions</th>
@@ -333,6 +364,9 @@ export default function UserManagementPage() {
                   const allowedCols = Array.isArray(u.allowed_columns) && u.allowed_columns.length > 0
                     ? u.allowed_columns
                     : (DEFAULT_ROLE_COLUMNS[u.role] || []);
+
+                  const devTargets = typeof u.device_targets === 'object' && u.device_targets !== null ? u.device_targets : {};
+                  const devTargetEntries = Object.entries(devTargets).filter(([_, v]) => Number(v) > 0);
 
                   return (
                     <tr key={u.id} className="hover:bg-slate-50/80 transition-colors">
@@ -377,6 +411,25 @@ export default function UserManagementPage() {
                       {/* Email / Username */}
                       <td className="p-3.5 font-mono text-slate-600">
                         {u.email || u.phone}
+                      </td>
+
+                      {/* Monthly Target Quota */}
+                      <td className="p-3.5 whitespace-nowrap">
+                        <div className="space-y-1">
+                          <div className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-50 text-amber-900 border border-amber-200 rounded-md font-mono text-[11px] font-bold">
+                            <Target className="w-3 h-3 text-amber-600" />
+                            <span>{u.monthly_target || 50} units/mo</span>
+                          </div>
+                          {devTargetEntries.length > 0 && (
+                            <div className="flex flex-wrap gap-1">
+                              {devTargetEntries.map(([model, quota]) => (
+                                <span key={model} className="text-[9px] px-1.5 py-0.2 bg-slate-100 text-slate-700 rounded font-semibold border border-slate-200">
+                                  {model}: {quota}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       </td>
 
                       {/* Password */}
@@ -583,6 +636,98 @@ export default function UserManagementPage() {
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-900 focus:outline-none focus:border-slate-800 focus:bg-white"
                   />
                 </div>
+              </div>
+
+              {/* Monthly Fitment Target Configuration (Overall Stock vs By Device Type) */}
+              <div className="pt-3 border-t border-slate-200 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                      <Target className="w-4 h-4 text-amber-600" /> Monthly Fitment Target Quota
+                    </h4>
+                    <p className="text-[11px] text-slate-500">
+                      Set monthly installation target either as overall stock count or broken down by device type.
+                    </p>
+                  </div>
+
+                  {/* Mode Switcher */}
+                  <div className="flex items-center p-1 bg-slate-100 rounded-xl border border-slate-200 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => setTargetMode('OVERALL')}
+                      className={`px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                        targetMode === 'OVERALL'
+                          ? 'bg-white text-amber-900 shadow-2xs border border-amber-200'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      📦 Overall Stock
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTargetMode('BY_DEVICE')}
+                      className={`px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                        targetMode === 'BY_DEVICE'
+                          ? 'bg-white text-amber-900 shadow-2xs border border-amber-200'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      📱 By Device Type
+                    </button>
+                  </div>
+                </div>
+
+                {targetMode === 'OVERALL' ? (
+                  <div className="p-3 bg-amber-50/70 rounded-2xl border border-amber-200/80 flex items-center justify-between gap-4">
+                    <div>
+                      <div className="text-xs font-bold text-amber-950">Total Monthly Target Goal</div>
+                      <div className="text-[11px] text-amber-700">Applies across all fitted inventory models</div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        min="1"
+                        value={monthlyTarget}
+                        onChange={(e) => setMonthlyTarget(Math.max(1, Number(e.target.value)))}
+                        className="w-24 bg-white border border-amber-300 rounded-xl p-2 text-center text-xs font-mono font-bold text-amber-950 focus:outline-none focus:border-amber-600 shadow-2xs"
+                      />
+                      <span className="text-xs font-bold text-amber-800">Units / mo</span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-3 bg-amber-50/70 rounded-2xl border border-amber-200/80 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-amber-950">Set Target per Device Hardware Type:</span>
+                      <span className="text-xs font-mono font-bold text-amber-950 px-2 py-0.5 bg-amber-100 rounded-lg border border-amber-300">
+                        Total Sum: {Object.values(deviceTargets).reduce((a, b) => a + (Number(b) || 0), 0)} Units
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                      {(deviceTypes.length > 0 ? deviceTypes.map(d => d.name) : ['VOLTY', 'VAMOSYS', 'TRACKNOW']).map(model => (
+                        <div key={model} className="p-2.5 bg-white rounded-xl border border-amber-200 shadow-2xs space-y-1">
+                          <div className="text-[11px] font-bold text-slate-800 uppercase flex items-center justify-between">
+                            <span>{model}</span>
+                            <span className="text-[10px] text-amber-700 font-mono">Target</span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              type="number"
+                              min="0"
+                              placeholder="0"
+                              value={deviceTargets[model] !== undefined ? deviceTargets[model] : ''}
+                              onChange={(e) => {
+                                const val = Number(e.target.value) || 0;
+                                setDeviceTargets(prev => ({ ...prev, [model]: val }));
+                              }}
+                              className="w-full bg-slate-50 border border-slate-200 rounded-lg p-1.5 text-center text-xs font-mono font-bold text-slate-900 focus:outline-none focus:border-amber-600 focus:bg-white"
+                            />
+                            <span className="text-[10px] text-slate-500 font-bold">units</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Column Edit Access Control Section */}
