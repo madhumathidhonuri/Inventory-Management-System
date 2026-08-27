@@ -222,13 +222,24 @@ export default function ReportsPage() {
     {
       id: 'installed',
       title: 'Installed Devices Master Register',
-      description: 'Export all devices with vehicle numbers and customer details from your active inventory.',
+      description: 'Export all installed devices in exact uploaded column order with vehicle and customer details.',
       icon: Car,
       color: 'text-emerald-600',
       bg: 'bg-emerald-50',
       border: 'border-emerald-200',
       badge: `${options.stats.installedDevices} Installed Units`,
       badgeColor: 'bg-emerald-100 text-emerald-800'
+    },
+    {
+      id: 'uninstalled',
+      title: 'In-Stock Devices Master Register',
+      description: 'Export all available in-stock / uninstalled units in exact uploaded device column order.',
+      icon: Boxes,
+      color: 'text-blue-600',
+      bg: 'bg-blue-50',
+      border: 'border-blue-200',
+      badge: `${options.stats.uninstalledDevices} In-Stock Units`,
+      badgeColor: 'bg-blue-100 text-blue-800'
     },
     {
       id: 'purchases',

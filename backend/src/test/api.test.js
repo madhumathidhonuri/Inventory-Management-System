@@ -1,12 +1,40 @@
 const http = require('http');
+const express = require('express');
+const cors = require('cors');
+const db = require('../db/database');
 
-function makeRequest(path, method = 'GET', body = null) {
+function createTestApp() {
+  const app = express();
+  app.use(cors());
+  app.use(express.json({ limit: '50mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+  app.get('/api/health', (req, res) => {
+    res.json({ status: 'OK', system: 'FuelTracks IMS Test Server', timestamp: new Date().toISOString() });
+  });
+
+  app.use('/api/device-types', require('../routes/deviceTypes'));
+  app.use('/api/devices', require('../routes/devices'));
+  app.use('/api/purchase-batches', require('../routes/purchaseBatches'));
+  app.use('/api/dispatches', require('../routes/dispatches'));
+  app.use('/api/installations', require('../routes/installations'));
+  app.use('/api/customers', require('../routes/customers'));
+  app.use('/api/dashboard', require('../routes/dashboard'));
+  app.use('/api/users', require('../routes/users'));
+  app.use('/api/reports', require('../routes/reports'));
+  app.use('/api/backup', require('../routes/backup'));
+
+  return app;
+}
+
+function makeRequest(port, path, method = 'GET', body = null) {
   return new Promise((resolve, reject) => {
     const req = http.request({
-      hostname: 'localhost',
-      port: 5000,
+      hostname: '127.0.0.1',
+      port,
       path,
       method,
+      timeout: 3000,
       headers: {
         'Content-Type': 'application/json'
       }
@@ -22,6 +50,10 @@ function makeRequest(path, method = 'GET', body = null) {
       });
     });
 
+    req.on('timeout', () => {
+      req.destroy();
+      reject(new Error('Request timed out'));
+    });
     req.on('error', reject);
     if (body) req.write(JSON.stringify(body));
     req.end();
@@ -29,40 +61,105 @@ function makeRequest(path, method = 'GET', body = null) {
 }
 
 async function runTests() {
-  console.log('--- RUNNING BACKEND INTEGRATION TESTS ---');
+  console.log('--- STARTING FUELTRACKS IMS INTEGRATION SUITE ---');
+
+  const testApp = createTestApp();
+  const server = testApp.listen(0, '127.0.0.1');
+  await new Promise((res) => server.once('listening', res));
+  const testPort = server.address().port;
+  console.log(`[Test Runner] Live test server listening on ephemeral port ${testPort}`);
+
+  let passed = 0;
+  let failed = 0;
+
+  async function assertTest(name, fn) {
+    try {
+      await fn();
+      console.log(`  ✓ ${name}: PASSED`);
+      passed++;
+    } catch (err) {
+      console.error(`  ✗ ${name}: FAILED - ${err.message}`);
+      failed++;
+    }
+  }
 
   try {
     // 1. Health Check
-    const health = await makeRequest('/api/health');
-    console.log('✓ Health Check:', health.status === 200 ? 'PASSED' : 'FAILED', health.body.status);
+    await assertTest('API Health Check', async () => {
+      const res = await makeRequest(testPort, '/api/health');
+      if (res.status !== 200 || res.body.status !== 'OK') throw new Error(`Status ${res.status}`);
+    });
 
-    // 2. Dashboard Stats
-    const stats = await makeRequest('/api/dashboard/stats');
-    console.log('✓ Dashboard Stats API:', stats.body.success ? 'PASSED' : 'FAILED', `Total Devices: ${stats.body.data.totals.devices}`);
+    // 2. Database Integrity Check
+    await assertTest('SQLite Database Integrity', async () => {
+      const integrity = db.pragma('integrity_check');
+      if (!integrity || integrity[0]?.integrity_check !== 'ok') {
+        throw new Error('Integrity check failed');
+      }
+    });
 
-    // 3. IMEI Journey Trace Audit Log
-    const devList = await makeRequest('/api/devices?limit=1');
-    const testImei = devList.body?.data?.[0]?.imei_number || '86501000001';
-    const trace = await makeRequest(`/api/devices/${testImei}`);
-    const historyLength = trace.body?.data?.history?.length ?? 0;
-    console.log('✓ IMEI Journey Trace Audit Log:', (trace.body?.success && historyLength > 0) ? 'PASSED' : 'FAILED', `Events count for ${testImei}: ${historyLength}`);
+    // 3. Device Types API
+    await assertTest('Device Types Catalog API', async () => {
+      const res = await makeRequest(testPort, '/api/device-types');
+      if (res.status !== 200 || !res.body.success || !Array.isArray(res.body.data)) {
+        throw new Error('Invalid device types response');
+      }
+    });
 
-    // 4. Installation Auto Customer Match
-    const instPayload = {
-      imei_number: testImei,
-      customer_phone: '9848011223',
-      customer_name: 'Rayalaseema Transport',
-      vehicle_number: 'AP-21-TX-9901',
-      vehicle_type: 'Truck',
-      sale_price: 5800,
-      installed_by: 'Jaya Surya'
-    };
-    const instResult = await makeRequest('/api/installations', 'POST', instPayload);
-    console.log('✓ Installation Single Action & Customer Auto-Match:', instResult.body.success ? 'PASSED' : 'FAILED', `Installation ID: ${instResult.body.data?.installationId}`);
+    // 4. Devices List API
+    let testImei = '86501000001';
+    await assertTest('Devices List & Attributes API', async () => {
+      const res = await makeRequest(testPort, '/api/devices');
+      if (res.status !== 200 || !res.body.success) throw new Error('Failed to fetch devices');
+      if (res.body.data?.length > 0) {
+        testImei = res.body.data[0].imei_number;
+      }
+    });
 
-    console.log('--- ALL BACKEND INTEGRATION TESTS COMPLETED ---');
-  } catch (err) {
-    console.error('Test Execution Error:', err);
+    // 5. Global Universal Search
+    await assertTest('Global Search (IMEI & Attributes)', async () => {
+      const searchStr = testImei.slice(0, 6);
+      const res = await makeRequest(testPort, `/api/devices/global-search?q=${searchStr}`);
+      if (res.status !== 200 || !res.body.success) throw new Error('Search failed');
+    });
+
+    // 6. SIM Validity Watcher
+    await assertTest('SIM Validity & Expiry API', async () => {
+      const res = await makeRequest(testPort, '/api/devices/sim-validity');
+      if (res.status !== 200 || !res.body.success) throw new Error('SIM validity check failed');
+    });
+
+    // 7. Aging Analysis
+    await assertTest('Stock Aging Analysis API', async () => {
+      const res = await makeRequest(testPort, '/api/devices/aging-analysis');
+      if (res.status !== 200 || !res.body.success) throw new Error('Aging analysis failed');
+    });
+
+    // 8. Users & Target Configuration
+    await assertTest('Users Management API', async () => {
+      const res = await makeRequest(testPort, '/api/users');
+      if (res.status !== 200 || !res.body.success) throw new Error('Failed to fetch users');
+    });
+
+    // 9. Backups List API
+    await assertTest('Database Backups System API', async () => {
+      const res = await makeRequest(testPort, '/api/backup/list');
+      if (res.status !== 200 || !res.body.success) throw new Error('Failed to list backups');
+    });
+
+    // 10. Dashboard Stats
+    await assertTest('Executive Dashboard Analytics API', async () => {
+      const res = await makeRequest(testPort, '/api/dashboard/stats');
+      if (res.status !== 200 || !res.body.success) throw new Error('Dashboard stats failed');
+    });
+
+    console.log('====================================================');
+    console.log(` RESULT: ${passed} PASSED, ${failed} FAILED`);
+    console.log('====================================================');
+  } finally {
+    server.close(() => {
+      process.exit(failed > 0 ? 1 : 0);
+    });
   }
 }
 

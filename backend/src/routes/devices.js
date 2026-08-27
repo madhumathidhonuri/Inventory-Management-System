@@ -58,206 +58,6 @@ router.get('/', (req, res) => {
   }
 });
 
-// GET /api/devices/aging-analysis - Dead-Stock & Stock Age Analysis
-router.get('/aging-analysis', (req, res) => {
-  try {
-    const devices = db.prepare(`
-      SELECT d.*, dt.name as device_type_name
-      FROM devices d
-      JOIN device_types dt ON d.device_type_id = dt.id
-      WHERE d.current_status != 'INSTALLED'
-    `).all();
-
-    const now = new Date();
-    const fresh = [];
-    const aging = [];
-    const stale = [];
-
-    devices.forEach(d => {
-      let attrs = {};
-      try { attrs = JSON.parse(d.additional_attributes || '{}'); } catch {}
-      const dateStr = d.purchase_date || attrs['STOCK PLACE DATE'] || d.created_at;
-      const itemDate = new Date(dateStr);
-      const ageDays = !isNaN(itemDate.getTime()) ? Math.max(0, Math.floor((now - itemDate) / (1000 * 86400))) : 0;
-
-      const record = {
-        id: d.id,
-        imei_number: d.imei_number,
-        device_type_name: d.device_type_name,
-        current_holder_name: d.current_holder_name || attrs['STOCK PLACE'] || 'Central Warehouse',
-        current_status: d.current_status,
-        age_days: ageDays,
-        purchase_date: dateStr
-      };
-
-      if (ageDays > 60) {
-        stale.push(record);
-      } else if (ageDays >= 30) {
-        aging.push(record);
-      } else {
-        fresh.push(record);
-      }
-    });
-
-    res.json({
-      success: true,
-      summary: {
-        totalUninstalled: devices.length,
-        staleCount: stale.length,
-        agingCount: aging.length,
-        freshCount: fresh.length
-      },
-      stale: stale.sort((a, b) => b.age_days - a.age_days),
-      aging: aging.sort((a, b) => b.age_days - a.age_days),
-      fresh: fresh.sort((a, b) => b.age_days - a.age_days)
-    });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// GET /api/devices/sim-validity - SIM Card Validity & Telecom Expiry Watcher
-router.get('/sim-validity', (req, res) => {
-  try {
-    const devices = db.prepare(`
-      SELECT d.*, dt.name as device_type_name
-      FROM devices d
-      JOIN device_types dt ON d.device_type_id = dt.id
-      WHERE (d.sim_number IS NOT NULL AND d.sim_number != '') OR d.sim_expiry_date IS NOT NULL
-    `).all();
-
-    const now = new Date();
-    const expiringSoon = [];
-    const expired = [];
-    const active = [];
-    const carrierCounts = {};
-
-    devices.forEach(d => {
-      let attrs = {};
-      try { attrs = JSON.parse(d.additional_attributes || '{}'); } catch {}
-
-      const carrier = d.sim_operator || attrs['SIM OPERATOR'] || attrs['NETWORK'] || 'Airtel / BSNL / Vi';
-      carrierCounts[carrier] = (carrierCounts[carrier] || 0) + 1;
-
-      const expiryStr = d.sim_expiry_date || attrs['SIM EXPIRY'] || attrs['VALIDITY'];
-      let daysRemaining = null;
-      if (expiryStr) {
-        const expDate = new Date(expiryStr);
-        if (!isNaN(expDate.getTime())) {
-          daysRemaining = Math.ceil((expDate - now) / (1000 * 86400));
-        }
-      }
-
-      const item = {
-        id: d.id,
-        imei_number: d.imei_number,
-        sim_number: d.sim_number,
-        sim_operator: carrier,
-        sim_expiry_date: expiryStr,
-        days_remaining: daysRemaining,
-        current_holder_name: d.current_holder_name,
-        current_status: d.current_status,
-        customer_name: attrs['CUSTOMER NAME'] || attrs['PARTY NAME'] || '',
-        vehicle_number: attrs['VEHICLE NO'] || attrs['REG NO'] || ''
-      };
-
-      if (daysRemaining !== null) {
-        if (daysRemaining < 0) {
-          expired.push(item);
-        } else if (daysRemaining <= 30) {
-          expiringSoon.push(item);
-        } else {
-          active.push(item);
-        }
-      } else {
-        active.push(item);
-      }
-    });
-
-    res.json({
-      success: true,
-      summary: {
-        totalSims: devices.length,
-        expiringSoonCount: expiringSoon.length,
-        expiredCount: expired.length,
-        activeCount: active.length
-      },
-      data: {
-        carrier_counts: carrierCounts,
-        expiring_soon: expiringSoon.sort((a, b) => (a.days_remaining || 0) - (b.days_remaining || 0)),
-        expired: expired.sort((a, b) => (a.days_remaining || 0) - (b.days_remaining || 0)),
-        active: active
-      }
-    });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// POST /api/devices/:id/rma-update - Update RMA stage and vendor tracking
-router.post('/:id/rma-update', (req, res) => {
-  try {
-    const { id } = req.params;
-    const { rma_status, rma_vendor_name, rma_replacement_imei, rma_notes, performed_by = 'Super Admin' } = req.body;
-
-    const device = db.prepare(`SELECT * FROM devices WHERE id = ?`).get(id);
-    if (!device) return res.status(404).json({ success: false, error: 'Device not found' });
-
-    let newStatus = device.current_status;
-    if (rma_status === 'FAULTY_REPORTED' || rma_status === 'RECEIVED_LAB' || rma_status === 'SENT_TO_OEM') {
-      newStatus = 'FAULTY';
-    } else if (rma_status === 'REPLACED') {
-      newStatus = 'IN_WAREHOUSE';
-    }
-
-    db.prepare(`
-      UPDATE devices
-      SET rma_status = ?, rma_vendor_name = ?, rma_replacement_imei = ?, rma_notes = ?, rma_date = CURRENT_TIMESTAMP, current_status = ?, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `).run(rma_status, rma_vendor_name || null, rma_replacement_imei || null, rma_notes || null, newStatus, id);
-
-    // Audit log entry
-    db.prepare(`
-      INSERT INTO inventory_audit_logs (device_id, imei_number, event_type, performed_by, old_values, new_values, remarks)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      id,
-      device.imei_number,
-      'RMA_UPDATE',
-      performed_by,
-      JSON.stringify({ rma_status: device.rma_status }),
-      JSON.stringify({ rma_status, rma_vendor_name, rma_replacement_imei }),
-      rma_notes || `RMA status transitioned to ${rma_status}`
-    );
-
-    res.json({ success: true, message: `RMA updated to ${rma_status}` });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// POST /api/devices/bulk-sim-update - Bulk update SIM details and validity
-router.post('/bulk-sim-update', (req, res) => {
-  try {
-    const { updates = [], performed_by = 'Super Admin' } = req.body;
-    const stmt = db.prepare(`
-      UPDATE devices
-      SET sim_operator = ?, sim_expiry_date = ?, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ? OR imei_number = ?
-    `);
-
-    db.transaction(() => {
-      for (const u of updates) {
-        stmt.run(u.sim_operator || null, u.sim_expiry_date || null, u.id || null, u.imei_number || null);
-      }
-    })();
-
-    res.json({ success: true, count: updates.length });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
 // GET /api/devices/global-search - Universal search across IMEI, Vehicle, Customer, Phone, SIM, and Stock Place
 router.get('/global-search', (req, res) => {
   const { q } = req.query;
@@ -586,6 +386,21 @@ router.post('/:id/rma-update', (req, res) => {
       performed_by,
       `RMA Stage Updated: ${rma_status}. Notes: ${rma_notes || 'N/A'}${rma_replacement_imei ? ` | Replacement IMEI: ${rma_replacement_imei}` : ''}`
     );
+
+    try {
+      db.prepare(`
+        INSERT INTO inventory_audit_logs (device_id, imei_number, event_type, performed_by, old_values, new_values, remarks)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        device.id,
+        device.imei_number,
+        'RMA_UPDATE',
+        performed_by,
+        JSON.stringify({ rma_status: device.rma_status }),
+        JSON.stringify({ rma_status, rma_vendor_name, rma_replacement_imei }),
+        rma_notes || `RMA status transitioned to ${rma_status}`
+      );
+    } catch (e) {}
 
     res.json({ success: true, message: `RMA status updated to ${rma_status}` });
   } catch (err) {

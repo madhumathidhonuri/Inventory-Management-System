@@ -1120,11 +1120,22 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
     const activeTypeName = activeDt ? activeDt.name : (batchFilter ? 'Batch_Stock' : 'Inventory_Stock');
     const fileName = `${activeTypeName.replace(/\s+/g, '_')}_List_${today}.xlsx`;
 
+    // Determine final ordered columns
+    const isSingleTypeView = Boolean(typeFilter || batchFilter || (filteredDevices.length > 0 && new Set(filteredDevices.map(d => d.device_type_id)).size === 1));
+    let exportColumns = [];
+
+    if (isSingleTypeView) {
+      // Exactly the uploaded Excel sheet columns in their 100% original sequence
+      exportColumns = [...displayedColumns];
+    } else {
+      exportColumns = ['Device IMEI', 'Device Type', ...displayedColumns];
+    }
+
     await exportDevicesToExcel(
       fileName,
       activeTypeName,
       filteredDevices,
-      customColumns,
+      exportColumns,
       '1E3A8A' // Royal Navy Blue Header
     );
   };

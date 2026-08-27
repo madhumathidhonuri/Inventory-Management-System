@@ -1,6 +1,40 @@
 const db = require('./database');
+const path = require('path');
+const fs = require('fs');
 
-function seedDatabase() {
+async function seedDatabase() {
+  // 1. Strict Production Guard
+  if (process.env.NODE_ENV === 'production' && process.env.FORCE_RESET_DATABASE !== 'true') {
+    console.error('❌ FATAL: Cannot run seed script in PRODUCTION mode! Operation aborted to prevent data loss.');
+    process.exit(1);
+  }
+
+  // 2. Existing Data Protection Check
+  try {
+    const devCount = db.prepare('SELECT count(*) as c FROM devices').get()?.c || 0;
+    const custCount = db.prepare('SELECT count(*) as c FROM customers').get()?.c || 0;
+
+    if ((devCount > 0 || custCount > 0) && process.env.FORCE_RESET_DATABASE !== 'true') {
+      console.warn('========================================================================');
+      console.warn(`⚠️  DATA PROTECTION WARNING: Your database contains ${devCount} devices and ${custCount} customers.`);
+      console.warn('   Running seed will WIPE all your entered data and replace it with dummy stock.');
+      console.warn('   To run normally without resetting data, use: npm run dev');
+      console.warn('   If you REALLY want to wipe and re-seed, run:');
+      console.warn('   $env:FORCE_RESET_DATABASE="true"; npm run seed  (PowerShell)');
+      console.warn('   or set FORCE_RESET_DATABASE=true npm run seed    (Linux/Mac)');
+      console.warn('========================================================================');
+      return;
+    }
+
+    // 3. Automated Pre-Seed Snapshot Backup
+    if (db.createBackup) {
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      await db.createBackup(`inventory_pre_seed_backup_${timestamp}.db`);
+    }
+  } catch (e) {
+    console.warn('Safety pre-check info:', e.message);
+  }
+
   console.log('Seeding database with Jaya Surya Kurnool Dealer stock...');
 
   // Clear existing data

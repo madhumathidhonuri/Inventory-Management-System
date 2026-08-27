@@ -625,6 +625,7 @@ router.get('/export', (req, res) => {
       // Original List Exact Columns Format
       let queryParams = { ...req.query };
       if (type === 'installed') queryParams.installed_filter = 'installed';
+      if (type === 'uninstalled' || type === 'instock') queryParams.installed_filter = 'uninstalled';
 
       const devices = queryFilteredDevices(queryParams);
 
@@ -639,16 +640,51 @@ router.get('/export', (req, res) => {
       }
       if (stock_place) nameParts.push(stock_place.replace(/[^a-zA-Z0-9_-]/g, '_'));
       if (installed_filter === 'installed' || type === 'installed') nameParts.push('installed');
-      if (installed_filter === 'uninstalled') nameParts.push('uninstalled');
+      if (installed_filter === 'uninstalled' || type === 'uninstalled' || type === 'instock') nameParts.push('instock');
       nameParts.push(new Date().toISOString().split('T')[0]);
 
       filename = nameParts.join('_');
-      sheetName = (stock_place || 'Sheet1').substring(0, 30);
+      sheetName = (stock_place || 'StockReport').substring(0, 30);
 
-      // Discover only the exact keys that exist in the filtered devices
+      // 1. Discover target Device Type ID to get exact uploaded Excel column template order
+      let targetDeviceTypeId = device_type_id || null;
+      if (!targetDeviceTypeId && purchase_batch_id) {
+        const batch = db.prepare('SELECT device_type_id FROM purchase_batches WHERE id = ?').get(purchase_batch_id);
+        if (batch && batch.device_type_id) targetDeviceTypeId = batch.device_type_id;
+      }
+      if (!targetDeviceTypeId && devices.length > 0) {
+        const uniqueTypeIds = new Set(devices.map(d => d.device_type_id).filter(Boolean));
+        if (uniqueTypeIds.size === 1) {
+          targetDeviceTypeId = Array.from(uniqueTypeIds)[0];
+        }
+      }
+
       const keysOrder = [];
       const seenKeys = new Set();
 
+      // If a specific device type is identified, seed keysOrder with exact template columns from upload
+      if (targetDeviceTypeId) {
+        const dtRecord = db.prepare('SELECT template_columns, custom_fields FROM device_types WHERE id = ?').get(targetDeviceTypeId);
+        if (dtRecord) {
+          let cols = [];
+          try {
+            cols = JSON.parse(dtRecord.template_columns || dtRecord.custom_fields || '[]');
+          } catch {
+            cols = [];
+          }
+          if (Array.isArray(cols)) {
+            cols.forEach(c => {
+              const trimmed = String(c || '').trim();
+              if (trimmed && trimmed !== 'original_row' && !seenKeys.has(trimmed)) {
+                seenKeys.add(trimmed);
+                keysOrder.push(trimmed);
+              }
+            });
+          }
+        }
+      }
+
+      // 2. Discover any additional keys that exist in the filtered devices
       devices.forEach(dev => {
         let attrs = {};
         try { attrs = JSON.parse(dev.additional_attributes || '{}'); } catch {}
@@ -660,7 +696,12 @@ router.get('/export', (req, res) => {
         });
       });
 
-      const existingImeiKey = keysOrder.find(k => /^imei|device.*imei|imei.*no/i.test(k));
+      // If mixed device types and no columns discovered, supply standard columns
+      if (keysOrder.length === 0) {
+        keysOrder.push('Device IMEI', 'Device Type', 'SIM Number', 'Status', 'Current Location', 'Vendor', 'Purchase Price');
+      }
+
+      const existingImeiKey = keysOrder.find(k => /^imei|device.*imei|imei.*no|^uid$/i.test(k));
 
       data = devices.map((dev) => {
         let attrs = {};
@@ -668,20 +709,49 @@ router.get('/export', (req, res) => {
 
         const row = {};
 
-        if (!existingImeiKey) {
-          row['IMEI'] = String(dev.imei_number);
+        // If no explicit IMEI column is in the template and multiple types exist, ensure Device IMEI is available
+        if (!existingImeiKey && !targetDeviceTypeId && !keysOrder.includes('Device IMEI')) {
+          row['Device IMEI'] = String(dev.imei_number);
         }
 
         keysOrder.forEach(key => {
           let val = attrs[key];
-          if (/date/i.test(key)) {
+
+          // Case-insensitive fallback lookup in attrs
+          if (val === undefined || val === null || String(val).trim() === '') {
+            const cleanTarget = key.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+            const matchingAttrKey = Object.keys(attrs).find(k => k.trim().toLowerCase().replace(/[^a-z0-9]/g, '') === cleanTarget);
+            if (matchingAttrKey && attrs[matchingAttrKey] !== undefined && attrs[matchingAttrKey] !== null) {
+              val = attrs[matchingAttrKey];
+            }
+          }
+
+          // Fallbacks to top-level device properties
+          if (val === undefined || val === null || String(val).trim() === '') {
+            if (key === 'Device IMEI' || key === existingImeiKey || /^imei|device.*imei|imei.*no|^serial.*number$|^vltd\s*sno$/i.test(key.trim())) {
+              val = dev.imei_number || '';
+            } else if (key === 'Device Type' || /^device\s*model|^device\s*name$/i.test(key.trim())) {
+              val = dev.device_type_name || '';
+            } else if (/^sim\s*1?$|^simno1?$|^sim\s*number$|^iccid$/i.test(key.trim())) {
+              val = dev.sim_number || '';
+            } else if (/^price$|^purchase\s*price$|^cost$/i.test(key.trim())) {
+              val = dev.purchase_price !== null && dev.purchase_price !== undefined ? dev.purchase_price : '';
+            } else if (/^vendor$|^vendor\s*name$/i.test(key.trim())) {
+              val = dev.vendor_name || '';
+            } else if (/^stock\s*place$|^current\s*location$|^holder$/i.test(key.trim())) {
+              val = dev.current_holder_name || '';
+            } else if (/^status$|^current\s*status$/i.test(key.trim())) {
+              val = dev.current_status || '';
+            } else {
+              val = '';
+            }
+          }
+
+          if (/date|month|validity/i.test(key)) {
             val = formatExcelDate(val);
           }
-          if (key === existingImeiKey) {
-            row[key] = String(attrs[key] || dev.imei_number);
-          } else {
-            row[key] = val !== undefined ? val : '';
-          }
+
+          row[key] = val !== undefined && val !== null ? val : '';
         });
 
         return row;

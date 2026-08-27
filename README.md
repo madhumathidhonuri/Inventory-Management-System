@@ -114,6 +114,39 @@ npm run dev
 
 ---
 
+## 🏭 Production Deployment & Durability
+
+### 1. Build Production Frontend
+```bash
+npm run build
+```
+*(Compiles and code-splits React application into optimized static assets in `frontend/dist`).*
+
+### 2. Start Production Server
+```bash
+npm start
+```
+*(Runs Express server on port `5000`, serving both `/api/*` REST endpoints and the compiled single-page web app).*
+
+### 3. Process Management (PM2)
+```bash
+# Start with pre-configured ecosystem config
+pm2 start ecosystem.config.js
+
+# Save process list for automatic server reboot recovery
+pm2 save
+pm2 startup
+```
+
+### 4. Zero Data Loss & Storage Durability
+- **Crash-Safe SQLite WAL Mode**: Configured with `synchronous = NORMAL` and aggressive page autocheckpoints.
+- **Graceful Shutdown Interceptor**: Intercepts `SIGINT`, `SIGTERM`, and process exits to flush cached WAL frames to disk before terminating.
+- **Automated Snapshots**: Daily non-blocking SQLite `.db` backups saved automatically in `/backend/data/backups/`.
+- **Live Database Download**: Download live database snapshots anytime via `GET /api/backup/download-live`.
+- **Accidental Reset Guard**: Destructive scripts (`seed.js`, `clear.js`) are hard-locked against wiping existing device records without explicit `FORCE_RESET_DATABASE=true` flags and blocked completely in `production`.
+
+---
+
 ## 🔑 Default Administrator Credentials
 
 | Role | Username / Email | Password | Access Level |
@@ -127,16 +160,17 @@ npm run dev
 ```
 Inventory-Management-System/
 ├── backend/
-│   ├── data/                 # SQLite database storage (inventory.db)
+│   ├── data/                 # SQLite database storage & /backups/
 │   ├── src/
-│   │   ├── db/               # DB schema, migrations, and seed scripts
-│   │   ├── routes/           # REST API routes (devices, dashboard, dispatches, users, reports, etc.)
+│   │   ├── db/               # DB schema, migrations, backups, and seed scripts
+│   │   ├── routes/           # REST API routes (devices, dashboard, dispatches, backup, users, etc.)
 │   │   ├── scripts/          # Database maintenance and cleanup utilities
-│   │   └── index.js          # Express server entrypoint
+│   │   ├── test/             # Automated integration test runner
+│   │   └── index.js          # Express server entrypoint & graceful shutdown
 │   └── package.json
 ├── frontend/
 │   ├── src/
-│   │   ├── components/       # Header, Sidebar, Delivery Challan, RMA Modal, Scanner Modal, Journey Drawer
+│   │   ├── components/       # Delivery Challan, RMA Modal, Scanner, Journey Drawer
 │   │   ├── context/          # AuthContext & Column Permission Matrix
 │   │   ├── pages/            # Dashboard, Inventory, Dispatches, Upload, CRM, Installations, Reports
 │   │   ├── services/         # REST API client services
@@ -145,6 +179,8 @@ Inventory-Management-System/
 │   │   └── main.jsx          # React DOM entrypoint
 │   ├── index.html
 │   └── package.json
+├── ecosystem.config.js       # PM2 process manager configuration
+├── .env.example              # Environment variables template
 ├── package.json              # Root workspace orchestrator
 └── README.md                 # Project documentation
 ```
@@ -153,3 +189,4 @@ Inventory-Management-System/
 
 ## 📄 License
 FuelTracks Technologies — Proprietary Inventory & Fleet Management System.
+

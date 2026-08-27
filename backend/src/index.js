@@ -32,6 +32,7 @@ app.use('/api/customers', require('./routes/customers'));
 app.use('/api/dashboard', require('./routes/dashboard'));
 app.use('/api/users', require('./routes/users'));
 app.use('/api/reports', require('./routes/reports'));
+app.use('/api/backup', require('./routes/backup'));
 
 // Serve static React frontend bundle in production
 const frontendDistPath = path.join(__dirname, '../../frontend/dist');
@@ -59,9 +60,32 @@ app.use((err, req, res, next) => {
   res.status(500).json({ success: false, error: err.message || 'Internal Server Error' });
 });
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`=======================================================`);
   console.log(` FuelTracks IMS API Server running on port ${PORT}`);
   console.log(` Health check: http://localhost:${PORT}/api/health`);
   console.log(`=======================================================`);
 });
+
+// Graceful shutdown handling for server
+function gracefulShutdown(signal) {
+  console.log(`\n[Server] Received ${signal}. Stopping HTTP server...`);
+  server.close(() => {
+    console.log('[Server] HTTP connections closed.');
+    const db = require('./db/database');
+    if (db.gracefulClose) {
+      db.gracefulClose(signal);
+    }
+    process.exit(0);
+  });
+
+  // Force close if connections remain open after 5 seconds
+  setTimeout(() => {
+    console.warn('[Server] Forcefully closing pending connections.');
+    process.exit(0);
+  }, 5000).unref();
+}
+
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+

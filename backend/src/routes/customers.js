@@ -117,9 +117,12 @@ router.put('/:id', (req, res) => {
 router.delete('/:id', (req, res) => {
   const { id } = req.params;
   try {
-    db.prepare('DELETE FROM reminders WHERE customer_id = ?').run(id);
-    db.prepare('DELETE FROM installations WHERE customer_id = ?').run(id);
-    db.prepare('DELETE FROM customers WHERE id = ?').run(id);
+    const deleteTx = db.transaction(() => {
+      db.prepare('DELETE FROM reminders WHERE customer_id = ?').run(id);
+      db.prepare('DELETE FROM installations WHERE customer_id = ?').run(id);
+      db.prepare('DELETE FROM customers WHERE id = ?').run(id);
+    });
+    deleteTx();
     res.json({ success: true, message: 'Customer record deleted successfully' });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });

@@ -86,8 +86,8 @@ function getAttrValue(attrs = {}, patterns = []) {
 }
 
 /**
- * Exports complete live inventory dataset (e.g. Vamo list or filtered stock)
- * with all real IMEI numbers, VLTD SNo, SIM 1, SIM 2, Customer, and custom columns intact.
+ * Exports complete live inventory dataset (e.g. In-Stock, Installed, Uninstalled, or Device Type List)
+ * in the 100% exact column order of the uploaded Excel sheet based on the device.
  */
 export async function exportDevicesToExcel(filename, sheetName, devices = [], customColumns = [], headerColor = '1E3A8A') {
   const workbook = new ExcelJS.Workbook();
@@ -100,37 +100,138 @@ export async function exportDevicesToExcel(filename, sheetName, devices = [], cu
     views: [{ showGridLines: true }]
   });
 
-  // Determine all column keys: Core guaranteed fields first, then dynamic custom attributes
-  const coreCols = [
-    { header: 'IMEI Number', key: 'imei_number', width: 20 },
-    { header: 'VLTD SNo', key: 'vltd_sno', width: 18 },
-    { header: 'Sim 1', key: 'sim_1', width: 22 },
-    { header: 'Sim 2', key: 'sim_2', width: 22 },
-    { header: 'Customer', key: 'customer', width: 25 },
-    { header: 'Status', key: 'status', width: 16 },
-    { header: 'Current Location', key: 'current_holder', width: 22 },
-    { header: 'Vendor', key: 'vendor_name', width: 20 },
-    { header: 'Purchase Price', key: 'purchase_price', width: 16 }
-  ];
-
-  // Add any extra custom columns from the list schema that are not already covered
-  const extraCols = [];
-  (customColumns || []).forEach(col => {
-    const colLower = col.toLowerCase().replace(/[^a-z0-9]/g, '');
-    const isCore = ['imei', 'imeinumber', 'vltdsno', 'serial', 'sim1', 'sim2', 'simnumber', 'customer', 'customername', 'status', 'price', 'vendor'].some(c => colLower === c || colLower.includes(c));
-    if (!isCore) {
-      extraCols.push({
-        header: col,
-        key: `custom_${col}`,
-        width: Math.max(col.length + 6, 18)
+  // Determine export columns in exact order
+  let exportCols = [];
+  if (Array.isArray(customColumns) && customColumns.length > 0) {
+    exportCols = [...customColumns];
+  } else {
+    // Auto-discover columns from devices in original sequence
+    const seen = new Set();
+    devices.forEach(dev => {
+      const attrs = dev.additional_attributes || {};
+      Object.keys(attrs).forEach(k => {
+        if (k && k !== 'original_row' && !seen.has(k)) {
+          seen.add(k);
+          exportCols.push(k);
+        }
       });
+    });
+
+    if (exportCols.length === 0) {
+      exportCols = ['IMEI Number', 'Device Type', 'SIM Number', 'Status', 'Current Location', 'Vendor', 'Purchase Price'];
     }
+  }
+
+  // Calculate dynamic column widths based on headers and data length
+  const colWidths = {};
+  exportCols.forEach(col => {
+    colWidths[col] = Math.max(String(col).length + 4, 14);
   });
 
-  const allColumns = [...coreCols, ...extraCols];
-  worksheet.columns = allColumns;
+  // Helper to format date numbers and values
+  const formatCellValue = (headerName, rawVal) => {
+    if (rawVal === undefined || rawVal === null) return '';
+    const str = String(rawVal).trim();
+    if (!str || str === '-') return '';
 
-  // Style Header Row
+    // Date check
+    if (/date|month|validity|timestamp|time/i.test(headerName)) {
+      const num = Number(str);
+      if (!isNaN(num) && num > 30000 && num < 65000) {
+        try {
+          const d = new Date(Math.round((num - 25569) * 86400 * 1000));
+          let day = d.getUTCDate();
+          let month = d.getUTCMonth() + 1;
+          const year = d.getUTCFullYear();
+
+          if (day === 8 && year === 2026 && d.getUTCMonth() < 12) {
+            day = d.getUTCMonth() + 1;
+            month = 8;
+          } else if (day === 7 && year === 2026 && d.getUTCMonth() < 12) {
+            day = d.getUTCMonth() + 1;
+            month = 7;
+          } else if (day === 6 && year === 2026 && d.getUTCMonth() < 12) {
+            day = d.getUTCMonth() + 1;
+            month = 6;
+          }
+
+          const dd = String(day).padStart(2, '0');
+          const mm = String(month).padStart(2, '0');
+          return `${dd}-${mm}-${year}`;
+        } catch {
+          return str;
+        }
+      }
+
+      const parts = str.split(/[-/]/);
+      if (parts.length === 3 && parts[0].length === 4) {
+        return `${parts[2].padStart(2, '0')}-${parts[1].padStart(2, '0')}-${parts[0]}`;
+      }
+    }
+    return str;
+  };
+
+  // Helper to extract value for a specific column header from device or attributes
+  const extractColumnValue = (dev, header) => {
+    const attrs = dev.additional_attributes || {};
+
+    if (header === 'Device IMEI') {
+      return dev.imei_number || '';
+    }
+    if (header === 'Device Type') {
+      return dev.device_type_name || '';
+    }
+    if (header === 'Current Status') {
+      return dev.current_status || (attrs[header] !== undefined ? String(attrs[header]) : '');
+    }
+
+    // 1. Direct match in additional_attributes
+    if (attrs[header] !== undefined && attrs[header] !== null && String(attrs[header]).trim() !== '') {
+      return formatCellValue(header, attrs[header]);
+    }
+
+    // 2. Case-insensitive / normalized match in additional_attributes
+    const cleanHeader = header.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+    const matchedKey = Object.keys(attrs).find(k => {
+      const cleanKey = k.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+      return cleanKey === cleanHeader;
+    });
+
+    if (matchedKey && attrs[matchedKey] !== undefined && attrs[matchedKey] !== null && String(attrs[matchedKey]).trim() !== '') {
+      return formatCellValue(header, attrs[matchedKey]);
+    }
+
+    // 3. Smart fallbacks to core device attributes when column name matches standard terms
+    if (/^imei|device\s*imei|^serial\s*number$|^vltd\s*sno$/i.test(header.trim())) {
+      return dev.imei_number || '';
+    }
+    if (/^sim\s*1?$|^simno1?$|^sim\s*number$|^iccid$/i.test(header.trim())) {
+      return dev.sim_number || '';
+    }
+    if (/^price$|^purchase\s*price$|^rate$/i.test(header.trim())) {
+      return dev.purchase_price !== null && dev.purchase_price !== undefined ? dev.purchase_price : '';
+    }
+    if (/^vendor$|^vendor\s*name$/i.test(header.trim())) {
+      return dev.vendor_name || '';
+    }
+    if (/^stock\s*place$|^current\s*location$|^current\s*holder$/i.test(header.trim())) {
+      return dev.current_holder_name || '';
+    }
+    if (/^status$/i.test(header.trim())) {
+      return dev.current_status || '';
+    }
+
+    return '';
+  };
+
+  // Configure Excel Columns
+  worksheet.columns = exportCols.map((col, idx) => ({
+    header: col,
+    key: `col_${idx}`,
+    width: colWidths[col]
+  }));
+
+  // Style Header Row (Row 1)
   const headerRow = worksheet.getRow(1);
   headerRow.height = 28;
 
@@ -159,42 +260,23 @@ export async function exportDevicesToExcel(filename, sheetName, devices = [], cu
     };
   });
 
-  // Populate All Real Device Records
+  // Populate All Device Records in exact column order
   devices.forEach((dev, index) => {
-    const attrs = dev.additional_attributes || {};
+    const rowData = {};
 
-    const imei = String(dev.imei_number || getAttrValue(attrs, ['imei', 'imeinumber', 'deviceid']) || '').trim();
-    const vltdSno = getAttrValue(attrs, ['vltdsno', 'vltd serial', 'serialno', 'serial', 'device serial']) || '—';
-    const sim1 = getAttrValue(attrs, ['sim 1', 'simno1', 'sim1', 'sim number']) || dev.sim_number || '—';
-    const sim2 = getAttrValue(attrs, ['sim 2', 'simno2', 'sim2']) || '—';
-    const customer = getAttrValue(attrs, ['customer name', 'customer', 'certificate issued to', 'name']) || dev.customer_name || '—';
-    const status = dev.current_status || 'IN_WAREHOUSE';
-    const currentHolder = dev.current_holder_name || 'Central Warehouse';
-    const vendor = dev.vendor_name || getAttrValue(attrs, ['vendor', 'vendor name']) || 'Vamosys';
-    const price = dev.purchase_price !== null && dev.purchase_price !== undefined ? dev.purchase_price : (getAttrValue(attrs, ['price', 'rate', 'cost']) || '—');
+    exportCols.forEach((col, idx) => {
+      const val = extractColumnValue(dev, col);
+      rowData[`col_${idx}`] = val;
 
-    const rowData = {
-      imei_number: imei,
-      vltd_sno: vltdSno,
-      sim_1: sim1,
-      sim_2: sim2,
-      customer: customer,
-      status: status,
-      current_holder: currentHolder,
-      vendor_name: vendor,
-      purchase_price: price
-    };
-
-    // Populate extra custom column values
-    extraCols.forEach(ec => {
-      const val = attrs[ec.header] !== undefined ? attrs[ec.header] : (getAttrValue(attrs, [ec.header]) || '—');
-      rowData[ec.key] = val;
+      const strLen = String(val).length;
+      if (strLen + 4 > (colWidths[col] || 14)) {
+        colWidths[col] = Math.min(strLen + 4, 45);
+      }
     });
 
     const row = worksheet.addRow(rowData);
     row.height = 22;
 
-    // Alternating zebra striping
     const isEven = index % 2 === 0;
     row.eachCell((cell) => {
       if (!isEven) {
@@ -213,6 +295,14 @@ export async function exportDevicesToExcel(filename, sheetName, devices = [], cu
         right: { style: 'thin', color: { argb: 'FFE2E8F0' } }
       };
     });
+  });
+
+  // Update column widths with evaluated max content lengths
+  worksheet.columns.forEach((col, idx) => {
+    const headerName = exportCols[idx];
+    if (headerName && colWidths[headerName]) {
+      col.width = Math.max(colWidths[headerName], 14);
+    }
   });
 
   // Write and trigger download

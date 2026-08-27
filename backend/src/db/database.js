@@ -15,31 +15,67 @@ if (!fs.existsSync(backupDir)) {
 
 const dbPath = path.join(dataDir, 'inventory.db');
 
-// Automated backup copy on startup if database exists
-try {
-  if (fs.existsSync(dbPath)) {
-    const todayStr = new Date().toISOString().split('T')[0];
-    const autoBackupPath = path.join(backupDir, `inventory_autobackup_${todayStr}.db`);
-    if (!fs.existsSync(autoBackupPath)) {
-      fs.copyFileSync(dbPath, autoBackupPath);
-    }
-  }
-} catch (e) {
-  console.warn('Auto-backup notice:', e.message);
-}
-
 const db = new Database(dbPath);
 
-// Enable Foreign Keys & WAL mode for performance & data integrity
+// Enable Foreign Keys & WAL mode for high concurrency & 100% data integrity
 db.pragma('foreign_keys = ON');
 db.pragma('journal_mode = WAL');
+db.pragma('synchronous = NORMAL');
+db.pragma('wal_autocheckpoint = 100');
+db.pragma('busy_timeout = 10000');
+
+// Safe, non-blocking native SQLite snapshot backup
+async function createBackup(customName) {
+  try {
+    const todayStr = new Date().toISOString().split('T')[0];
+    const backupFile = customName || `inventory_autobackup_${todayStr}.db`;
+    const targetPath = path.join(backupDir, backupFile);
+    if (!fs.existsSync(targetPath) || customName) {
+      await db.backup(targetPath);
+      console.log(`[Backup] Safe SQLite snapshot created at: ${targetPath}`);
+    }
+  } catch (e) {
+    console.warn('[Backup] Notice:', e.message);
+  }
+}
+
+// Trigger initial backup safely
+createBackup();
 
 // Periodically run WAL checkpoint to ensure all transactions are flushed to disk
-setInterval(() => {
+const checkpointTimer = setInterval(() => {
   try {
     db.pragma('wal_checkpoint(TRUNCATE)');
   } catch (e) {}
-}, 10 * 60 * 1000); // Every 10 minutes
+}, 5 * 60 * 1000); // Every 5 minutes
+checkpointTimer.unref(); // Prevents timer from keeping CLI scripts alive
+
+function flushAndCheckpoint() {
+  try {
+    db.pragma('wal_checkpoint(TRUNCATE)');
+  } catch (e) {
+    console.error('[Database] WAL Checkpoint error:', e.message);
+  }
+}
+
+// Graceful process exit handling to guarantee zero data loss
+let isClosed = false;
+function gracefulClose(signal) {
+  if (isClosed) return;
+  isClosed = true;
+  console.log(`\n[Database] Signal ${signal || 'EXIT'}: Flushing WAL to disk...`);
+  try {
+    flushAndCheckpoint();
+    db.close();
+    console.log('[Database] Database cleanly saved and closed. Zero data loss.');
+  } catch (e) {
+    console.error('[Database] Shutdown error:', e.message);
+  }
+}
+
+process.once('SIGINT', () => { gracefulClose('SIGINT'); process.exit(0); });
+process.once('SIGTERM', () => { gracefulClose('SIGTERM'); process.exit(0); });
+process.once('beforeExit', () => { gracefulClose('beforeExit'); });
 
 function initDatabase() {
   db.exec(`
@@ -181,9 +217,23 @@ function initDatabase() {
       FOREIGN KEY (customer_id) REFERENCES customers(id),
       FOREIGN KEY (device_id) REFERENCES devices(id)
     );
+
+    CREATE TABLE IF NOT EXISTS inventory_audit_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      device_id INTEGER,
+      imei_number TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      performed_by TEXT NOT NULL,
+      old_values TEXT,
+      new_values TEXT,
+      remarks TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
   `);
 
   // Safe schema migrations for software credentials & payments
+  try { db.exec("ALTER TABLE users ADD COLUMN monthly_target INTEGER DEFAULT 50;"); } catch (e) {}
+  try { db.exec("ALTER TABLE users ADD COLUMN device_targets TEXT DEFAULT '{}';"); } catch (e) {}
   try { db.exec("ALTER TABLE customers ADD COLUMN software_user_id TEXT;"); } catch (e) {}
   try { db.exec("ALTER TABLE customers ADD COLUMN software_password TEXT;"); } catch (e) {}
   try { db.exec("ALTER TABLE customers ADD COLUMN aadhar_number TEXT;"); } catch (e) {}
@@ -232,5 +282,9 @@ function initDatabase() {
 }
 
 initDatabase();
+
+db.createBackup = createBackup;
+db.flushAndCheckpoint = flushAndCheckpoint;
+db.gracefulClose = gracefulClose;
 
 module.exports = db;

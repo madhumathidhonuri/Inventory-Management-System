@@ -509,5 +509,23 @@ export async function verifyImeis(imeis) {
   return data;
 }
 
+export async function createManualBackup() {
+  const res = await fetch(`${API_BASE}/backup/create`, { method: 'POST' });
+  const data = await res.json();
+  if (!res.ok || !data.success) throw new Error(data.error || 'Failed to create database backup');
+  return data;
+}
+
+export async function fetchBackupsList() {
+  const res = await fetch(`${API_BASE}/backup/list`);
+  if (!res.ok) throw new Error('Failed to fetch backup files list');
+  return res.json();
+}
+
+export function getLiveBackupDownloadUrl() {
+  return `${API_BASE}/backup/download-live`;
+}
+
+
 
 

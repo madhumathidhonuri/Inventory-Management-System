@@ -38,3 +38,6 @@ pnpm-debug.log*
 *.db-journal
 *.db-wal
 *.db-shm
+backend/data/backups/
+backend/data/*.db
+
