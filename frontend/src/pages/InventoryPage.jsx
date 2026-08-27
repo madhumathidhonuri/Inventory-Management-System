@@ -56,6 +56,7 @@ import FitmentReceiptModal from '../components/FitmentReceiptModal';
 import ConsolidatedReminderModal from '../components/ConsolidatedReminderModal';
 import PaymentQrModal from '../components/PaymentQrModal';
 import RmaManagementModal from '../components/RmaManagementModal';
+import ImeiVerificationSheet from '../components/ImeiVerificationSheet';
 import { buildCustomerCredentialsWhatsAppMessage, buildPaymentDueReminderWhatsAppMessage, formatINR, formatDisplayCellValue } from '../utils/whatsapp';
 import { exportDevicesToExcel } from '../utils/excelExport';
 
@@ -65,6 +66,7 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
   const isDealer = user?.role === 'DEALER';
   const canDelete = !isDealer; // Available to Super Admin, Operations Admin, and managerial roles
 
+  const [activeInventoryTab, setActiveInventoryTab] = useState('ALL_STOCK'); // 'ALL_STOCK' | 'VERIFICATION_SHEET'
   const [devices, setDevices] = useState([]);
   const [deviceTypes, setDeviceTypes] = useState([]);
   const [batches, setBatches] = useState([]);
@@ -1393,22 +1395,72 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
   return (
     <div className="space-y-6">
       
-      {/* Header & Main Controls */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs">
-        <div>
-          {isDealer ? (
+      {/* Top Inventory Mode Navigation Switcher */}
+      <div className="flex items-center gap-2 p-1.5 bg-slate-200/80 rounded-2xl w-fit border border-slate-300/80 shadow-2xs">
+        <button
+          type="button"
+          onClick={() => setActiveInventoryTab('ALL_STOCK')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
+            activeInventoryTab === 'ALL_STOCK'
+              ? 'bg-white text-slate-900 shadow-xs'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+          }`}
+        >
+          <Boxes className="w-4 h-4 text-blue-600" />
+          <span>All Stock Inventory Grid</span>
+          <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
+            activeInventoryTab === 'ALL_STOCK' ? 'bg-blue-100 text-blue-800' : 'bg-slate-300 text-slate-700'
+          }`}>
+            {filteredDevices.length}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveInventoryTab('VERIFICATION_SHEET')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
+            activeInventoryTab === 'VERIFICATION_SHEET'
+              ? 'bg-slate-900 text-white shadow-md'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+          }`}
+        >
+          <QrCode className="w-4 h-4 text-indigo-400" />
+          <span>IMEI Verification Sheet</span>
+          <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-indigo-500 text-white animate-pulse">
+            SCAN & VERIFY
+          </span>
+        </button>
+      </div>
+
+      {activeInventoryTab === 'VERIFICATION_SHEET' ? (
+        <ImeiVerificationSheet
+          onOpenDeviceDetail={(imei) => {
+            setDetailCardImei(imei);
+            setIsDetailCardOpen(true);
+          }}
+          onOpenJourneyDrawer={onOpenTraceDrawer}
+          onInitiateBulkTransfer={() => {
+            setIsBulkTransferModalOpen(true);
+          }}
+        />
+      ) : (
+        <>
+          {/* Header & Main Controls */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs">
             <div>
-              <div className="flex items-center gap-2 mb-1">
-                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-200">
-                  Dealer Partner Stock
-                </span>
-                <span className="text-xs font-medium text-slate-500">
-                  {user?.region ? `${user.region} Region` : 'Branch Stock'}
-                </span>
-              </div>
-              <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-                <Boxes className="w-5 h-5 text-blue-600" /> Stock Inventory for {user?.name || 'Dealer'}
-              </h2>
+              {isDealer ? (
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-200">
+                      Dealer Partner Stock
+                    </span>
+                    <span className="text-xs font-medium text-slate-500">
+                      {user?.region ? `${user.region} Region` : 'Branch Stock'}
+                    </span>
+                  </div>
+                  <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                    <Boxes className="w-5 h-5 text-blue-600" /> Stock Inventory for {user?.name || 'Dealer'}
+                  </h2>
               <p className="text-xs text-slate-500">
                 Displaying only the <strong className="text-blue-700 font-semibold">{filteredDevices.length} devices</strong> currently in your stock and assigned to your dealership.
               </p>
@@ -2152,6 +2204,8 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
           </div>
         )}
       </div>
+      </>
+      )}
 
       {/* Single Record Delete Modal */}
       {deletingDeviceRecord && (

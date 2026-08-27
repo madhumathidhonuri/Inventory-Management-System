@@ -498,4 +498,16 @@ export async function resetDealerStock(payload) {
   return data;
 }
 
+export async function verifyImeis(imeis) {
+  const res = await fetch(`${API_BASE}/devices/verify-imeis`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ imeis })
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) throw new Error(data.error || 'Failed to verify IMEIs');
+  return data;
+}
+
+
 

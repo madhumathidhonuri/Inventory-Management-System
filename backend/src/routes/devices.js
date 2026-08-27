@@ -1171,4 +1171,148 @@ router.post('/bulk-assign-dealer', (req, res) => {
   }
 });
 
+// POST /api/devices/verify-imeis - Bulk verification of scanned IMEIs against inventory database
+router.post('/verify-imeis', (req, res) => {
+  try {
+    const { imeis } = req.body;
+    if (!Array.isArray(imeis) || imeis.length === 0) {
+      return res.status(400).json({ success: false, error: 'At least one IMEI is required for verification' });
+    }
+
+    // Clean and normalize incoming IMEIs preserving order
+    const cleanedImeis = imeis.map(i => String(i || '').trim()).filter(Boolean);
+    if (cleanedImeis.length === 0) {
+      return res.status(400).json({ success: false, error: 'No valid IMEIs provided' });
+    }
+
+    // Deduplicate for DB lookup
+    const uniqueImeis = [...new Set(cleanedImeis)];
+    
+    // Batch query in chunks if needed or construct parameterized SQL
+    const placeholders = uniqueImeis.map(() => '?').join(',');
+    const sql = `
+      SELECT d.*, dt.name as device_type_name, dt.category as device_type_category,
+             i.customer_name as inst_customer_name, i.customer_contact as inst_customer_phone,
+             i.vehicle_number as inst_vehicle_number, i.installation_date as inst_date,
+             i.sales_person as inst_sales_person
+      FROM devices d
+      LEFT JOIN device_types dt ON d.device_type_id = dt.id
+      LEFT JOIN installations i ON (d.imei_number = i.imei_number OR d.id = i.device_id)
+      WHERE d.imei_number IN (${placeholders})
+    `;
+
+    const rows = db.prepare(sql).all(...uniqueImeis);
+
+    // Build lookup map by IMEI
+    const deviceMap = new Map();
+    rows.forEach(r => {
+      let attrs = {};
+      try {
+        attrs = typeof r.additional_attributes === 'string' ? JSON.parse(r.additional_attributes || '{}') : (r.additional_attributes || {});
+      } catch {
+        attrs = {};
+      }
+
+      // Extract helpful display fields
+      const stockPlace = r.current_holder_name || attrs['STOCK PLACE'] || attrs['DEALER'] || 'Central Warehouse';
+      const customerName = r.inst_customer_name || attrs['CUSTOMER NAME'] || attrs['Party Name'] || attrs['Customer'] || '';
+      const vehicleNumber = r.inst_vehicle_number || attrs['VEHICLE NUMBER'] || attrs['Veh No'] || attrs['Vehicle No'] || '';
+      const simNumber = r.sim_number || attrs['SIM NUMBER'] || attrs['Sim No'] || '';
+
+      deviceMap.set(r.imei_number, {
+        id: r.id,
+        imei_number: r.imei_number,
+        sim_number: simNumber,
+        device_type_name: r.device_type_name || 'Standard Device',
+        device_type_category: r.device_type_category || 'AIS140',
+        purchase_batch_id: r.purchase_batch_id,
+        vendor_name: r.vendor_name || 'Direct',
+        purchase_price: r.purchase_price,
+        purchase_date: r.purchase_date,
+        current_status: r.current_status,
+        current_holder_type: r.current_holder_type,
+        current_holder_name: stockPlace,
+        stock_place: stockPlace,
+        customer_name: customerName,
+        customer_phone: r.inst_customer_phone || attrs['MOBILE NUMBER'] || attrs['Phone'] || '',
+        vehicle_number: vehicleNumber,
+        additional_attributes: attrs,
+        created_at: r.created_at,
+        updated_at: r.updated_at
+      });
+    });
+
+    // Structure response mapping for every scanned item in order
+    const results = [];
+    const seenScanImeis = new Set();
+    let foundCount = 0;
+    let missingCount = 0;
+    let inStockCount = 0;
+    let dispatchedCount = 0;
+    let installedCount = 0;
+    let rmaCount = 0;
+    let duplicateScanCount = 0;
+
+    cleanedImeis.forEach((imei, idx) => {
+      const isDuplicateScan = seenScanImeis.has(imei);
+      if (isDuplicateScan) {
+        duplicateScanCount++;
+      } else {
+        seenScanImeis.add(imei);
+      }
+
+      const matched = deviceMap.get(imei);
+      if (matched) {
+        foundCount++;
+        if (matched.current_status === 'IN_STOCK' || matched.current_status === 'IN_WAREHOUSE' || matched.current_status === 'AVAILABLE') {
+          inStockCount++;
+        } else if (matched.current_status === 'DISPATCHED' || matched.current_status === 'WITH_DEALER') {
+          dispatchedCount++;
+        } else if (matched.current_status === 'INSTALLED' || Boolean(matched.vehicle_number)) {
+          installedCount++;
+        } else if (matched.current_status === 'RMA_PENDING' || matched.current_status === 'FAULTY' || matched.current_status === 'RMA_DISPATCHED' || matched.current_status === 'RMA') {
+          rmaCount++;
+        }
+
+        results.push({
+          scan_index: idx + 1,
+          imei_number: imei,
+          exists: true,
+          status: matched.current_status || 'IN_STOCK',
+          is_duplicate_scan: isDuplicateScan,
+          device: matched
+        });
+      } else {
+        missingCount++;
+        results.push({
+          scan_index: idx + 1,
+          imei_number: imei,
+          exists: false,
+          status: 'NOT_FOUND',
+          is_duplicate_scan: isDuplicateScan,
+          device: null
+        });
+      }
+    });
+
+    res.json({
+      success: true,
+      summary: {
+        total_scanned: cleanedImeis.length,
+        unique_scanned: uniqueImeis.length,
+        found_count: foundCount,
+        missing_count: missingCount,
+        in_stock_count: inStockCount,
+        dispatched_count: dispatchedCount,
+        installed_count: installedCount,
+        rma_count: rmaCount,
+        duplicate_scan_count: duplicateScanCount
+      },
+      data: results
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;

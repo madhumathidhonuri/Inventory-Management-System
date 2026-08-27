@@ -227,3 +227,129 @@ export async function exportDevicesToExcel(filename, sheetName, devices = [], cu
   document.body.removeChild(a);
   window.URL.revokeObjectURL(url);
 }
+
+/**
+ * Exports IMEI Verification & Audit Scan results to a formatted Excel workbook
+ */
+export async function exportImeiVerificationToExcel(filename, sheetName, items = [], summary = {}) {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'FuelTracks IMS';
+  workbook.lastModifiedBy = 'Audit Team';
+  workbook.created = new Date();
+
+  const safeSheetName = (sheetName || 'IMEI_Verification_Audit').replace(/[^a-zA-Z0-9_\s]/g, '_').substring(0, 30);
+  const worksheet = workbook.addWorksheet(safeSheetName, {
+    views: [{ showGridLines: true }]
+  });
+
+  // Define Columns
+  worksheet.columns = [
+    { header: 'Sl No', key: 'sl_no', width: 8 },
+    { header: 'Scanned IMEI', key: 'imei_number', width: 22 },
+    { header: 'Verification Status', key: 'verification_status', width: 24 },
+    { header: 'Device Model', key: 'device_type', width: 20 },
+    { header: 'Stock Location / Holder', key: 'stock_place', width: 24 },
+    { header: 'Assigned Customer', key: 'customer_name', width: 24 },
+    { header: 'Vehicle Number', key: 'vehicle_number', width: 18 },
+    { header: 'SIM Number', key: 'sim_number', width: 20 },
+    { header: 'Duplicate Scan', key: 'is_duplicate', width: 16 },
+    { header: 'Scan Timestamp', key: 'scan_time', width: 22 }
+  ];
+
+  // Style Header Row
+  const headerRow = worksheet.getRow(1);
+  headerRow.height = 30;
+  headerRow.eachCell((cell) => {
+    cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF0F172A' } // Sleek slate-900 header
+    };
+    cell.font = {
+      name: 'Segoe UI',
+      size: 11,
+      bold: true,
+      color: { argb: 'FFFFFFFF' }
+    };
+    cell.alignment = {
+      vertical: 'middle',
+      horizontal: 'center'
+    };
+    cell.border = {
+      top: { style: 'thin', color: { argb: 'FF475569' } },
+      bottom: { style: 'medium', color: { argb: 'FF3B82F6' } },
+      left: { style: 'thin', color: { argb: 'FF475569' } },
+      right: { style: 'thin', color: { argb: 'FF475569' } }
+    };
+  });
+
+  // Populate data rows
+  items.forEach((item, index) => {
+    const dev = item.device || {};
+    let statusText = 'UNREGISTERED (NOT FOUND)';
+    if (item.exists) {
+      if (item.status === 'IN_STOCK' || item.status === 'IN_WAREHOUSE' || item.status === 'AVAILABLE') statusText = 'VERIFIED - IN STOCK';
+      else if (item.status === 'WITH_DEALER' || item.status === 'DISPATCHED') statusText = `WITH DEALER (${dev.stock_place || 'Dispatched'})`;
+      else if (item.status === 'INSTALLED' || Boolean(dev.vehicle_number)) statusText = `INSTALLED (${dev.vehicle_number || 'Fitted'})`;
+      else if (item.status === 'FAULTY' || item.status?.includes('RMA')) statusText = `RMA / FAULTY (${item.status})`;
+      else statusText = item.status || 'FOUND';
+    }
+
+    const rowData = {
+      sl_no: index + 1,
+      imei_number: item.imei_number,
+      verification_status: statusText,
+      device_type: dev.device_type_name || (item.exists ? 'Device' : '—'),
+      stock_place: dev.stock_place || (item.exists ? 'Central Warehouse' : '—'),
+      customer_name: dev.customer_name || '—',
+      vehicle_number: dev.vehicle_number || '—',
+      sim_number: dev.sim_number || '—',
+      is_duplicate: item.is_duplicate_scan ? 'YES (DUPLICATE)' : 'NO',
+      scan_time: item.scanned_at ? new Date(item.scanned_at).toLocaleString('en-IN') : new Date().toLocaleString('en-IN')
+    };
+
+    const row = worksheet.addRow(rowData);
+    row.height = 24;
+
+    row.eachCell((cell, colNumber) => {
+      cell.font = { name: 'Segoe UI', size: 10 };
+      cell.alignment = { vertical: 'middle', horizontal: colNumber === 1 || colNumber === 9 ? 'center' : 'left' };
+      cell.border = {
+        top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+        left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+        bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+        right: { style: 'thin', color: { argb: 'FFE2E8F0' } }
+      };
+
+      // Status cell highlighting
+      if (colNumber === 3) {
+        if (!item.exists) {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEE2E2' } }; // Light red
+          cell.font = { name: 'Segoe UI', size: 10, bold: true, color: { argb: 'FF991B1B' } };
+        } else if (item.status === 'IN_STOCK' || item.status === 'IN_WAREHOUSE' || item.status === 'AVAILABLE') {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDCFCE7' } }; // Light green
+          cell.font = { name: 'Segoe UI', size: 10, bold: true, color: { argb: 'FF166534' } };
+        } else if (item.status === 'INSTALLED' || Boolean(dev.vehicle_number)) {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDBEAFE' } }; // Light blue
+          cell.font = { name: 'Segoe UI', size: 10, bold: true, color: { argb: 'FF1E40AF' } };
+        } else {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEF3C7' } }; // Light amber
+          cell.font = { name: 'Segoe UI', size: 10, bold: true, color: { argb: 'FF92400E' } };
+        }
+      }
+    });
+  });
+
+  // Write and trigger download
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename.endsWith('.xlsx') ? filename : `${filename}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  window.URL.revokeObjectURL(url);
+}
+
