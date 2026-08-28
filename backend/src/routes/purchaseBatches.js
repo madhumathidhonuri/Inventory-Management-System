@@ -354,10 +354,18 @@ router.post('/confirm', (req, res) => {
     });
 
     const result = transaction();
+
+    // Auto-sync instantly to Supabase Cloud Storage (No manual click needed)
+    try {
+      const cloudSync = require('../db/cloudSync');
+      cloudSync.triggerDebouncedSync(1000);
+    } catch (e) {}
+
     res.json({
       success: true,
       data: result
     });
+
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }

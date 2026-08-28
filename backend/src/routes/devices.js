@@ -576,6 +576,12 @@ router.put('/:id', (req, res) => {
       VALUES (?, ?, 'STATUS_CHANGED', datetime('now'), ?, ?, ?, ?)
     `).run(id, newImei, existing.current_holder_name, newHolder, req.body.performed_by || 'Admin', remarksText);
 
+    // Auto-sync to Supabase Cloud Storage
+    try {
+      const cloudSync = require('../db/cloudSync');
+      cloudSync.triggerDebouncedSync(1000);
+    } catch (e) {}
+
     const updated = db.prepare('SELECT * FROM devices WHERE id = ?').get(id);
     res.json({
       success: true,
@@ -584,6 +590,7 @@ router.put('/:id', (req, res) => {
         additional_attributes: JSON.parse(updated.additional_attributes || '{}')
       }
     });
+
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }

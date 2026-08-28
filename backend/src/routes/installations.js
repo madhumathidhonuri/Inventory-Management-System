@@ -255,11 +255,19 @@ router.post('/', (req, res) => {
 
   try {
     const result = transaction();
+
+    // Auto-sync instantly to Supabase Cloud Storage (No manual click needed)
+    try {
+      const cloudSync = require('../db/cloudSync');
+      cloudSync.triggerDebouncedSync(1000);
+    } catch (e) {}
+
     res.json({
       success: true,
       data: result,
       message: `Successfully linked ${cleanVehicle} with IMEI ${cleanImei} for customer ${customer_name.trim()}`
     });
+
   } catch (err) {
     res.status(400).json({ success: false, error: err.message });
   }
