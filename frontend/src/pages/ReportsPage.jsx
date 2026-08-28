@@ -117,6 +117,12 @@ export default function ReportsPage() {
     loadPaymentsStatement();
   }, [paymentsRange, paymentStartDate, paymentEndDate]);
 
+  useEffect(() => {
+    if (activeTab === 'customer_directory') {
+      loadCustomerDirectory();
+    }
+  }, [activeTab]);
+
   const loadCustomerDirectory = async () => {
 
     setCustomerDirLoading(true);

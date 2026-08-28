@@ -1352,6 +1352,44 @@ function cleanVehicleAndPhone(rawVeh, rawPhone) {
   return { vehicle_number: veh, phone_number: phone };
 }
 
+// Helper: Extract clean Device Model
+function getDeviceModelName(dev, attrs = {}) {
+  const modelKeys = [
+    'DEVICE NAME', 'Device Name', 'device_name',
+    'MODEL', 'Model', 'model',
+    'DEVICE', 'Device',
+    'DEVICE TYPE', 'Device Type',
+    'PRODUCT', 'Product'
+  ];
+  for (const k of modelKeys) {
+    if (attrs[k] && String(attrs[k]).trim()) return String(attrs[k]).trim();
+  }
+  if (dev.device_model && dev.device_model !== 'AIS-140 GPS') return dev.device_model;
+  return dev.device_model || 'VAMOSYS';
+}
+
+// Helper: Extract clean Installation Date
+function getInstallationDateValue(dev, attrs = {}) {
+  const dateKeys = [
+    'DATE', 'Date', 'date',
+    'INSTALLATION DATE', 'Installation Date', 'installation_date',
+    'CERTIFICATE ISSUED DATE', 'Certificate Issued Date',
+    'FITTED DATE', 'Fitted Date',
+    'STOCK PLACE DATE', 'Stock Place Date',
+    'PAYMENT DATE', 'Payment Date',
+    'CREATED AT', 'Created At'
+  ];
+  for (const k of dateKeys) {
+    if (attrs[k] && String(attrs[k]).trim()) {
+      const formatted = formatExcelDate(attrs[k]);
+      if (formatted) return formatted;
+    }
+  }
+  if (dev.installation_date) return formatExcelDate(dev.installation_date);
+  if (dev.purchase_date) return formatExcelDate(dev.purchase_date);
+  return '';
+}
+
 // Helper: Query all customers & vehicles across installations and device inventory
 function getCustomerDirectoryRecords() {
   const records = [];
@@ -1386,21 +1424,18 @@ function getCustomerDirectoryRecords() {
     ORDER BY i.id DESC
   `).all();
 
-  // 2. Also fetch all devices in case devices contain customer/vehicle info in additional_attributes
+  // 2. Also fetch all devices across database
   const deviceRows = db.prepare(`
     SELECT 
       d.id,
       d.imei_number,
-      d.additional_attributes,
+      d.purchase_date,
+      d.current_status,
       d.current_holder_name,
+      d.additional_attributes,
       dt.name as device_model
     FROM devices d
     LEFT JOIN device_types dt ON d.device_type_id = dt.id
-    WHERE d.additional_attributes LIKE '%CUSTOMER%' 
-       OR d.additional_attributes LIKE '%VEHICLE%'
-       OR d.additional_attributes LIKE '%CERTIFICATE%'
-       OR d.additional_attributes LIKE '%CHASIS%'
-       OR d.additional_attributes LIKE '%AADHAR%'
     ORDER BY d.id DESC
   `).all();
 
@@ -1418,6 +1453,8 @@ function getCustomerDirectoryRecords() {
     const pan = row.pan_number || attrs['PAN NUMBER'] || attrs['Pan Number'] || attrs['PAN'] || '';
     const email = row.email || attrs['EMAIL'] || attrs['Customer Email'] || attrs['Email'] || '';
     const rtoLoc = deriveRTOLocation(cleaned.vehicle_number, attrs);
+    const model = getDeviceModelName(row, attrs);
+    const date = getInstallationDateValue(row, attrs);
 
     const rec = {
       customer_name: row.customer_name || '—',
@@ -1430,56 +1467,58 @@ function getCustomerDirectoryRecords() {
       engine_number: engine,
       email: email,
       imei_number: row.imei_number,
-      device_model: row.device_model || 'AIS-140 GPS',
-      installation_date: row.installation_date || '',
+      device_model: model,
+      installation_date: date || row.installation_date || '',
       location: row.installation_location || '',
       sale_price: row.sale_price || 0,
       payment_status: row.payment_status || 'PENDING'
     };
 
-    const key = `${rec.vehicle_number}_${rec.imei_number}`.toUpperCase();
+    const key = `${rec.vehicle_number || rec.imei_number}_${rec.imei_number}`.toUpperCase();
     seenKeys.add(key);
     records.push(rec);
   });
 
-  // Process any other devices in master sheets with customer/vehicle info
+  // Process any devices in master sheets with customer/vehicle info or installed status
   deviceRows.forEach(dev => {
     let attrs = {};
     try {
       attrs = typeof dev.additional_attributes === 'string' ? JSON.parse(dev.additional_attributes || '{}') : (dev.additional_attributes || {});
     } catch {}
 
-    const custName = attrs['CUSTOMER NAME'] || attrs['Customer Name'] || attrs['CERTIFICATE ISSUED TO'] || attrs['Customer'] || '';
-    const rawVeh = attrs['VEHICLE NUMBER'] || attrs['Vehicle Number'] || attrs['Veh No'] || attrs['VEH NO'] || '';
-    const rawPhone = attrs['CUSTOMER PHONE NUMBER'] || attrs['Customer Contact'] || attrs['Phone'] || attrs['Mobile'] || attrs['Primary Mobile'] || '';
-
+    const rawCust = getCustomerName(attrs);
+    const rawVeh = getVehicleNumber(dev, attrs);
+    const rawPhone = getCustomerPhone(attrs);
     const cleaned = cleanVehicleAndPhone(rawVeh, rawPhone);
 
-    if (custName || cleaned.vehicle_number) {
-      const key = `${cleaned.vehicle_number}_${dev.imei_number}`.toUpperCase();
+    const isInstalled = dev.current_status === 'INSTALLED' || Boolean(cleaned.vehicle_number) || (rawCust && rawCust !== '—');
+
+    if (isInstalled || cleaned.vehicle_number || (rawCust && rawCust !== '—')) {
+      const key = `${cleaned.vehicle_number || dev.imei_number}_${dev.imei_number}`.toUpperCase();
       if (!seenKeys.has(key)) {
         seenKeys.add(key);
-        const chasis = attrs['CHASIS NUMBER'] || attrs['Chasis Number'] || attrs['Chassis Number'] || attrs['CHASSIS'] || '';
-        const engine = attrs['ENGINE NUMBER'] || attrs['Engine Number'] || attrs['ENGINE'] || '';
-        const aadhar = attrs['AADHAR NUMBER'] || attrs['Aadhar Number'] || attrs['Aadhar'] || attrs['AADHAR'] || '';
-        const pan = attrs['PAN NUMBER'] || attrs['Pan Number'] || attrs['PAN'] || '';
+        const chasis = attrs['CHASIS NUMBER'] || attrs['Chasis Number'] || attrs['Chassis Number'] || attrs['CHASSIS'] || attrs['Chasis'] || '';
+        const engine = attrs['ENGINE NUMBER'] || attrs['Engine Number'] || attrs['ENGINE'] || attrs['Engine'] || '';
+        const aadhar = attrs['AADHAR NUMBER'] || attrs['Aadhar Number'] || attrs['Aadhar'] || attrs['AADHAR'] || attrs['Aadhaar Number'] || '';
+        const pan = attrs['PAN NUMBER'] || attrs['Pan Number'] || attrs['PAN'] || attrs['Pan'] || '';
         const email = attrs['EMAIL'] || attrs['Customer Email'] || attrs['Email'] || '';
-        const date = formatExcelDate(attrs['DATE'] || attrs['INSTALLATION DATE'] || attrs['CERTIFICATE ISSUED DATE'] || attrs['STOCK PLACE DATE'] || '');
+        const date = getInstallationDateValue(dev, attrs);
+        const model = getDeviceModelName(dev, attrs);
         const rtoLoc = deriveRTOLocation(cleaned.vehicle_number, attrs);
 
         records.push({
-          customer_name: custName || '—',
-          phone_number: cleaned.phone_number,
+          customer_name: (rawCust && rawCust !== '—') ? rawCust : '—',
+          phone_number: (cleaned.phone_number && cleaned.phone_number !== '—') ? cleaned.phone_number : '',
           aadhar_number: aadhar,
           pan_number: pan,
-          vehicle_number: cleaned.vehicle_number,
+          vehicle_number: cleaned.vehicle_number || (dev.current_status === 'INSTALLED' ? 'Installed' : '—'),
           rto_location: rtoLoc,
           chasis_number: chasis,
           engine_number: engine,
           email: email,
           imei_number: dev.imei_number,
-          device_model: dev.device_model || 'AIS-140 GPS',
-          installation_date: date,
+          device_model: model,
+          installation_date: date || '—',
           location: dev.current_holder_name || attrs['STOCK PLACE'] || '',
           sale_price: attrs['TOTAL COST'] || attrs['COST'] || 0,
           payment_status: attrs['AMOUNT RECEIVED'] ? 'RECEIVED' : 'PENDING'
@@ -1490,6 +1529,7 @@ function getCustomerDirectoryRecords() {
 
   return records;
 }
+
 
 // GET /api/reports/customer-directory - List customer KYC & vehicle directory JSON
 router.get('/customer-directory', (req, res) => {

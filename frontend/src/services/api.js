@@ -366,6 +366,7 @@ export async function fetchDailyDistributionReport(date = null) {
   return res.json();
 }
 
+
 export async function globalSearchDevices(query) {
   const res = await fetch(`${API_BASE}/devices/global-search?q=${encodeURIComponent(query)}`);
   if (!res.ok) throw new Error('Failed to perform global search');
