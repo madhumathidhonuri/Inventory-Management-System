@@ -56,8 +56,9 @@ async function createBackup(customName) {
   }
 }
 
-// Trigger initial backup safely
-createBackup();
+// Safe backup helper
+// (Automatic periodic backups & cloud sync run after boot restore)
+
 
 // Periodically run WAL checkpoint to ensure all transactions are flushed to disk
 const checkpointTimer = setInterval(() => {
