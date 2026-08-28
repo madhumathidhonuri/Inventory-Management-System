@@ -51,7 +51,20 @@ import {
   RotateCcw
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { fetchStats, fetchPurchaseBatches, fetchDeviceTypes, fetchAgingAnalysis, fetchSimValidity, updateQuickPayment, fetchDevices, recordInstallation, updateDealerTarget } from '../services/api';
+import {
+  fetchStats,
+  fetchPurchaseBatches,
+  fetchDeviceTypes,
+  fetchAgingAnalysis,
+  fetchSimValidity,
+  updateQuickPayment,
+  fetchDevices,
+  recordInstallation,
+  updateDealerTarget,
+  fetchPaymentsTelemetry,
+  getPaymentsExcelDownloadUrl
+} from '../services/api';
+
 import { useAuth } from '../context/AuthContext';
 import DealerDetailModal from '../components/DealerDetailModal';
 import FitmentReceiptModal from '../components/FitmentReceiptModal';
@@ -141,6 +154,16 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
     software_user_id: '',
     software_password: 'User@123'
   });
+
+  // Payments Telemetry State
+  const [paymentsRange, setPaymentsRange] = useState('today'); // 'today' | 'yesterday' | 'this_week' | 'this_month' | 'all' | 'custom'
+  const [paymentStartDate, setPaymentStartDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [paymentEndDate, setPaymentEndDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [paymentsData, setPaymentsData] = useState(null);
+  const [loadingPayments, setLoadingPayments] = useState(false);
+  const [showPaymentsTransactions, setShowPaymentsTransactions] = useState(false);
+  const [paymentLedgerSearch, setPaymentLedgerSearch] = useState('');
+
 
   const filteredInStockDevices = useMemo(() => {
     return inStockDevices.filter(d => {
@@ -625,6 +648,34 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
       setLoading(false);
     }
   };
+
+  const loadPaymentsTelemetry = async () => {
+    setLoadingPayments(true);
+    try {
+      const params = {
+        range: paymentsRange,
+        start_date: paymentStartDate,
+        end_date: paymentEndDate
+      };
+      if (selectedDeviceTypeId) params.device_type_id = selectedDeviceTypeId;
+      if (isDealer && user?.name) params.dealer_name = user.name;
+      if (locationFilter) params.dealer_name = locationFilter;
+
+      const res = await fetchPaymentsTelemetry(params);
+      if (res.success) {
+        setPaymentsData(res.data);
+      }
+    } catch (err) {
+      console.error('Failed to load payments telemetry:', err);
+    } finally {
+      setLoadingPayments(false);
+    }
+  };
+
+  useEffect(() => {
+    loadPaymentsTelemetry();
+  }, [paymentsRange, paymentStartDate, paymentEndDate, selectedDeviceTypeId, locationFilter]);
+
 
   if (loading) {
     return (
@@ -1704,88 +1755,164 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
       {/* Row 2: Financials & Dealer Allocations Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
-        {/* Revenue & Payment Status Card */}
+        {/* Daily & Custom Range Payments & Revenue Telemetry Hub */}
         <div className="glass-panel p-5 rounded-2xl space-y-4 shadow-2xs">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
             <div className="flex items-center gap-2 text-slate-900 font-bold text-sm">
               <DollarSign className="w-4 h-4 text-emerald-600" />
-              <span>Revenue & Payment Status</span>
+              <span>Payments & Revenue Collections</span>
             </div>
-            <span className="text-[11px] text-slate-400 font-medium">Billed Installs</span>
+            {/* Live Today's Collections Badge */}
+            {paymentsData?.kpis && (
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 animate-pulse">
+                Today: ₹{(paymentsData.kpis.today_collected_amount || 0).toLocaleString('en-IN')}
+              </span>
+            )}
           </div>
 
-          <div className="space-y-3">
-            {/* Total Installed Vehicles */}
-            <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200">
-              <div className="text-[11px] text-slate-500 font-bold uppercase tracking-wider">Total Installed Vehicles</div>
-              <div className="text-xl font-bold font-mono text-slate-900 mt-0.5">
-                {((financials?.payment_received_count || 0) + (financials?.payment_pending_count || 0)) || installed} <span className="text-xs font-normal text-slate-500">Vehicles</span>
+          {/* Date Range Selection Tabs */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between text-[11px] font-bold text-slate-700">
+              <span className="flex items-center gap-1">
+                <Calendar className="w-3 h-3 text-slate-500" />
+                <span>Select Period:</span>
+              </span>
+              {loadingPayments && <RefreshCw className="w-3 h-3 animate-spin text-emerald-600" />}
+            </div>
+
+            <div className="grid grid-cols-3 gap-1 text-[10px] font-bold">
+              {[
+                { id: 'today', label: 'Today' },
+                { id: 'yesterday', label: 'Yesterday' },
+                { id: 'this_week', label: 'Last 7D' },
+                { id: 'this_month', label: 'This Month' },
+                { id: 'all', label: 'All Time' },
+                { id: 'custom', label: 'Custom 📅' }
+              ].map((tab) => {
+                const active = paymentsRange === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setPaymentsRange(tab.id)}
+                    className={`py-1 px-1.5 rounded-lg border transition-all cursor-pointer text-center ${
+                      active
+                        ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs font-black'
+                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-emerald-50 hover:border-emerald-200'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Custom Date Pickers when 'custom' is active */}
+            {paymentsRange === 'custom' && (
+              <div className="grid grid-cols-2 gap-2 pt-1 animate-in fade-in duration-150">
+                <div>
+                  <label className="block text-[10px] font-medium text-slate-500 mb-0.5">From Date</label>
+                  <input
+                    type="date"
+                    value={paymentStartDate}
+                    onChange={(e) => setPaymentStartDate(e.target.value)}
+                    className="w-full text-xs font-mono p-1.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-medium text-slate-500 mb-0.5">To Date</label>
+                  <input
+                    type="date"
+                    value={paymentEndDate}
+                    onChange={(e) => setPaymentEndDate(e.target.value)}
+                    className="w-full text-xs font-mono p-1.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-3 pt-1">
+            {/* KPI 1: Today's Collection vs Period Collection */}
+            <div className="p-3 bg-gradient-to-br from-emerald-50 to-emerald-100/50 rounded-xl border border-emerald-200 text-emerald-950">
+              <div className="flex items-center justify-between text-[10px] font-bold text-emerald-800 uppercase tracking-wider">
+                <span>Collections in {paymentsRange.replace('_', ' ').toUpperCase()}</span>
+                <span className="bg-emerald-200/80 text-emerald-900 px-1.5 py-0.5 rounded font-mono font-bold">
+                  {paymentsData?.kpis?.period_collected_count || 0} Paid Units
+                </span>
+              </div>
+              <div className="text-xl font-black font-mono text-emerald-800 mt-1">
+                ₹{(paymentsData?.kpis?.period_collected_amount || 0).toLocaleString('en-IN')}
+              </div>
+              <div className="text-[10px] text-emerald-700 font-medium mt-0.5 flex items-center justify-between">
+                <span>Today's Total: ₹{(paymentsData?.kpis?.today_collected_amount || 0).toLocaleString('en-IN')}</span>
+                <span>({paymentsData?.kpis?.today_collected_count || 0} today)</span>
               </div>
             </div>
 
-            {/* Collected (with ₹ Amount) vs Pending (Vehicles Count only) */}
-            <div className="grid grid-cols-2 gap-2.5">
-              <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 text-emerald-950 flex flex-col justify-between">
-                <div>
-                  <div className="text-[10px] font-bold text-emerald-700 uppercase">Payment Received</div>
-                  <div className="text-lg font-bold font-mono text-emerald-800 mt-0.5">
-                    ₹{(financials?.payment_received_amount || 0).toLocaleString()}
-                  </div>
+            {/* KPI 2: Pending Receivables & Collection Rate */}
+            <div className="grid grid-cols-2 gap-2">
+              <div className="p-2.5 bg-red-50 rounded-xl border border-red-200 text-red-950 flex flex-col justify-between">
+                <div className="text-[10px] font-bold text-red-700 uppercase">Pending Due</div>
+                <div className="text-sm font-bold font-mono text-red-800 mt-0.5">
+                  ₹{(paymentsData?.kpis?.period_pending_amount || 0).toLocaleString('en-IN')}
                 </div>
-                <div className="text-[10px] text-emerald-600 font-medium mt-1">
-                  {financials?.payment_received_count || 0} vehicles paid
+                <div className="text-[9px] text-red-600 font-medium mt-0.5">
+                  {paymentsData?.kpis?.period_pending_count || 0} pending units
                 </div>
               </div>
 
-              <div className="p-3 bg-red-50 rounded-xl border border-red-200 text-red-950 flex flex-col justify-between">
-                <div>
-                  <div className="text-[10px] font-bold text-red-700 uppercase">Payment Pending</div>
-                  <div className="text-lg font-bold font-mono text-red-800 mt-0.5">
-                    {financials?.payment_pending_count || 0} <span className="text-xs font-normal">Vehicles</span>
-                  </div>
+              <div className="p-2.5 bg-blue-50 rounded-xl border border-blue-200 text-blue-950 flex flex-col justify-between">
+                <div className="text-[10px] font-bold text-blue-700 uppercase">Efficiency</div>
+                <div className="text-sm font-bold font-mono text-blue-800 mt-0.5">
+                  {paymentsData?.kpis?.collection_rate || 0}%
                 </div>
-                <div className="text-[10px] text-red-600 font-medium mt-1">
-                  Pending payment
+                <div className="text-[9px] text-blue-600 font-medium mt-0.5">
+                  Collection Rate
                 </div>
               </div>
             </div>
 
             {/* Collection Progress Bar */}
             <div>
-              {(() => {
-                const totalPaidVehicles = (financials?.payment_received_count || 0) + (financials?.payment_pending_count || 0);
-                const rate = totalPaidVehicles > 0
-                  ? Math.round(((financials?.payment_received_count || 0) / totalPaidVehicles) * 100)
-                  : 0;
-                return (
-                  <>
-                    <div className="flex justify-between text-[11px] font-bold text-slate-600 mb-1">
-                      <span>Collection Rate</span>
-                      <span>{rate}%</span>
-                    </div>
-                    <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
-                      <div
-                        className="bg-emerald-500 h-2 rounded-full transition-all duration-500"
-                        style={{ width: `${Math.min(100, rate)}%` }}
-                      />
-                    </div>
-                  </>
-                );
-              })()}
+              <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                <div
+                  className="bg-emerald-500 h-1.5 rounded-full transition-all duration-500"
+                  style={{ width: `${Math.min(100, paymentsData?.kpis?.collection_rate || 0)}%` }}
+                />
+              </div>
             </div>
 
-            {/* Quick Monthly Payment Excel Export Action */}
-            <button
-              onClick={() => handleOpenMonthlyExportModal('AUGUST')}
-              className="w-full mt-2 px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
-              title="Download Excel statement of payments received in August, July, or any month"
-            >
-              <FileSpreadsheet className="w-3.5 h-3.5" />
-              <span>Download Monthly Payments Excel</span>
-            </button>
+            {/* Action Buttons: 1-Click Excel Download & Ledger View */}
+            <div className="pt-1 space-y-1.5">
+              <a
+                href={getPaymentsExcelDownloadUrl({
+                  range: paymentsRange,
+                  start_date: paymentStartDate,
+                  end_date: paymentEndDate,
+                  device_type_id: selectedDeviceTypeId
+                })}
+                download
+                className="w-full px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                title="Download Excel statement of payments for the selected date range"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                <span>Export {paymentsRange.replace('_', ' ').toUpperCase()} Payments Excel</span>
+              </a>
+
+              <button
+                type="button"
+                onClick={() => setShowPaymentsTransactions(!showPaymentsTransactions)}
+                className="w-full px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+              >
+                <Table className="w-3.5 h-3.5 text-slate-500" />
+                <span>{showPaymentsTransactions ? 'Hide Transactions Ledger' : `View Ledger (${paymentsData?.transactions?.length || 0})`}</span>
+              </button>
+            </div>
 
           </div>
         </div>
+
 
         {/* Dealer Stock Allocation Matrix */}
         <div className="lg:col-span-2 glass-panel p-5 rounded-2xl space-y-4 shadow-2xs flex flex-col">
@@ -1843,6 +1970,137 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
         </div>
 
       </div>
+
+      {/* Itemized Payments Ledger Table Section (Collapsible / Interactive) */}
+      {showPaymentsTransactions && (
+        <div className="glass-panel p-5 rounded-2xl space-y-4 shadow-md border border-emerald-200 animate-in fade-in zoom-in-95 duration-200">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+            <div>
+              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                <Receipt className="w-4 h-4 text-emerald-600" />
+                <span>Daily & Period Itemized Payments Ledger ({paymentsRange.replace('_', ' ').toUpperCase()})</span>
+              </h3>
+              <p className="text-[11px] text-slate-500">
+                Detailed transaction records for {paymentsData?.filter?.start_date} to {paymentsData?.filter?.end_date}
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Filter by IMEI, Vehicle, Customer, Dealer..."
+                  value={paymentLedgerSearch}
+                  onChange={(e) => setPaymentLedgerSearch(e.target.value)}
+                  className="pl-8.5 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+                />
+              </div>
+
+              <a
+                href={getPaymentsExcelDownloadUrl({
+                  range: paymentsRange,
+                  start_date: paymentStartDate,
+                  end_date: paymentEndDate,
+                  device_type_id: selectedDeviceTypeId
+                })}
+                download
+                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Download Excel</span>
+              </a>
+
+              <button
+                type="button"
+                onClick={() => setShowPaymentsTransactions(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg cursor-pointer"
+                title="Close Ledger"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          {/* Table */}
+          <div className="overflow-x-auto max-h-[380px] rounded-xl border border-slate-200">
+            {(() => {
+              const allTx = paymentsData?.transactions || [];
+              const q = paymentLedgerSearch.trim().toLowerCase();
+              const filteredTx = q
+                ? allTx.filter(t => 
+                    (t.imei_number || '').toLowerCase().includes(q) ||
+                    (t.vehicle_number || '').toLowerCase().includes(q) ||
+                    (t.customer_name || '').toLowerCase().includes(q) ||
+                    (t.customer_phone || '').toLowerCase().includes(q) ||
+                    (t.stock_place || '').toLowerCase().includes(q) ||
+                    (t.payment_received_by || '').toLowerCase().includes(q)
+                  )
+                : allTx;
+
+              if (filteredTx.length === 0) {
+                return (
+                  <div className="text-center py-10 text-xs text-slate-400 bg-slate-50">
+                    No payment records found for {paymentsRange.replace('_', ' ')} matching "{paymentLedgerSearch}".
+                  </div>
+                );
+              }
+
+              return (
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead className="bg-slate-900 text-white text-[11px] uppercase tracking-wider sticky top-0 z-10">
+                    <tr>
+                      <th className="py-2.5 px-3">#</th>
+                      <th className="py-2.5 px-3">Payment Date</th>
+                      <th className="py-2.5 px-3">IMEI / Model</th>
+                      <th className="py-2.5 px-3">Vehicle Number</th>
+                      <th className="py-2.5 px-3">Customer KYC</th>
+                      <th className="py-2.5 px-3">Stock Place / Dealer</th>
+                      <th className="py-2.5 px-3 text-right">Amount (₹)</th>
+                      <th className="py-2.5 px-3 text-center">Status</th>
+                      <th className="py-2.5 px-3">Received By</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {filteredTx.map((tx, idx) => (
+                      <tr key={tx.id || idx} className="hover:bg-slate-50/80 transition-colors">
+                        <td className="py-2 px-3 font-mono text-slate-400 text-[11px]">{idx + 1}</td>
+                        <td className="py-2 px-3 font-mono font-medium text-slate-700">{tx.payment_date}</td>
+                        <td className="py-2 px-3">
+                          <div className="font-mono font-bold text-slate-900">{tx.imei_number}</div>
+                          <div className="text-[10px] text-slate-500">{tx.device_type_name}</div>
+                        </td>
+                        <td className="py-2 px-3 font-mono font-bold text-indigo-700">{tx.vehicle_number}</td>
+                        <td className="py-2 px-3">
+                          <div className="font-semibold text-slate-800">{tx.customer_name}</div>
+                          {tx.customer_phone && tx.customer_phone !== '—' && (
+                            <div className="text-[10px] text-slate-500 font-mono">{tx.customer_phone}</div>
+                          )}
+                        </td>
+                        <td className="py-2 px-3 text-slate-700">{tx.stock_place}</td>
+                        <td className="py-2 px-3 text-right font-mono font-bold text-slate-900">
+                          {tx.amount_formatted}
+                        </td>
+                        <td className="py-2 px-3 text-center">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            tx.payment_status === 'PAID'
+                              ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                              : 'bg-red-100 text-red-800 border border-red-200'
+                          }`}>
+                            {tx.payment_status}
+                          </span>
+                        </td>
+                        <td className="py-2 px-3 text-slate-600 text-[11px]">{tx.payment_received_by}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              );
+            })()}
+          </div>
+        </div>
+      )}
+
 
       {/* Row 3: Vendor Brand Share & Upcoming Expiries Alerts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

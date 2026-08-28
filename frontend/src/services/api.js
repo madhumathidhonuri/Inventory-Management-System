@@ -539,6 +539,19 @@ export async function triggerCloudSyncNow() {
   return data;
 }
 
+export async function fetchPaymentsTelemetry(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  const res = await fetch(`${API_BASE}/dashboard/payments-telemetry?${query}`);
+  if (!res.ok) throw new Error('Failed to fetch payments telemetry');
+  return res.json();
+}
+
+export function getPaymentsExcelDownloadUrl(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return `${API_BASE}/reports/payments-excel?${query}`;
+}
+
+
 
 
 

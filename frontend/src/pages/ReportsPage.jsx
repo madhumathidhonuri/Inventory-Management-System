@@ -29,10 +29,18 @@ import {
   CreditCard as PanIcon,
   Shield
 } from 'lucide-react';
-import { fetchReportOptions, fetchReportPreview, fetchDailyDistributionReport, fetchCustomerDirectory, getCustomerDirectoryExportUrl } from '../services/api';
+import {
+  fetchReportOptions,
+  fetchReportPreview,
+  fetchDailyDistributionReport,
+  fetchCustomerDirectory,
+  getCustomerDirectoryExportUrl,
+  fetchPaymentsTelemetry,
+  getPaymentsExcelDownloadUrl
+} from '../services/api';
 
 export default function ReportsPage() {
-  const [activeTab, setActiveTab] = useState('customer_directory'); // 'customer_directory' | 'daily_matrix' | 'custom_builder'
+  const [activeTab, setActiveTab] = useState('payments_statement'); // 'payments_statement' | 'customer_directory' | 'daily_matrix' | 'custom_builder'
   const [loadingOptions, setLoadingOptions] = useState(true);
   const [dailyMatrixLoading, setDailyMatrixLoading] = useState(false);
   const [dailyMatrix, setDailyMatrix] = useState(null);
@@ -42,6 +50,15 @@ export default function ReportsPage() {
   const [customerDirectory, setCustomerDirectory] = useState([]);
   const [customerDirLoading, setCustomerDirLoading] = useState(false);
   const [customerDirSearch, setCustomerDirSearch] = useState('');
+
+  // Payments Statement State
+  const [paymentsRange, setPaymentsRange] = useState('today');
+  const [paymentStartDate, setPaymentStartDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [paymentEndDate, setPaymentEndDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [paymentsData, setPaymentsData] = useState(null);
+  const [paymentsLoading, setPaymentsLoading] = useState(false);
+  const [paymentsSearch, setPaymentsSearch] = useState('');
+
 
   const [options, setOptions] = useState({
     batches: [],
@@ -70,14 +87,38 @@ export default function ReportsPage() {
   const [previewData, setPreviewData] = useState({ totalCount: 0, preview: [] });
   const [downloading, setDownloading] = useState(null);
 
-  // Load options, daily matrix & customer directory on mount
+  // Load options, daily matrix, customer directory & payments statement on mount
   useEffect(() => {
     loadOptions();
     loadDailyMatrix();
     loadCustomerDirectory();
+    loadPaymentsStatement();
   }, []);
 
+  const loadPaymentsStatement = async () => {
+    setPaymentsLoading(true);
+    try {
+      const res = await fetchPaymentsTelemetry({
+        range: paymentsRange,
+        start_date: paymentStartDate,
+        end_date: paymentEndDate
+      });
+      if (res.success) {
+        setPaymentsData(res.data);
+      }
+    } catch (err) {
+      console.error('Failed to load payments statement:', err);
+    } finally {
+      setPaymentsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadPaymentsStatement();
+  }, [paymentsRange, paymentStartDate, paymentEndDate]);
+
   const loadCustomerDirectory = async () => {
+
     setCustomerDirLoading(true);
     try {
       const res = await fetchCustomerDirectory();
@@ -291,6 +332,23 @@ export default function ReportsPage() {
       {/* Main Mode Navigation Tabs */}
       <div className="flex flex-wrap items-center gap-3 border-b border-slate-200 pb-2">
         <button
+          onClick={() => setActiveTab('payments_statement')}
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 border ${
+            activeTab === 'payments_statement'
+              ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs'
+              : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+          }`}
+        >
+          <Receipt className="w-4 h-4" />
+          <span>Daily & Custom Range Payments Statement</span>
+          {paymentsData?.kpis && (
+            <span className="px-2 py-0.5 rounded-full text-[10px] bg-white/20 text-white font-bold">
+              Today: ₹{(paymentsData.kpis.today_collected_amount || 0).toLocaleString('en-IN')}
+            </span>
+          )}
+        </button>
+
+        <button
           onClick={() => setActiveTab('customer_directory')}
           className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 border ${
             activeTab === 'customer_directory'
@@ -333,8 +391,259 @@ export default function ReportsPage() {
         </button>
       </div>
 
+      {/* TAB: Daily & Custom Range Payments Statement */}
+      {activeTab === 'payments_statement' && (
+        <div className="glass-panel p-6 rounded-2xl space-y-6 border border-slate-200 shadow-sm animate-fadeIn">
+          {/* Section Header */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  <Receipt className="w-5 h-5 text-emerald-600" /> Daily Payments & Revenue Statement
+                </h3>
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                  {paymentsRange.replace('_', ' ').toUpperCase()}
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 mt-1">
+                Filter collections received today, yesterday, this month, or select any custom date range. Generates formal spreadsheet statement.
+              </p>
+            </div>
+
+            {/* Range Pills & Download Excel Button */}
+            <div className="flex flex-wrap items-center gap-2">
+              <a
+                href={getPaymentsExcelDownloadUrl({
+                  range: paymentsRange,
+                  start_date: paymentStartDate,
+                  end_date: paymentEndDate
+                })}
+                download
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-2xs transition-colors cursor-pointer"
+              >
+                <Download className="w-4 h-4" />
+                <span>Export Statement (.xlsx)</span>
+              </a>
+
+              <button
+                onClick={loadPaymentsStatement}
+                disabled={paymentsLoading}
+                className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition-colors cursor-pointer text-xs font-semibold flex items-center gap-1.5 border border-slate-200"
+                title="Refresh statement"
+              >
+                <RefreshCw className={`w-4 h-4 ${paymentsLoading ? 'animate-spin text-emerald-600' : ''}`} />
+              </button>
+            </div>
+          </div>
+
+          {/* Range Controls */}
+          <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2 text-xs font-bold text-slate-700">
+                <Calendar className="w-4 h-4 text-slate-500" />
+                <span>Select Payment Date Range:</span>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-1.5">
+                {[
+                  { id: 'today', label: 'Today' },
+                  { id: 'yesterday', label: 'Yesterday' },
+                  { id: 'this_week', label: 'Last 7 Days' },
+                  { id: 'this_month', label: 'This Month' },
+                  { id: 'all', label: 'All Time' },
+                  { id: 'custom', label: 'Custom Range 📅' }
+                ].map((tab) => {
+                  const active = paymentsRange === tab.id;
+                  return (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setPaymentsRange(tab.id)}
+                      className={`py-1.5 px-3 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+                        active
+                          ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs'
+                          : 'bg-white text-slate-700 border-slate-200 hover:bg-emerald-50 hover:border-emerald-200'
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {paymentsRange === 'custom' && (
+              <div className="flex flex-wrap items-center gap-4 pt-2 border-t border-slate-200/60 animate-fadeIn">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-slate-600">From Date:</span>
+                  <input
+                    type="date"
+                    value={paymentStartDate}
+                    onChange={(e) => setPaymentStartDate(e.target.value)}
+                    className="text-xs font-mono p-1.5 bg-white border border-slate-200 rounded-xl focus:border-emerald-500"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-slate-600">To Date:</span>
+                  <input
+                    type="date"
+                    value={paymentEndDate}
+                    onChange={(e) => setPaymentEndDate(e.target.value)}
+                    className="text-xs font-mono p-1.5 bg-white border border-slate-200 rounded-xl focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 4 Financial Summary KPI Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* KPI 1: Today's Collection */}
+            <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl text-emerald-950 shadow-2xs">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">Today's Collections</div>
+              <div className="text-2xl font-black font-mono text-emerald-800 mt-1">
+                ₹{(paymentsData?.kpis?.today_collected_amount || 0).toLocaleString('en-IN')}
+              </div>
+              <div className="text-[11px] text-emerald-600 mt-1">
+                {paymentsData?.kpis?.today_collected_count || 0} units paid today
+              </div>
+            </div>
+
+            {/* KPI 2: Period Total Collection */}
+            <div className="p-4 bg-blue-50 border border-blue-200 rounded-2xl text-blue-950 shadow-2xs">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-blue-700">Period Revenue Collected</div>
+              <div className="text-2xl font-black font-mono text-blue-800 mt-1">
+                ₹{(paymentsData?.kpis?.period_collected_amount || 0).toLocaleString('en-IN')}
+              </div>
+              <div className="text-[11px] text-blue-600 mt-1">
+                {paymentsData?.kpis?.period_collected_count || 0} units paid in period
+              </div>
+            </div>
+
+            {/* KPI 3: Pending Due */}
+            <div className="p-4 bg-red-50 border border-red-200 rounded-2xl text-red-950 shadow-2xs">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-red-700">Pending Receivables Due</div>
+              <div className="text-2xl font-black font-mono text-red-800 mt-1">
+                ₹{(paymentsData?.kpis?.period_pending_amount || 0).toLocaleString('en-IN')}
+              </div>
+              <div className="text-[11px] text-red-600 mt-1">
+                {paymentsData?.kpis?.period_pending_count || 0} units unpaid
+              </div>
+            </div>
+
+            {/* KPI 4: Collection Rate */}
+            <div className="p-4 bg-purple-50 border border-purple-200 rounded-2xl text-purple-950 shadow-2xs">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-purple-700">Collection Efficiency</div>
+              <div className="text-2xl font-black font-mono text-purple-800 mt-1">
+                {paymentsData?.kpis?.collection_rate || 0}%
+              </div>
+              <div className="text-[11px] text-purple-600 mt-1">
+                Total Billed: ₹{(paymentsData?.kpis?.total_period_billed || 0).toLocaleString('en-IN')}
+              </div>
+            </div>
+          </div>
+
+          {/* Search Bar & Transactions Ledger Table */}
+          <div className="space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                <Table className="w-4 h-4 text-emerald-600" />
+                <span>Transactions Ledger ({paymentsData?.transactions?.length || 0} Devices)</span>
+              </h4>
+
+              <div className="relative max-w-sm w-full">
+                <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Search by IMEI, Customer, Vehicle, Dealer..."
+                  value={paymentsSearch}
+                  onChange={(e) => setPaymentsSearch(e.target.value)}
+                  className="w-full pl-8.5 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+                />
+              </div>
+            </div>
+
+            <div className="overflow-x-auto max-h-[460px] rounded-xl border border-slate-200">
+              {(() => {
+                const allTx = paymentsData?.transactions || [];
+                const q = paymentsSearch.trim().toLowerCase();
+                const filteredTx = q
+                  ? allTx.filter(t =>
+                      (t.imei_number || '').toLowerCase().includes(q) ||
+                      (t.vehicle_number || '').toLowerCase().includes(q) ||
+                      (t.customer_name || '').toLowerCase().includes(q) ||
+                      (t.customer_phone || '').toLowerCase().includes(q) ||
+                      (t.stock_place || '').toLowerCase().includes(q) ||
+                      (t.payment_received_by || '').toLowerCase().includes(q)
+                    )
+                  : allTx;
+
+                if (filteredTx.length === 0) {
+                  return (
+                    <div className="text-center py-12 text-xs text-slate-400 bg-slate-50">
+                      No payment records found for {paymentsRange.replace('_', ' ')}.
+                    </div>
+                  );
+                }
+
+                return (
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead className="bg-slate-900 text-white text-[11px] uppercase tracking-wider sticky top-0 z-10">
+                      <tr>
+                        <th className="py-3 px-3.5">#</th>
+                        <th className="py-3 px-3.5">Payment Date</th>
+                        <th className="py-3 px-3.5">IMEI Number</th>
+                        <th className="py-3 px-3.5">Model</th>
+                        <th className="py-3 px-3.5">Vehicle Number</th>
+                        <th className="py-3 px-3.5">Customer Name & Phone</th>
+                        <th className="py-3 px-3.5">Dealer / Stock Place</th>
+                        <th className="py-3 px-3.5 text-right">Amount (₹)</th>
+                        <th className="py-3 px-3.5 text-center">Status</th>
+                        <th className="py-3 px-3.5">Received By</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 bg-white">
+                      {filteredTx.map((tx, idx) => (
+                        <tr key={tx.id || idx} className="hover:bg-slate-50/80 transition-colors">
+                          <td className="py-2.5 px-3.5 font-mono text-slate-400 text-[11px]">{idx + 1}</td>
+                          <td className="py-2.5 px-3.5 font-mono font-medium text-slate-700">{tx.payment_date}</td>
+                          <td className="py-2.5 px-3.5 font-mono font-bold text-slate-900">{tx.imei_number}</td>
+                          <td className="py-2.5 px-3.5 text-slate-600">{tx.device_type_name}</td>
+                          <td className="py-2.5 px-3.5 font-mono font-bold text-indigo-700">{tx.vehicle_number}</td>
+                          <td className="py-2.5 px-3.5">
+                            <div className="font-semibold text-slate-800">{tx.customer_name}</div>
+                            {tx.customer_phone && tx.customer_phone !== '—' && (
+                              <div className="text-[10px] text-slate-500 font-mono">{tx.customer_phone}</div>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3.5 text-slate-700">{tx.stock_place}</td>
+                          <td className="py-2.5 px-3.5 text-right font-mono font-bold text-slate-900">
+                            {tx.amount_formatted}
+                          </td>
+                          <td className="py-2.5 px-3.5 text-center">
+                            <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                              tx.payment_status === 'PAID'
+                                ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                : 'bg-red-100 text-red-800 border border-red-200'
+                            }`}>
+                              {tx.payment_status}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3.5 text-slate-600 text-[11px]">{tx.payment_received_by}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                );
+              })()}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* TAB 0: Customer & Vehicle KYC Directory Master */}
       {activeTab === 'customer_directory' && (
+
         <div className="glass-panel p-6 rounded-2xl space-y-5 border border-slate-200 shadow-sm animate-fadeIn">
           {/* Header & Excel Download Action */}
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 pb-4">

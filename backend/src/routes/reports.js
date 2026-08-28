@@ -1611,4 +1611,280 @@ router.get('/backup-database', (req, res) => {
   }
 });
 
+// GET /api/reports/payments-excel - Formatted Daily & Custom Range Payment Statement (.xlsx)
+router.get('/payments-excel', async (req, res) => {
+  try {
+
+    const {
+      range = 'today',
+      start_date,
+      end_date,
+      dealer_name,
+      device_type_id
+    } = req.query;
+
+    const now = new Date();
+    const todayISO = now.toISOString().split('T')[0];
+    const yesterdayObj = new Date(now);
+    yesterdayObj.setDate(yesterdayObj.getDate() - 1);
+    const yesterdayISO = yesterdayObj.toISOString().split('T')[0];
+    const weekAgoObj = new Date(now);
+    weekAgoObj.setDate(weekAgoObj.getDate() - 7);
+    const weekAgoISO = weekAgoObj.toISOString().split('T')[0];
+    const firstDayOfMonthISO = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+
+    let activeStartDate = todayISO;
+    let activeEndDate = todayISO;
+
+    if (range === 'today') {
+      activeStartDate = todayISO;
+      activeEndDate = todayISO;
+    } else if (range === 'yesterday') {
+      activeStartDate = yesterdayISO;
+      activeEndDate = yesterdayISO;
+    } else if (range === 'this_week') {
+      activeStartDate = weekAgoISO;
+      activeEndDate = todayISO;
+    } else if (range === 'this_month') {
+      activeStartDate = firstDayOfMonthISO;
+      activeEndDate = todayISO;
+    } else if (range === 'all') {
+      activeStartDate = '1970-01-01';
+      activeEndDate = '2099-12-31';
+    } else if (range === 'custom') {
+      activeStartDate = start_date ? start_date : todayISO;
+      activeEndDate = end_date ? end_date : todayISO;
+    }
+
+    let whereClauses = [];
+    let params = [];
+
+    if (device_type_id) {
+      whereClauses.push('d.device_type_id = ?');
+      params.push(device_type_id);
+    }
+    if (dealer_name) {
+      whereClauses.push('(d.current_holder_name LIKE ? OR d.additional_attributes LIKE ?)');
+      params.push(`%${dealer_name}%`, `%${dealer_name}%`);
+    }
+
+    const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
+    const devices = db.prepare(`
+      SELECT 
+        d.*,
+        dt.name as device_type_name
+      FROM devices d
+      LEFT JOIN device_types dt ON d.device_type_id = dt.id
+      ${whereSql}
+      ORDER BY d.id DESC
+    `).all(...params);
+
+    const rows = [];
+    let totalCollected = 0;
+    let totalPending = 0;
+
+    for (const dev of devices) {
+      let attrs = {};
+      try { attrs = JSON.parse(dev.additional_attributes || '{}'); } catch {}
+
+      // Extract payment date
+      const priorityKeys = [
+        'PAYMENT DATE', 'Payment Date', 'payment_date',
+        'PAYMENT RECEIVED DATE', 'Payment Received Date',
+        'DATE', 'Date', 'date',
+        'STOCK PLACE DATE', 'CERTIFICATE ISSUED DATE', 'INSTALLATION DATE'
+      ];
+      let devDateISO = null;
+      let rawDate = null;
+      for (const k of priorityKeys) {
+        if (attrs[k]) {
+          rawDate = String(attrs[k]).trim();
+          // Normalize to ISO
+          const parts = rawDate.split(/[-/.]/);
+          if (parts.length === 3) {
+            if (parts[0].length === 4) devDateISO = `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
+            else if (parts[2].length === 4) devDateISO = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+          }
+          if (devDateISO) break;
+        }
+      }
+      if (!devDateISO) {
+        devDateISO = (dev.updated_at || dev.created_at || '').split(' ')[0] || todayISO;
+      }
+
+      if (devDateISO >= activeStartDate && devDateISO <= activeEndDate) {
+        // Extract cost & payment status
+        let costVal = 0;
+        const costKeys = ['TOTAL COST', 'TOTAL_COST', 'COST', 'SALE PRICE', 'PRICE', 'AMOUNT'];
+        for (const ck of costKeys) {
+          if (attrs[ck]) {
+            const clean = String(attrs[ck]).replace(/[^0-9.]/g, '');
+            if (clean && !isNaN(Number(clean))) {
+              costVal = parseFloat(clean);
+              break;
+            }
+          }
+        }
+        if (!costVal && dev.purchase_price) costVal = Number(dev.purchase_price);
+
+        const payStatusRaw = attrs['AMOUNT RECEIVED'] || attrs['PAYMENT STATUS'] || (dev.current_status === 'INSTALLED' ? 'PAID' : 'PENDING');
+        const isPaid = String(payStatusRaw).toUpperCase().includes('REC') || 
+                       String(payStatusRaw).toUpperCase().includes('PAID') || 
+                       String(payStatusRaw).toUpperCase().includes('YES') ||
+                       Boolean(attrs['AMOUNT RECEIVED BY']);
+
+        if (isPaid) totalCollected += costVal;
+        else totalPending += costVal;
+
+        const custName = attrs['CUSTOMER NAME'] || attrs['Customer Name'] || attrs['CERTIFICATE ISSUED TO'] || '—';
+        const custPhone = attrs['CUSTOMER PHONE NUMBER'] || attrs['Customer Phone'] || '—';
+        const vehNo = attrs['VEHICLE NUMBER'] || attrs['Vehicle Number'] || (dev.current_status === 'INSTALLED' ? 'Installed' : '—');
+        const stockPlace = attrs['STOCK PLACE'] || dev.current_holder_name || 'Central Warehouse';
+        const receivedBy = attrs['AMOUNT RECEIVED BY'] || attrs['SALES PERSON NAME'] || '—';
+
+        rows.push({
+          payment_date: rawDate || devDateISO,
+          imei_number: dev.imei_number,
+          device_type: dev.device_type_name || 'GPS Tracker',
+          vehicle_number: vehNo,
+          customer_name: custName,
+          customer_phone: custPhone,
+          stock_place: stockPlace,
+          amount: costVal,
+          status: isPaid ? 'PAID' : 'PENDING',
+          received_by: receivedBy
+        });
+      }
+    }
+
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Payments Statement');
+
+    // Title Row
+    ws.mergeCells('A1:J1');
+    const titleCell = ws.getCell('A1');
+    titleCell.value = 'FUELTRACKS TECHNOLOGIES — DAILY PAYMENTS & COLLECTIONS STATEMENT';
+    titleCell.font = { bold: true, size: 14, color: { argb: 'FFFFFFFF' } };
+    titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F172A' } }; // Slate-900
+    titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+    ws.getRow(1).height = 35;
+
+    // Subtitle Row
+    ws.mergeCells('A2:J2');
+    const subCell = ws.getCell('A2');
+    subCell.value = `Date Range: ${activeStartDate} to ${activeEndDate} | Total Units: ${rows.length} | Generated: ${new Date().toLocaleString('en-IN')}`;
+    subCell.font = { italic: true, size: 10, color: { argb: 'FF475569' } };
+    subCell.alignment = { horizontal: 'center', vertical: 'middle' };
+    ws.getRow(2).height = 22;
+
+    // Summary Card Row
+    ws.mergeCells('A4:D4');
+    ws.getCell('A4').value = `Total Collected: ₹${totalCollected.toLocaleString('en-IN')}`;
+    ws.getCell('A4').font = { bold: true, size: 11, color: { argb: 'FF065F46' } };
+    ws.getCell('A4').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD1FAE5' } };
+    ws.getCell('A4').alignment = { horizontal: 'center', vertical: 'middle' };
+
+    ws.mergeCells('E4:G4');
+    ws.getCell('E4').value = `Pending Due: ₹${totalPending.toLocaleString('en-IN')}`;
+    ws.getCell('E4').font = { bold: true, size: 11, color: { argb: 'FF991B1B' } };
+    ws.getCell('E4').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEE2E2' } };
+    ws.getCell('E4').alignment = { horizontal: 'center', vertical: 'middle' };
+
+    ws.mergeCells('H4:J4');
+    const efficiency = (totalCollected + totalPending) > 0 ? Math.round((totalCollected / (totalCollected + totalPending)) * 100) : 100;
+    ws.getCell('H4').value = `Collection Efficiency: ${efficiency}%`;
+    ws.getCell('H4').font = { bold: true, size: 11, color: { argb: 'FF1E40AF' } };
+    ws.getCell('H4').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDBEAFE' } };
+    ws.getCell('H4').alignment = { horizontal: 'center', vertical: 'middle' };
+    ws.getRow(4).height = 26;
+
+    // Table Headers
+    const headers = [
+      'S.No', 'Payment Date', 'IMEI Number', 'Device Model',
+      'Vehicle Number', 'Customer Name', 'Contact Phone',
+      'Stock Place / Dealer', 'Amount (₹)', 'Payment Status', 'Received By / Mode'
+    ];
+    const headerRow = ws.addRow(headers);
+    headerRow.height = 28;
+    headerRow.eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 10 };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } }; // Slate-800
+      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+    });
+
+    // Populate Data
+    rows.forEach((r, idx) => {
+      const row = ws.addRow([
+        idx + 1,
+        r.payment_date,
+        r.imei_number,
+        r.device_type,
+        r.vehicle_number,
+        r.customer_name,
+        r.customer_phone,
+        r.stock_place,
+        r.amount,
+        r.status,
+        r.received_by
+      ]);
+      row.height = 22;
+
+      row.eachCell((cell, colNum) => {
+        cell.alignment = { vertical: 'middle', horizontal: colNum === 1 || colNum === 2 || colNum === 9 || colNum === 10 ? 'center' : 'left' };
+        cell.font = { name: 'Calibri', size: 10 };
+
+        // Currency format
+        if (colNum === 9) {
+          cell.numFmt = '₹#,##0';
+          cell.font = { bold: true, size: 10 };
+        }
+
+        // Status styling
+        if (colNum === 10) {
+          cell.font = { bold: true, color: { argb: r.status === 'PAID' ? 'FF065F46' : 'FF991B1B' } };
+        }
+      });
+    });
+
+    // Total Row
+    const totalRow = ws.addRow([
+      '', 'TOTAL', '', '', '', '', '', '',
+      totalCollected,
+      `${rows.filter(r => r.status === 'PAID').length} Paid`,
+      ''
+    ]);
+    totalRow.height = 26;
+    totalRow.eachCell((cell, colNum) => {
+      cell.font = { bold: true, size: 11, color: { argb: 'FF0F172A' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
+      if (colNum === 9) cell.numFmt = '₹#,##0';
+    });
+
+    ws.columns = [
+      { width: 8 },  // S.No
+      { width: 16 }, // Payment Date
+      { width: 20 }, // IMEI Number
+      { width: 16 }, // Device Model
+      { width: 18 }, // Vehicle Number
+      { width: 22 }, // Customer Name
+      { width: 18 }, // Contact Phone
+      { width: 24 }, // Stock Place / Dealer
+      { width: 16 }, // Amount (₹)
+      { width: 16 }, // Payment Status
+      { width: 22 }  // Received By / Mode
+    ];
+
+    const filename = `FuelTracks_Payments_Statement_${activeStartDate}_to_${activeEndDate}`;
+    const buffer = await wb.xlsx.writeBuffer();
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}.xlsx"`);
+    res.send(buffer);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;
+

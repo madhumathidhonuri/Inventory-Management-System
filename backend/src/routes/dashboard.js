@@ -49,6 +49,93 @@ function isPaymentReceived(attrs = {}, currentStatus = '') {
   return false;
 }
 
+// Helper: Normalize various Excel serials or string dates into YYYY-MM-DD
+function normalizeDateToISO(val) {
+  if (!val) return null;
+
+  // 1. Number or numeric string (Excel serial e.g. 46089, 46030)
+  const num = Number(val);
+  if (!isNaN(num) && num > 30000 && num < 65000 && !String(val).includes('-') && !String(val).includes('/')) {
+    const d = new Date(Math.round((num - 25569) * 86400 * 1000));
+    const year = d.getUTCFullYear();
+    const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(d.getUTCDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  // 2. String date (DD-MM-YYYY, YYYY-MM-DD, DD/MM/YYYY, DD.MM.YYYY)
+  const str = String(val).trim();
+  const parts = str.split(/[-/.]/);
+  if (parts.length === 3) {
+    if (parts[0].length === 4) {
+      // YYYY-MM-DD
+      const y = parts[0];
+      const m = parts[1].padStart(2, '0');
+      const d = parts[2].padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    } else if (parts[2].length === 4) {
+      // DD-MM-YYYY
+      const d = parts[0].padStart(2, '0');
+      const m = parts[1].padStart(2, '0');
+      const y = parts[2];
+      return `${y}-${m}-${d}`;
+    } else if (parts[2].length === 2) {
+      // DD-MM-YY
+      const d = parts[0].padStart(2, '0');
+      const m = parts[1].padStart(2, '0');
+      const y = '20' + parts[2];
+      return `${y}-${m}-${d}`;
+    }
+  }
+
+  // 3. Fallback Date.parse
+  const parsed = new Date(str);
+  if (!isNaN(parsed.getTime())) {
+    return parsed.toISOString().split('T')[0];
+  }
+
+  return null;
+}
+
+// Helper: Extract accurate Payment Date from device attributes or dates
+function extractPaymentDate(attrs = {}, device = {}) {
+  const priorityKeys = [
+    'PAYMENT DATE', 'Payment Date', 'payment_date',
+    'PAYMENT RECEIVED DATE', 'Payment Received Date', 'payment_received_date',
+    'DATE', 'Date', 'date',
+    'STOCK PLACE DATE', 'Stock Place Date',
+    'CERTIFICATE ISSUED DATE', 'Certificate Issued Date',
+    'INSTALLATION DATE', 'Installation Date'
+  ];
+
+  for (const k of priorityKeys) {
+    if (attrs[k]) {
+      const iso = normalizeDateToISO(attrs[k]);
+      if (iso) return { isoDate: iso, rawValue: String(attrs[k]).trim(), sourceColumn: k };
+    }
+  }
+
+  // Any attribute matching /payment.*date|date/i
+  for (const k of Object.keys(attrs)) {
+    if (/payment.*date|date/i.test(k) && attrs[k]) {
+      const iso = normalizeDateToISO(attrs[k]);
+      if (iso) return { isoDate: iso, rawValue: String(attrs[k]).trim(), sourceColumn: k };
+    }
+  }
+
+  if (device.updated_at) {
+    const iso = device.updated_at.split(' ')[0] || device.updated_at.split('T')[0];
+    return { isoDate: iso, rawValue: iso, sourceColumn: 'updated_at' };
+  }
+
+  if (device.created_at) {
+    const iso = device.created_at.split(' ')[0] || device.created_at.split('T')[0];
+    return { isoDate: iso, rawValue: iso, sourceColumn: 'created_at' };
+  }
+
+  return { isoDate: new Date().toISOString().split('T')[0], rawValue: 'Today', sourceColumn: 'default' };
+}
+
 const MONTH_NAMES = [
   'JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE',
   'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER'
@@ -58,6 +145,7 @@ const MONTH_NAMES = [
 function getDeviceMonth(attrs = {}, device = {}) {
   // 1. Highest Priority: Explicit MONTH / RECEIVEDMONTH column in spreadsheet
   for (const k of Object.keys(attrs)) {
+
     if (/^month$|^received.*month$/i.test(k.trim()) && attrs[k]) {
       const val = String(attrs[k]).toUpperCase().trim();
       if (MONTH_NAMES.includes(val)) return val;
@@ -828,4 +916,209 @@ router.get('/dealer-summary', (req, res) => {
   }
 });
 
+// GET /api/dashboard/payments-telemetry - Daily & Custom Date Range Payments Analytics
+router.get('/payments-telemetry', (req, res) => {
+  try {
+    const {
+      range = 'today', // 'today' | 'yesterday' | 'this_week' | 'this_month' | 'all' | 'custom'
+      start_date,
+      end_date,
+      dealer_name,
+      device_type_id,
+      vendor_name
+    } = req.query;
+
+    const now = new Date();
+    const todayISO = now.toISOString().split('T')[0];
+
+    const yesterdayObj = new Date(now);
+    yesterdayObj.setDate(yesterdayObj.getDate() - 1);
+    const yesterdayISO = yesterdayObj.toISOString().split('T')[0];
+
+    const weekAgoObj = new Date(now);
+    weekAgoObj.setDate(weekAgoObj.getDate() - 7);
+    const weekAgoISO = weekAgoObj.toISOString().split('T')[0];
+
+    const firstDayOfMonthISO = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+
+    let activeStartDate = todayISO;
+    let activeEndDate = todayISO;
+
+    if (range === 'today') {
+      activeStartDate = todayISO;
+      activeEndDate = todayISO;
+    } else if (range === 'yesterday') {
+      activeStartDate = yesterdayISO;
+      activeEndDate = yesterdayISO;
+    } else if (range === 'this_week') {
+      activeStartDate = weekAgoISO;
+      activeEndDate = todayISO;
+    } else if (range === 'this_month') {
+      activeStartDate = firstDayOfMonthISO;
+      activeEndDate = todayISO;
+    } else if (range === 'all') {
+      activeStartDate = '1970-01-01';
+      activeEndDate = '2099-12-31';
+    } else if (range === 'custom') {
+      activeStartDate = start_date ? normalizeDateToISO(start_date) || start_date : todayISO;
+      activeEndDate = end_date ? normalizeDateToISO(end_date) || end_date : todayISO;
+    }
+
+    let whereClauses = [];
+    let params = [];
+
+    if (device_type_id) {
+      whereClauses.push('d.device_type_id = ?');
+      params.push(device_type_id);
+    }
+    if (vendor_name) {
+      whereClauses.push('d.vendor_name = ?');
+      params.push(vendor_name);
+    }
+    if (dealer_name) {
+      whereClauses.push('(d.current_holder_name LIKE ? OR d.additional_attributes LIKE ?)');
+      params.push(`%${dealer_name}%`, `%${dealer_name}%`);
+    }
+
+    const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
+    const devices = db.prepare(`
+      SELECT 
+        d.*,
+        dt.name as device_type_name,
+        dt.category as device_type_category,
+        pb.notes as batch_notes
+      FROM devices d
+      LEFT JOIN device_types dt ON d.device_type_id = dt.id
+      LEFT JOIN purchase_batches pb ON d.purchase_batch_id = pb.id
+      ${whereSql}
+      ORDER BY d.id DESC
+    `).all(...params);
+
+    let todayCollectedAmount = 0;
+    let todayCollectedCount = 0;
+
+    let periodCollectedAmount = 0;
+    let periodCollectedCount = 0;
+    let periodPendingAmount = 0;
+    let periodPendingCount = 0;
+
+    const dateTimelineMap = {};
+    const dealerBreakdownMap = {};
+    const transactions = [];
+
+    for (const dev of devices) {
+      let attrs = {};
+      try { attrs = JSON.parse(dev.additional_attributes || '{}'); } catch {}
+
+      const costVal = extractCostValue(attrs, dev.purchase_price);
+      const isPaid = isPaymentReceived(attrs, dev.current_status);
+      const paymentDateInfo = extractPaymentDate(attrs, dev);
+      const devDateISO = paymentDateInfo.isoDate;
+
+      const custName = attrs['CUSTOMER NAME'] || attrs['Customer Name'] || attrs['Customer'] || attrs['CERTIFICATE ISSUED TO'] || '—';
+      const custPhone = attrs['CUSTOMER PHONE NUMBER'] || attrs['Customer Phone'] || attrs['Phone'] || '—';
+      const vehNo = attrs['VEHICLE NUMBER'] || attrs['Vehicle Number'] || attrs['Vehicle No'] || attrs['Reg No'] || (dev.current_status === 'INSTALLED' ? 'Installed Unit' : '—');
+      const stockPlace = attrs['STOCK PLACE'] || attrs['Stock Place'] || dev.current_holder_name || 'Central Warehouse';
+      const receivedBy = attrs['AMOUNT RECEIVED BY'] || attrs['Received By'] || attrs['PAYMENT RECEIVED BY'] || attrs['SALES PERSON NAME'] || '—';
+
+      // 1. All-time Today's metric
+      if (devDateISO === todayISO && isPaid) {
+        todayCollectedAmount += costVal;
+        todayCollectedCount++;
+      }
+
+      // 2. Check if device falls into active selected date range
+      const inRange = devDateISO >= activeStartDate && devDateISO <= activeEndDate;
+
+      if (inRange) {
+        if (isPaid) {
+          periodCollectedAmount += costVal;
+          periodCollectedCount++;
+        } else {
+          periodPendingAmount += costVal;
+          periodPendingCount++;
+        }
+
+        // Timeline aggregation
+        if (!dateTimelineMap[devDateISO]) {
+          dateTimelineMap[devDateISO] = { date: devDateISO, collected: 0, paid_count: 0, pending: 0, pending_count: 0 };
+        }
+        if (isPaid) {
+          dateTimelineMap[devDateISO].collected += costVal;
+          dateTimelineMap[devDateISO].paid_count++;
+        } else {
+          dateTimelineMap[devDateISO].pending += costVal;
+          dateTimelineMap[devDateISO].pending_count++;
+        }
+
+        // Dealer aggregation
+        if (!dealerBreakdownMap[stockPlace]) {
+          dealerBreakdownMap[stockPlace] = { name: stockPlace, collected: 0, paid_count: 0, pending: 0, pending_count: 0 };
+        }
+        if (isPaid) {
+          dealerBreakdownMap[stockPlace].collected += costVal;
+          dealerBreakdownMap[stockPlace].paid_count++;
+        } else {
+          dealerBreakdownMap[stockPlace].pending += costVal;
+          dealerBreakdownMap[stockPlace].pending_count++;
+        }
+
+        // Add to itemized transactions list
+        transactions.push({
+          id: dev.id,
+          imei_number: dev.imei_number,
+          sim_number: dev.sim_number,
+          device_type_name: dev.device_type_name || 'GPS Tracker',
+          customer_name: custName,
+          customer_phone: custPhone,
+          vehicle_number: vehNo,
+          stock_place: stockPlace,
+          amount: costVal,
+          amount_formatted: `₹${costVal.toLocaleString('en-IN')}`,
+          payment_status: isPaid ? 'PAID' : 'PENDING',
+          payment_date: paymentDateInfo.rawValue || devDateISO,
+          payment_date_iso: devDateISO,
+          payment_received_by: receivedBy
+        });
+      }
+    }
+
+    const totalBilledPeriod = periodCollectedAmount + periodPendingAmount;
+    const collectionRate = totalBilledPeriod > 0 ? Math.round((periodCollectedAmount / totalBilledPeriod) * 100) : (periodCollectedCount > 0 ? 100 : 0);
+
+    const timeline = Object.values(dateTimelineMap).sort((a, b) => b.date.localeCompare(a.date));
+    const dealerBreakdown = Object.values(dealerBreakdownMap).sort((a, b) => b.collected - a.collected);
+
+    res.json({
+      success: true,
+      data: {
+        filter: {
+          range,
+          start_date: activeStartDate,
+          end_date: activeEndDate,
+          today: todayISO,
+          yesterday: yesterdayISO
+        },
+        kpis: {
+          today_collected_amount: todayCollectedAmount,
+          today_collected_count: todayCollectedCount,
+          period_collected_amount: periodCollectedAmount,
+          period_collected_count: periodCollectedCount,
+          period_pending_amount: periodPendingAmount,
+          period_pending_count: periodPendingCount,
+          total_period_billed: totalBilledPeriod,
+          collection_rate: collectionRate
+        },
+        timeline,
+        dealer_breakdown: dealerBreakdown,
+        transactions
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;
+

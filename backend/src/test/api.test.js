@@ -161,6 +161,23 @@ async function runTests() {
       }
     });
 
+    // 12. Daily & Custom Range Payments Telemetry API
+    await assertTest('Payments Telemetry API', async () => {
+      const res = await makeRequest(testPort, '/api/dashboard/payments-telemetry?range=today');
+      if (res.status !== 200 || !res.body.success || !res.body.data.kpis) {
+        throw new Error('Payments telemetry API failed');
+      }
+    });
+
+    // 13. Payments Excel Report Export Endpoint
+    await assertTest('Payments Statement Excel Export API', async () => {
+      const res = await makeRequest(testPort, '/api/reports/payments-excel?range=today');
+      if (res.status !== 200) {
+        throw new Error('Payments Excel endpoint returned status ' + res.status);
+      }
+    });
+
+
 
     console.log('====================================================');
     console.log(` RESULT: ${passed} PASSED, ${failed} FAILED`);
