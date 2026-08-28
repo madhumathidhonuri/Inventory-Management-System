@@ -351,6 +351,61 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
     return Array.from(keysSet);
   }, [typeFilter, batchFilter, batches, deviceTypes, devices]);
 
+  // Dynamic columns strictly scoped to the device type of the row currently being edited
+  const rowEditColumns = useMemo(() => {
+    if (!editingRowDevice) return [];
+
+    const deviceTypeId = editingRowDevice.device_type_id?.toString();
+    const targetDt = deviceTypes.find(dt => 
+      (deviceTypeId && dt.id?.toString() === deviceTypeId) || 
+      (editingRowDevice.device_type_name && dt.name?.toLowerCase() === editingRowDevice.device_type_name?.toLowerCase())
+    );
+
+    const keysList = [];
+    const seen = new Set();
+
+    // 1. Prioritize registered Excel columns for this device type in exact order
+    if (targetDt && targetDt.custom_fields) {
+      let fields = [];
+      if (Array.isArray(targetDt.custom_fields)) {
+        fields = targetDt.custom_fields;
+      } else if (typeof targetDt.custom_fields === 'string') {
+        try {
+          const p = JSON.parse(targetDt.custom_fields);
+          fields = Array.isArray(p) ? p : Object.keys(p);
+        } catch {
+          fields = [];
+        }
+      } else if (typeof targetDt.custom_fields === 'object' && targetDt.custom_fields !== null) {
+        fields = Object.keys(targetDt.custom_fields);
+      }
+      fields.forEach(f => {
+        if (f && f !== 'original_row' && !/require.*sim/i.test(f) && !seen.has(f)) {
+          seen.add(f);
+          keysList.push(f);
+        }
+      });
+    }
+
+    // 2. Include any attributes that exist in this specific device's additional_attributes
+    let attrs = editingRowDevice.additional_attributes;
+    if (typeof attrs === 'string') {
+      try { attrs = JSON.parse(attrs); } catch { attrs = {}; }
+    }
+    if (attrs && typeof attrs === 'object') {
+      Object.keys(attrs).forEach(k => {
+        if (k && k !== 'original_row' && !/require.*sim/i.test(k) && !seen.has(k)) {
+          seen.add(k);
+          keysList.push(k);
+        }
+      });
+    }
+
+    // 3. Fallback: if no specific columns found, use customColumns
+    return keysList.length > 0 ? keysList : customColumns;
+  }, [editingRowDevice, deviceTypes, customColumns]);
+
+
   // Dynamic Column Preset Filtering
   const displayedColumns = useMemo(() => {
     if (columnPreset === 'ALL') return customColumns;
@@ -2497,9 +2552,16 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
         <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-lg p-6 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                <Edit2 className="w-5 h-5 text-blue-600" /> Edit Device Row & Custom Attributes
-              </h3>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  <Edit2 className="w-5 h-5 text-blue-600" /> Edit Device Row & Custom Attributes
+                </h3>
+                {editingRowDevice?.device_type_name && (
+                  <span className="px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 text-xs font-bold border border-blue-200 uppercase">
+                    {editingRowDevice.device_type_name}
+                  </span>
+                )}
+              </div>
               <button onClick={() => setEditingRowDevice(null)} className="p-1 text-slate-400 hover:text-slate-600">
                 <X className="w-4 h-4" />
               </button>
@@ -2562,14 +2624,17 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
             </div>
 
             {/* Dynamic Custom Attributes Inputs */}
-            {customColumns.length > 0 && (
+            {rowEditColumns.length > 0 && (
               <div className="pt-3 border-t border-slate-100 space-y-3">
                 <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-bold text-slate-800">Dynamic Excel Custom Fields</h4>
+                  <h4 className="text-xs font-bold text-slate-800">
+                    Dynamic Excel Custom Fields {editingRowDevice?.device_type_name ? `(${editingRowDevice.device_type_name})` : ''}
+                  </h4>
                   <span className="text-[10px] text-slate-500">Fields marked with 🔒 are restricted for your role</span>
                 </div>
                 <div className="grid grid-cols-2 gap-3 text-xs">
-                  {customColumns.map((col) => {
+                  {rowEditColumns.map((col) => {
+
                     const canEdit = canUserEditField(user, col);
                     return (
                       <div key={col}>
