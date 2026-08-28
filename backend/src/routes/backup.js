@@ -102,5 +102,52 @@ router.post('/sync-cloud', async (req, res) => {
   }
 });
 
+// POST /api/backup/factory-reset - Wipe everything (devices, batches, installations, customers, dispatches, extra users) and reset to fresh state
+router.post('/factory-reset', async (req, res) => {
+  try {
+    const transaction = db.transaction(() => {
+      db.prepare('DELETE FROM device_history').run();
+      db.prepare('DELETE FROM dispatch_items').run();
+      db.prepare('DELETE FROM dispatches').run();
+      db.prepare('DELETE FROM installations').run();
+      db.prepare('DELETE FROM reminders').run();
+      db.prepare('DELETE FROM devices').run();
+      db.prepare('DELETE FROM purchase_batches').run();
+      db.prepare('DELETE FROM customers').run();
+      
+      // Delete all extra users except ADMIN, ensure default ADMIN exists
+      db.prepare('DELETE FROM users WHERE role != "ADMIN"').run();
+      const adminUser = db.prepare('SELECT id FROM users WHERE role = "ADMIN" LIMIT 1').get();
+      if (!adminUser) {
+        db.prepare(`
+          INSERT INTO users (name, phone, email, password, role, region, allowed_columns)
+          VALUES ('DHONURI MADHUMATHI', '9999999999', 'admin@fueltracks.in', '123456', 'ADMIN', 'All India', '["*"]')
+        `).run();
+      }
+
+      // Reset device types template columns / custom fields
+      db.prepare('UPDATE device_types SET custom_fields = "[]", template_columns = "[]"').run();
+    });
+
+    transaction();
+
+    // Auto-sync cleared database to Supabase Cloud Storage
+    try {
+      const cloudSync = require('../db/cloudSync');
+      if (cloudSync.isConfigured()) {
+        await cloudSync.uploadToCloud();
+      }
+    } catch (e) {}
+
+    res.json({
+      success: true,
+      message: 'System successfully reset to factory fresh state. All devices, batches, installations, customers, and extra user roles wiped cleanly.'
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;
+
 

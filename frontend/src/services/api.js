@@ -551,6 +551,15 @@ export function getPaymentsExcelDownloadUrl(params = {}) {
   return `${API_BASE}/reports/payments-excel?${query}`;
 }
 
+export async function factoryResetSystem() {
+  const res = await fetch(`${API_BASE}/backup/factory-reset`, { method: 'POST' });
+  const data = await res.json();
+  if (!res.ok || !data.success) throw new Error(data.error || 'Failed to execute factory reset');
+  return data;
+}
+
+
+
 
 
 
