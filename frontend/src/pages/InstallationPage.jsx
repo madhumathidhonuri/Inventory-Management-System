@@ -61,6 +61,9 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
   const [installationDate, setInstallationDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [location, setLocation] = useState('');
   const [remarks, setRemarks] = useState('');
+  const [category, setCategory] = useState('VLTD'); // 'VLTD' | 'TG MINING' | 'AP MINING' | 'GENERAL' | 'CUSTOM'
+  const [customCategoryInput, setCustomCategoryInput] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('ALL');
 
   // Bulk WhatsApp Installs State
   const [showBulkModal, setShowBulkModal] = useState(false);
@@ -138,7 +141,9 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
         customer_address: customerAddress.trim(),
         vehicle_number: vehicleNumber.trim().toUpperCase(),
         vehicle_type: vehicleType,
+        category: category === 'CUSTOM' ? (customCategoryInput.trim() || 'CUSTOM') : category,
         aadhar_number: aadharNumber.trim(),
+
         pan_number: panNumber.trim().toUpperCase(),
         chasis_number: chasisNumber.trim().toUpperCase(),
         engine_number: engineNumber.trim().toUpperCase(),
@@ -334,8 +339,29 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
         </div>
       )}
 
-      {/* Filter Bar */}
-      <div className="glass-panel p-4 rounded-2xl flex items-center justify-between">
+      {/* Filter Bar with Category Selector Pills */}
+      <div className="glass-panel p-4 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mr-1">Project Category:</span>
+          {[
+            { id: 'ALL', label: 'All Projects', active: 'bg-slate-900 text-white' },
+            { id: 'VLTD', label: 'VLTD', active: 'bg-blue-600 text-white' },
+            { id: 'TG MINING', label: 'TG MINING', active: 'bg-amber-600 text-white' },
+            { id: 'AP MINING', label: 'AP MINING', active: 'bg-purple-600 text-white' },
+            { id: 'GENERAL', label: 'GENERAL', active: 'bg-emerald-600 text-white' }
+          ].map(p => (
+            <button
+              key={p.id}
+              onClick={() => setCategoryFilter(p.id)}
+              className={`px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                categoryFilter === p.id ? p.active : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+
         <div className="relative w-full md:w-80">
           <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
           <input
@@ -346,7 +372,6 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
             className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-4 py-2 text-xs text-slate-900 focus:outline-none focus:border-emerald-500 font-mono"
           />
         </div>
-        <span className="text-xs text-slate-500 font-bold hidden sm:inline">{installations.length} Active Installations</span>
       </div>
 
       {/* Installations Data Table */}
@@ -365,9 +390,11 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
               <thead className="bg-slate-50 text-slate-700 border-b border-slate-200 font-bold">
                 <tr>
                   <th className="p-3.5">Date</th>
+                  <th className="p-3.5">Category</th>
                   <th className="p-3.5 font-mono">Vehicle Number</th>
                   <th className="p-3.5 font-mono">Device IMEI</th>
                   <th className="p-3.5">Customer & Phone</th>
+
                   <th className="p-3.5 bg-indigo-50/50 text-indigo-900 border-l border-r border-indigo-100">GPS Software Login</th>
                   <th className="p-3.5">Technician / City</th>
                   <th className="p-3.5">Price & Payment</th>
@@ -375,14 +402,41 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {installations.map((inst) => {
+                {installations
+                  .filter(inst => {
+                    if (categoryFilter === 'ALL') return true;
+                    let devAttrs = {};
+                    try {
+                      devAttrs = typeof inst.device_additional_attributes === 'string' ? JSON.parse(inst.device_additional_attributes || '{}') : (inst.device_additional_attributes || {});
+                    } catch {}
+                    const cat = (devAttrs['CATEGORY'] || devAttrs['DEVICE CATEGORY'] || inst.vehicle_type || '').toUpperCase();
+                    return cat.includes(categoryFilter);
+                  })
+                  .map((inst) => {
                   const payStatus = (inst.payment_status || 'RECEIVED').toUpperCase();
                   const isPaid = payStatus.includes('REC') || payStatus.includes('PAID');
+
+                  let devAttrs = {};
+                  try {
+                    devAttrs = typeof inst.device_additional_attributes === 'string' ? JSON.parse(inst.device_additional_attributes || '{}') : (inst.device_additional_attributes || {});
+                  } catch {}
+                  const itemCat = (devAttrs['CATEGORY'] || devAttrs['DEVICE CATEGORY'] || inst.vehicle_type || 'VLTD').toUpperCase();
+                  let badgeClass = 'bg-blue-100 text-blue-800 border-blue-300';
+                  if (itemCat.includes('TG MINING')) badgeClass = 'bg-amber-100 text-amber-900 border-amber-300';
+                  else if (itemCat.includes('AP MINING')) badgeClass = 'bg-purple-100 text-purple-900 border-purple-300';
+                  else if (itemCat.includes('GENERAL')) badgeClass = 'bg-emerald-100 text-emerald-800 border-emerald-300';
 
                   return (
                     <tr key={inst.id} className="hover:bg-slate-50 transition-colors">
                       <td className="p-3.5 text-slate-600 font-mono">{inst.installation_date}</td>
                       
+                      {/* Project Category */}
+                      <td className="p-3.5">
+                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${badgeClass}`}>
+                          {itemCat}
+                        </span>
+                      </td>
+
                       {/* Vehicle Number */}
                       <td className="p-3.5 font-mono text-amber-700 font-bold">
                         <div className="flex items-center gap-1.5">
@@ -390,6 +444,7 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
                           <span>{inst.vehicle_number}</span>
                         </div>
                       </td>
+
 
                       {/* IMEI Number */}
                       <td className="p-3.5 font-mono text-blue-600 font-bold">
@@ -606,8 +661,60 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
                 </div>
               </div>
 
+              {/* Project / Installation Category Selector */}
+              <div className="space-y-2 bg-gradient-to-r from-blue-50/70 via-indigo-50/50 to-purple-50/70 p-3.5 rounded-2xl border border-blue-200/80">
+                <label className="block text-xs font-bold text-slate-800 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <Layers className="w-4 h-4 text-blue-600" /> Category / Project *
+                  </span>
+                  <span className="text-[10px] text-slate-500 font-normal">Choose project or type custom</span>
+                </label>
+                
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {[
+                    { id: 'VLTD', label: 'VLTD (AIS-140)', activeColor: 'bg-blue-600 text-white border-blue-600 shadow-xs', normalColor: 'bg-white border-blue-200 text-blue-800 hover:border-blue-400' },
+                    { id: 'TG MINING', label: 'TG MINING', activeColor: 'bg-amber-600 text-white border-amber-600 shadow-xs', normalColor: 'bg-white border-amber-200 text-amber-800 hover:border-amber-400' },
+                    { id: 'AP MINING', label: 'AP MINING', activeColor: 'bg-purple-600 text-white border-purple-600 shadow-xs', normalColor: 'bg-white border-purple-200 text-purple-800 hover:border-purple-400' },
+                    { id: 'GENERAL', label: 'GENERAL', activeColor: 'bg-emerald-600 text-white border-emerald-600 shadow-xs', normalColor: 'bg-white border-emerald-200 text-emerald-800 hover:border-emerald-400' }
+                  ].map(cat => (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      onClick={() => setCategory(cat.id)}
+                      className={`p-2 rounded-xl text-xs font-bold border transition-all text-center cursor-pointer ${
+                        category === cat.id ? cat.activeColor : cat.normalColor
+                      }`}
+                    >
+                      {cat.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="flex items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setCategory('CUSTOM')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                      category === 'CUSTOM' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    + Custom Category
+                  </button>
+                  {category === 'CUSTOM' && (
+                    <input
+                      type="text"
+                      placeholder="Type custom category (e.g. SCHOOL BUS, EXCAVATOR, GOVT)"
+                      value={customCategoryInput}
+                      onChange={(e) => setCustomCategoryInput(e.target.value.toUpperCase())}
+                      className="flex-1 bg-white border border-indigo-300 rounded-xl p-1.5 text-xs text-slate-900 font-bold uppercase focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                  )}
+                </div>
+              </div>
+
               {/* Customer Info Section */}
               <div className="space-y-3 bg-slate-50/70 p-3.5 rounded-2xl border border-slate-200/80">
+
                 <div className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
                   <UserCheck className="w-4 h-4 text-indigo-600" /> Customer Information
                 </div>

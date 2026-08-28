@@ -103,6 +103,8 @@ export default function DeviceDetailCardModal({ isOpen, onClose, imei, onDelete,
   const uid = getAttr('UID', 'Uid', 'Unit ID', 'UNIT ID', 'Unit Id', 'UID NUMBER', 'UID NO', 'Uid No');
   const vahanId = getAttr('VAHAN ID', 'Vahan ID', 'VAHAN_ID', 'Vahan Id', 'VAHAN', 'Vahan', 'VAHAN NO', 'Vahan No');
   const sim1 = getAttr('simno1', 'sim no 1', 'sim_no_1', 'SIM1', 'SIM 1', 'SIM_1', 'Sim 1', 'Primary SIM', 'SIM 1 Number', 'SIM1 NUMBER', 'SIM1 NO', 'Sim1', 'SIM NO 1');
+  const deviceCategory = (attrs['CATEGORY'] || attrs['DEVICE CATEGORY'] || attrs['Category'] || attrs['PROJECT'] || 'VLTD').toUpperCase();
+
   const sim2 = getAttr('simn02', 'simno2', 'sim no 2', 'sim_no_2', 'SIM2', 'SIM 2', 'SIM_2', 'Sim 2', 'Secondary SIM', 'SIM 2 Number', 'SIM2 NUMBER', 'SIM2 NO', 'Sim2', 'SIM NO 2');
 
   // Exclude already surfaced fields from generic extra attributes grid
@@ -226,6 +228,16 @@ export default function DeviceDetailCardModal({ isOpen, onClose, imei, onDelete,
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2">
+                    {/* Project Category Badge */}
+                    <span className={`px-3 py-1 rounded-xl text-xs font-bold uppercase tracking-wider border shadow-2xs ${
+                      deviceCategory.includes('TG MINING') ? 'bg-amber-100 text-amber-900 border-amber-300' :
+                      deviceCategory.includes('AP MINING') ? 'bg-purple-100 text-purple-900 border-purple-300' :
+                      deviceCategory.includes('GENERAL') ? 'bg-emerald-100 text-emerald-800 border-emerald-300' :
+                      'bg-blue-100 text-blue-800 border-blue-300'
+                    }`}>
+                      🏷️ {deviceCategory}
+                    </span>
+
                     {device.current_status && device.current_status !== 'IN_WAREHOUSE' && (
                       <span className={`px-3 py-1 rounded-xl text-xs font-bold uppercase tracking-wider border shadow-2xs ${getStatusBadgeStyle(device.current_status)}`}>
                         {device.current_status.replace('_', ' ')}
@@ -235,6 +247,7 @@ export default function DeviceDetailCardModal({ isOpen, onClose, imei, onDelete,
                       {device.device_type_name}
                     </span>
                   </div>
+
                 </div>
 
                 {/* Model-Specific Hardware Specs Sub-bar */}

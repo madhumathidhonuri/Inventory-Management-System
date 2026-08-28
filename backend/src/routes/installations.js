@@ -14,6 +14,9 @@ router.post('/', (req, res) => {
     customer_type,
     vehicle_number,
     vehicle_type,
+    category,
+    service_category,
+    project_category,
     chasis_number,
     engine_number,
     aadhar_number,
@@ -30,6 +33,7 @@ router.post('/', (req, res) => {
     software_user_id,
     software_password
   } = req.body;
+
 
   if (!imei_number || !customer_phone || !customer_name || !vehicle_number) {
     return res.status(400).json({
@@ -48,6 +52,7 @@ router.post('/', (req, res) => {
   const cleanSoftwareUser = software_user_id ? String(software_user_id).trim() : '';
   const cleanSoftwarePass = software_password ? String(software_password).trim() : '';
   const cleanPayStatus = payment_status ? String(payment_status).toUpperCase().trim() : (sale_price && parseFloat(sale_price) > 0 ? 'RECEIVED' : 'NOT RECEIVED');
+  const cleanCategory = (category || service_category || project_category || 'VLTD').toString().trim().toUpperCase();
   const instDate = installation_date ? String(installation_date).trim() : new Date().toISOString().split('T')[0];
 
   const transaction = db.transaction(() => {
@@ -56,6 +61,8 @@ router.post('/', (req, res) => {
     if (!dev) {
       const defaultType = db.prepare('SELECT id FROM device_types LIMIT 1').get() || { id: 1 };
       const initAttrs = {
+        'CATEGORY': cleanCategory,
+        'DEVICE CATEGORY': cleanCategory,
         'VEHICLE NUMBER': cleanVehicle,
         'CUSTOMER NAME': customer_name.trim(),
         'CUSTOMER PHONE NUMBER': cleanPhone,
@@ -72,6 +79,7 @@ router.post('/', (req, res) => {
 
       dev = db.prepare('SELECT * FROM devices WHERE id = ?').get(info.lastInsertRowid);
     }
+
 
     // 2. Customer Lookup & Auto Deduplication
     let customer = db.prepare('SELECT * FROM customers WHERE phone_number = ?').get(cleanPhone);
@@ -194,6 +202,9 @@ router.post('/', (req, res) => {
     }
     if (cleanSoftwareUser) attrs['USERNAME'] = cleanSoftwareUser;
     if (cleanSoftwarePass) attrs['PASSWORD'] = cleanSoftwarePass;
+    attrs['CATEGORY'] = cleanCategory;
+    attrs['DEVICE CATEGORY'] = cleanCategory;
+
 
     db.prepare(`
       UPDATE devices
@@ -391,12 +402,13 @@ router.get('/', (req, res) => {
   try {
     const { search, installer, customer_id, date_from, date_to } = req.query;
     let query = `
-      SELECT i.*, d.sim_number, dt.name as device_type_name
+      SELECT i.*, d.sim_number, d.additional_attributes as device_additional_attributes, dt.name as device_type_name
       FROM installations i
       JOIN devices d ON i.device_id = d.id
       JOIN device_types dt ON d.device_type_id = dt.id
       WHERE 1=1
     `;
+
     const params = [];
 
     if (search) {

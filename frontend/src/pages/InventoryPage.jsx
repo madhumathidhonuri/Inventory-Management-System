@@ -2626,7 +2626,74 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
               </div>
             </div>
 
+            {/* Category / Project Selector & Custom Input */}
+            <div className="space-y-2 bg-gradient-to-r from-blue-50/60 via-purple-50/40 to-emerald-50/60 p-3 rounded-xl border border-blue-200/80">
+              <label className="block text-xs font-bold text-slate-800 flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <Layers className="w-3.5 h-3.5 text-blue-600" /> Device Project Category
+                </span>
+                <span className="text-[10px] text-slate-500 font-normal">Click to select or type custom</span>
+              </label>
+
+              {/* Quick Choice Buttons */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                {[
+                  { id: 'VLTD', label: 'VLTD', active: 'bg-blue-600 text-white border-blue-600 shadow-xs', normal: 'bg-white text-blue-800 border-blue-200 hover:border-blue-400' },
+                  { id: 'TG MINING', label: 'TG MINING', active: 'bg-amber-600 text-white border-amber-600 shadow-xs', normal: 'bg-white text-amber-800 border-amber-200 hover:border-amber-400' },
+                  { id: 'AP MINING', label: 'AP MINING', active: 'bg-purple-600 text-white border-purple-600 shadow-xs', normal: 'bg-white text-purple-800 border-purple-200 hover:border-purple-400' },
+                  { id: 'GENERAL', label: 'GENERAL', active: 'bg-emerald-600 text-white border-emerald-600 shadow-xs', normal: 'bg-white text-emerald-800 border-emerald-200 hover:border-emerald-400' }
+                ].map(cat => {
+                  const currentCat = (rowFormData.additional_attributes['CATEGORY'] || rowFormData.additional_attributes['DEVICE CATEGORY'] || '').toUpperCase();
+                  const isSelected = currentCat === cat.id;
+                  return (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      onClick={() => {
+                        setRowFormData({
+                          ...rowFormData,
+                          additional_attributes: {
+                            ...rowFormData.additional_attributes,
+                            'CATEGORY': cat.id,
+                            'DEVICE CATEGORY': cat.id
+                          }
+                        });
+                      }}
+                      className={`p-1.5 rounded-lg text-xs font-bold border transition-all text-center cursor-pointer ${
+                        isSelected ? cat.active : cat.normal
+                      }`}
+                    >
+                      {cat.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Custom Category Input */}
+              <div className="flex items-center gap-2 pt-0.5">
+                <span className="text-[10px] font-bold text-slate-500">Or Type:</span>
+                <input
+                  type="text"
+                  placeholder="e.g. VLTD, TG MINING, AP MINING, GENERAL, SCHOOL BUS..."
+                  value={rowFormData.additional_attributes['CATEGORY'] || rowFormData.additional_attributes['DEVICE CATEGORY'] || ''}
+                  onChange={(e) => {
+                    const val = e.target.value.toUpperCase();
+                    setRowFormData({
+                      ...rowFormData,
+                      additional_attributes: {
+                        ...rowFormData.additional_attributes,
+                        'CATEGORY': val,
+                        'DEVICE CATEGORY': val
+                      }
+                    });
+                  }}
+                  className="flex-1 bg-white border border-slate-300 rounded-lg p-1.5 text-xs text-slate-900 font-bold uppercase focus:outline-none focus:border-blue-500"
+                />
+              </div>
+            </div>
+
             {/* Dynamic Custom Attributes Inputs */}
+
             {rowEditColumns.length > 0 && (
               <div className="pt-3 border-t border-slate-100 space-y-3">
                 <div className="flex items-center justify-between">
