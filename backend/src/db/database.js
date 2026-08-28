@@ -113,9 +113,12 @@ function initDatabase() {
       role TEXT NOT NULL,
       region TEXT DEFAULT 'All India',
       allowed_columns TEXT DEFAULT '[]',
+      monthly_target INTEGER DEFAULT NULL,
+      device_targets TEXT DEFAULT '{}',
       active INTEGER DEFAULT 1,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
+
 
     CREATE TABLE IF NOT EXISTS device_types (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -257,8 +260,9 @@ function initDatabase() {
   `);
 
   // Safe schema migrations for software credentials & payments
-  try { db.exec("ALTER TABLE users ADD COLUMN monthly_target INTEGER DEFAULT 50;"); } catch (e) {}
+  try { db.exec("ALTER TABLE users ADD COLUMN monthly_target INTEGER DEFAULT NULL;"); } catch (e) {}
   try { db.exec("ALTER TABLE users ADD COLUMN device_targets TEXT DEFAULT '{}';"); } catch (e) {}
+
   try { db.exec("ALTER TABLE customers ADD COLUMN software_user_id TEXT;"); } catch (e) {}
   try { db.exec("ALTER TABLE customers ADD COLUMN software_password TEXT;"); } catch (e) {}
   try { db.exec("ALTER TABLE customers ADD COLUMN aadhar_number TEXT;"); } catch (e) {}

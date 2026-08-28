@@ -501,14 +501,21 @@ router.get('/stats', (req, res) => {
       }
     }
 
-    const allUsers = db.prepare('SELECT id, name, monthly_target, device_targets FROM users').all();
+    let allUsers = [];
+    try {
+      allUsers = db.prepare('SELECT id, name, role, monthly_target, device_targets FROM users WHERE role = "DEALER"').all();
+    } catch (e) {
+      allUsers = [];
+    }
+
     const dealerAllocations = Object.values(dealerMap).map(d => {
-      const cleanName = d.dealer.replace(/\s*\(.*?\)/, '').trim().toLowerCase();
-      let matchedTarget = 50;
+      const cleanName = (d.dealer || '').replace(/\s*\(.*?\)/, '').trim().toLowerCase();
+      let matchedTarget = 0;
       let matchedDevTargets = {};
       for (const u of allUsers) {
-        if (d.dealer.toLowerCase().includes(u.name.toLowerCase()) || u.name.toLowerCase().includes(cleanName)) {
-          matchedTarget = u.monthly_target || 50;
+        const uName = (u.name || '').trim().toLowerCase();
+        if (uName && (cleanName.includes(uName) || uName.includes(cleanName) || (d.dealer || '').toLowerCase().includes(uName))) {
+          matchedTarget = Number(u.monthly_target) || 0;
           try { matchedDevTargets = JSON.parse(u.device_targets || '{}'); } catch {}
           break;
         }
@@ -520,16 +527,21 @@ router.get('/stats', (req, res) => {
       };
     }).sort((a, b) => b.total - a.total);
 
-    let dealerTarget = 50;
+    let dealerTarget = 0;
     let dealerDeviceTargets = {};
     if (dealer_name) {
-      const cleanName = dealer_name.replace(/\s*\(.*?\)/, '').trim().toLowerCase();
-      const matched = allUsers.find(u => dealer_name.toLowerCase().includes(u.name.toLowerCase()) || u.name.toLowerCase().includes(cleanName));
+      const cleanName = String(dealer_name).replace(/\s*\(.*?\)/, '').trim().toLowerCase();
+      const matched = allUsers.find(u => {
+        const uName = (u.name || '').trim().toLowerCase();
+        return uName && (cleanName.includes(uName) || uName.includes(cleanName) || String(dealer_name).toLowerCase().includes(uName));
+      });
       if (matched) {
-        dealerTarget = matched.monthly_target || 50;
+        dealerTarget = Number(matched.monthly_target) || 0;
         try { dealerDeviceTargets = JSON.parse(matched.device_targets || '{}'); } catch {}
       }
     }
+
+
 
     // 7. Upcoming 30-Day SIM & Warranty & Certificate Expiries Alert Center
     const todayDate = new Date();
