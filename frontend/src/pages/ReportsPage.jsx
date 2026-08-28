@@ -648,14 +648,14 @@ export default function ReportsPage() {
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                  <UserCheck className="w-5 h-5 text-indigo-600" /> Customer Master & Vehicle Directory (KYC Details)
+                  <UserCheck className="w-5 h-5 text-indigo-600" /> Customer Master & Vehicle Directory (KYC & RTO Details)
                 </h3>
                 <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-800 border border-indigo-200">
                   {customerDirectory.length} Total Customers
                 </span>
               </div>
               <p className="text-xs text-slate-500 mt-1">
-                Complete directory containing Customer Name, Phone Number, Aadhar Number, PAN Number, Chassis Number, Engine Number, Vehicle Number, and Email.
+                Complete directory containing Customer Name, Phone, Aadhaar, PAN, Vehicle Number, RTO Location, Chassis, Engine, Email, IMEI, and Installation Date.
               </p>
             </div>
 
@@ -674,7 +674,7 @@ export default function ReportsPage() {
                 onClick={handleExportCustomerDirectory}
                 disabled={downloading === 'customer_directory' || customerDirectory.length === 0}
                 className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-2 cursor-pointer"
-                title="Download Customer Details with Aadhar, PAN, Chassis, Engine in Excel Sheet (.xlsx)"
+                title="Download Customer Details with Aadhaar, PAN, Vehicle, RTO Location, Chassis, Engine in Excel Sheet (.xlsx)"
               >
                 <FileSpreadsheet className="w-4 h-4" />
                 <span>
@@ -690,7 +690,7 @@ export default function ReportsPage() {
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
-                placeholder="Search by Customer Name, Phone, Vehicle, Aadhar, PAN, Chassis..."
+                placeholder="Search by Customer Name, Phone, Vehicle, RTO Location, Aadhaar, PAN, Chassis..."
                 value={customerDirSearch}
                 onChange={(e) => setCustomerDirSearch(e.target.value)}
                 className="w-full bg-white border border-slate-300 rounded-xl pl-9 pr-4 py-2 text-xs text-slate-900 focus:outline-none focus:border-indigo-500 font-medium"
@@ -706,6 +706,7 @@ export default function ReportsPage() {
                     String(r.customer_name || '').toLowerCase().includes(q) ||
                     String(r.phone_number || '').toLowerCase().includes(q) ||
                     String(r.vehicle_number || '').toLowerCase().includes(q) ||
+                    String(r.rto_location || '').toLowerCase().includes(q) ||
                     String(r.aadhar_number || '').toLowerCase().includes(q) ||
                     String(r.pan_number || '').toLowerCase().includes(q) ||
                     String(r.chasis_number || '').toLowerCase().includes(q) ||
@@ -727,27 +728,29 @@ export default function ReportsPage() {
                     <th className="p-3 border-r border-slate-800">#</th>
                     <th className="p-3 border-r border-slate-800 font-bold">Customer Name</th>
                     <th className="p-3 border-r border-slate-800">Phone Number</th>
-                    <th className="p-3 border-r border-slate-800">Aadhar Number</th>
+                    <th className="p-3 border-r border-slate-800">Aadhaar Number</th>
                     <th className="p-3 border-r border-slate-800">PAN Number</th>
+                    <th className="p-3 border-r border-slate-800 font-bold text-amber-300">Vehicle Number</th>
+                    <th className="p-3 border-r border-slate-800 font-bold text-blue-300">RTO Location</th>
                     <th className="p-3 border-r border-slate-800">Chassis Number</th>
                     <th className="p-3 border-r border-slate-800">Engine Number</th>
-                    <th className="p-3 border-r border-slate-800 font-bold text-amber-300">Vehicle Number</th>
                     <th className="p-3 border-r border-slate-800">Email Address</th>
                     <th className="p-3 border-r border-slate-800 font-mono">IMEI Number</th>
-                    <th className="p-3">Device Model</th>
+                    <th className="p-3 border-r border-slate-800">Device Model</th>
+                    <th className="p-3">Installation Date</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200 bg-white">
                   {customerDirLoading ? (
                     <tr>
-                      <td colSpan={11} className="p-8 text-center text-slate-500">
+                      <td colSpan={13} className="p-8 text-center text-slate-500">
                         <RefreshCw className="w-6 h-6 animate-spin mx-auto text-indigo-600 mb-2" />
                         <span>Loading customer directory records...</span>
                       </td>
                     </tr>
                   ) : customerDirectory.length === 0 ? (
                     <tr>
-                      <td colSpan={11} className="p-8 text-center text-slate-400">
+                      <td colSpan={13} className="p-8 text-center text-slate-400">
                         No customer vehicle installation records found in directory yet.
                       </td>
                     </tr>
@@ -760,6 +763,7 @@ export default function ReportsPage() {
                           String(r.customer_name || '').toLowerCase().includes(q) ||
                           String(r.phone_number || '').toLowerCase().includes(q) ||
                           String(r.vehicle_number || '').toLowerCase().includes(q) ||
+                          String(r.rto_location || '').toLowerCase().includes(q) ||
                           String(r.aadhar_number || '').toLowerCase().includes(q) ||
                           String(r.pan_number || '').toLowerCase().includes(q) ||
                           String(r.chasis_number || '').toLowerCase().includes(q) ||
@@ -783,14 +787,23 @@ export default function ReportsPage() {
                           <td className="p-3 font-mono uppercase text-slate-700 border-r border-slate-100 whitespace-nowrap">
                             {rec.pan_number || '-'}
                           </td>
+                          <td className="p-3 font-mono font-black text-amber-900 bg-amber-50/60 border-r border-slate-100 whitespace-nowrap">
+                            {rec.vehicle_number || '-'}
+                          </td>
+                          <td className="p-3 font-medium text-blue-900 bg-blue-50/40 border-r border-slate-100 whitespace-nowrap">
+                            {rec.rto_location && rec.rto_location !== '-' ? (
+                              <span className="px-2 py-0.5 rounded-md bg-blue-100/80 text-blue-800 font-semibold text-[11px]">
+                                {rec.rto_location}
+                              </span>
+                            ) : (
+                              <span className="text-slate-400">-</span>
+                            )}
+                          </td>
                           <td className="p-3 font-mono text-slate-800 border-r border-slate-100 whitespace-nowrap">
                             {rec.chasis_number || '-'}
                           </td>
                           <td className="p-3 font-mono text-slate-800 border-r border-slate-100 whitespace-nowrap">
                             {rec.engine_number || '-'}
-                          </td>
-                          <td className="p-3 font-mono font-black text-amber-900 bg-amber-50/60 border-r border-slate-100 whitespace-nowrap">
-                            {rec.vehicle_number || '-'}
                           </td>
                           <td className="p-3 text-slate-600 border-r border-slate-100 whitespace-nowrap">
                             {rec.email || '-'}
@@ -798,8 +811,11 @@ export default function ReportsPage() {
                           <td className="p-3 font-mono text-slate-600 border-r border-slate-100 whitespace-nowrap">
                             {rec.imei_number}
                           </td>
-                          <td className="p-3 text-slate-600 whitespace-nowrap">
+                          <td className="p-3 text-slate-600 border-r border-slate-100 whitespace-nowrap">
                             {rec.device_model}
+                          </td>
+                          <td className="p-3 font-mono text-slate-600 whitespace-nowrap">
+                            {rec.installation_date || '-'}
                           </td>
                         </tr>
                       ))
@@ -810,6 +826,7 @@ export default function ReportsPage() {
           </div>
         </div>
       )}
+
 
       {/* TAB 1: Auto-Prepared Daily Master Stock Distribution Matrix */}
       {activeTab === 'daily_matrix' && (
