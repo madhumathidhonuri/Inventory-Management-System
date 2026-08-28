@@ -49,6 +49,26 @@ function isPaymentReceived(attrs = {}, currentStatus = '') {
   return false;
 }
 
+const MONTH_NAMES = [
+  'JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE',
+  'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER'
+];
+
+const MONTH_INDEX_MAP = {
+  'JANUARY': '01', 'JAN': '01',
+  'FEBRUARY': '02', 'FEB': '02',
+  'MARCH': '03', 'MAR': '03',
+  'APRIL': '04', 'APR': '04',
+  'MAY': '05',
+  'JUNE': '06', 'JUN': '06',
+  'JULY': '07', 'JUL': '07',
+  'AUGUST': '08', 'AUG': '08',
+  'SEPTEMBER': '09', 'SEP': '09', 'SEPT': '09',
+  'OCTOBER': '10', 'OCT': '10',
+  'NOVEMBER': '11', 'NOV': '11',
+  'DECEMBER': '12', 'DEC': '12'
+};
+
 // Helper: Normalize various Excel serials or string dates into YYYY-MM-DD
 function normalizeDateToISO(val) {
   if (!val) return null;
@@ -88,18 +108,21 @@ function normalizeDateToISO(val) {
     }
   }
 
-  // 3. Fallback Date.parse
-  const parsed = new Date(str);
-  if (!isNaN(parsed.getTime())) {
-    return parsed.toISOString().split('T')[0];
+  // 3. Fallback Date.parse if it contains explicit year
+  if (/\d{4}/.test(str)) {
+    const parsed = new Date(str);
+    if (!isNaN(parsed.getTime())) {
+      return parsed.toISOString().split('T')[0];
+    }
   }
 
   return null;
 }
 
-// Helper: Extract accurate Payment Date from device attributes or dates
+// Helper: Extract accurate Payment Date or Month from device attributes
 function extractPaymentDate(attrs = {}, device = {}) {
-  const priorityKeys = [
+  // 1. Look for explicit Date columns (Exact daily date)
+  const dateKeys = [
     'PAYMENT DATE', 'Payment Date', 'payment_date',
     'PAYMENT RECEIVED DATE', 'Payment Received Date', 'payment_received_date',
     'DATE', 'Date', 'date',
@@ -108,38 +131,69 @@ function extractPaymentDate(attrs = {}, device = {}) {
     'INSTALLATION DATE', 'Installation Date'
   ];
 
-  for (const k of priorityKeys) {
-    if (attrs[k]) {
-      const iso = normalizeDateToISO(attrs[k]);
-      if (iso) return { isoDate: iso, rawValue: String(attrs[k]).trim(), sourceColumn: k };
+  for (const k of dateKeys) {
+    if (attrs[k] !== undefined && attrs[k] !== null && String(attrs[k]).trim() !== '') {
+      const raw = String(attrs[k]).trim();
+      const upper = raw.toUpperCase();
+
+      // If the date column actually contains a month string (e.g. "JUNE", "JULY")
+      for (const [mName, mNum] of Object.entries(MONTH_INDEX_MAP)) {
+        if (upper === mName || upper.startsWith(mName + ' ') || upper.startsWith(mName + '-')) {
+          return {
+            isoDate: `2026-${mNum}-01`,
+            rawValue: raw,
+            sourceColumn: k,
+            hasExactDate: false,
+            monthName: mName
+          };
+        }
+      }
+
+      const iso = normalizeDateToISO(raw);
+      if (iso) {
+        return {
+          isoDate: iso,
+          rawValue: raw,
+          sourceColumn: k,
+          hasExactDate: true
+        };
+      }
     }
   }
 
-  // Any attribute matching /payment.*date|date/i
+  // 2. Look for explicit Month column in attributes (e.g. MONTH, RECEIVEDMONTH, RECEIVED MONTH)
   for (const k of Object.keys(attrs)) {
-    if (/payment.*date|date/i.test(k) && attrs[k]) {
-      const iso = normalizeDateToISO(attrs[k]);
-      if (iso) return { isoDate: iso, rawValue: String(attrs[k]).trim(), sourceColumn: k };
+    if (/^month$|^received.*month$/i.test(k.trim()) && attrs[k]) {
+      const raw = String(attrs[k]).trim();
+      const upper = raw.toUpperCase();
+      for (const [mName, mNum] of Object.entries(MONTH_INDEX_MAP)) {
+        if (upper === mName || upper.startsWith(mName)) {
+          return {
+            isoDate: `2026-${mNum}-01`,
+            rawValue: raw,
+            sourceColumn: k,
+            hasExactDate: false,
+            monthName: mName
+          };
+        }
+      }
     }
   }
 
-  if (device.updated_at) {
-    const iso = device.updated_at.split(' ')[0] || device.updated_at.split('T')[0];
-    return { isoDate: iso, rawValue: iso, sourceColumn: 'updated_at' };
+  // 3. Fallback: If device has an actual installation record with explicit date
+  if (device && device.installation_date) {
+    const iso = normalizeDateToISO(device.installation_date);
+    if (iso) return { isoDate: iso, rawValue: device.installation_date, sourceColumn: 'installation_date', hasExactDate: true };
   }
 
-  if (device.created_at) {
-    const iso = device.created_at.split(' ')[0] || device.created_at.split('T')[0];
-    return { isoDate: iso, rawValue: iso, sourceColumn: 'created_at' };
-  }
-
-  return { isoDate: new Date().toISOString().split('T')[0], rawValue: 'Today', sourceColumn: 'default' };
+  // 4. If no date and no month was recorded in the sheet, NEVER default to today
+  return {
+    isoDate: '1970-01-01',
+    rawValue: 'Unspecified Date',
+    sourceColumn: 'none',
+    hasExactDate: false
+  };
 }
-
-const MONTH_NAMES = [
-  'JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE',
-  'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER'
-];
 
 // Helper: Extract accurate operational Month from device attributes
 function getDeviceMonth(attrs = {}, device = {}) {
@@ -1035,14 +1089,21 @@ router.get('/payments-telemetry', (req, res) => {
       const stockPlace = attrs['STOCK PLACE'] || attrs['Stock Place'] || dev.current_holder_name || 'Central Warehouse';
       const receivedBy = attrs['AMOUNT RECEIVED BY'] || attrs['Received By'] || attrs['PAYMENT RECEIVED BY'] || attrs['SALES PERSON NAME'] || '—';
 
-      // 1. All-time Today's metric
-      if (devDateISO === todayISO) {
+      // 1. All-time Today's metric (Only if exact date is today)
+      if (paymentDateInfo.hasExactDate && devDateISO === todayISO) {
         todayCollectedAmount += costVal;
         todayCollectedCount++;
       }
 
       // 2. Check if payment date falls into active selected date range
-      const inRange = devDateISO >= activeStartDate && devDateISO <= activeEndDate;
+      let inRange = false;
+      if (range === 'today') inRange = paymentDateInfo.hasExactDate && devDateISO === todayISO;
+      else if (range === 'yesterday') inRange = paymentDateInfo.hasExactDate && devDateISO === yesterdayISO;
+      else if (range === 'this_week') inRange = paymentDateInfo.hasExactDate && devDateISO >= weekAgoISO && devDateISO <= todayISO;
+      else if (range === 'this_month') inRange = devDateISO >= firstDayOfMonthISO && devDateISO <= todayISO;
+      else if (range === 'all') inRange = true;
+      else if (range === 'custom') inRange = devDateISO >= activeStartDate && devDateISO <= activeEndDate;
+
 
       if (inRange) {
         periodCollectedAmount += costVal;

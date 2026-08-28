@@ -1697,9 +1697,25 @@ router.get('/payments-excel', async (req, res) => {
     let totalCollected = 0;
     let totalPending = 0;
 
+    const MONTH_INDEX_MAP = {
+      'JANUARY': '01', 'JAN': '01', 'FEBRUARY': '02', 'FEB': '02', 'MARCH': '03', 'MAR': '03',
+      'APRIL': '04', 'APR': '04', 'MAY': '05', 'JUNE': '06', 'JUN': '06', 'JULY': '07', 'JUL': '07',
+      'AUGUST': '08', 'AUG': '08', 'SEPTEMBER': '09', 'SEP': '09', 'SEPT': '09', 'OCTOBER': '10',
+      'OCT': '10', 'NOVEMBER': '11', 'NOV': '11', 'DECEMBER': '12', 'DEC': '12'
+    };
+
     for (const dev of devices) {
       let attrs = {};
       try { attrs = JSON.parse(dev.additional_attributes || '{}'); } catch {}
+
+      const payStatusRaw = attrs['AMOUNT RECEIVED'] || attrs['PAYMENT STATUS'] || (dev.current_status === 'INSTALLED' ? 'PAID' : 'PENDING');
+      const isPaid = String(payStatusRaw).toUpperCase().includes('REC') || 
+                     String(payStatusRaw).toUpperCase().includes('PAID') || 
+                     String(payStatusRaw).toUpperCase().includes('YES') ||
+                     Boolean(attrs['AMOUNT RECEIVED BY']);
+
+      // Strictly ignore any unpaid / pending records
+      if (!isPaid) continue;
 
       // Extract payment date
       const priorityKeys = [
@@ -1710,23 +1726,76 @@ router.get('/payments-excel', async (req, res) => {
       ];
       let devDateISO = null;
       let rawDate = null;
+      let hasExactDate = false;
+
       for (const k of priorityKeys) {
-        if (attrs[k]) {
+        if (attrs[k] !== undefined && attrs[k] !== null && String(attrs[k]).trim() !== '') {
           rawDate = String(attrs[k]).trim();
-          // Normalize to ISO
+          const upper = rawDate.toUpperCase();
+
+          for (const [mName, mNum] of Object.entries(MONTH_INDEX_MAP)) {
+            if (upper === mName || upper.startsWith(mName + ' ') || upper.startsWith(mName + '-')) {
+              devDateISO = `2026-${mNum}-01`;
+              hasExactDate = false;
+              break;
+            }
+          }
+          if (devDateISO) break;
+
+          const num = Number(rawDate);
+          if (!isNaN(num) && num > 30000 && num < 65000 && !rawDate.includes('-') && !rawDate.includes('/')) {
+            const d = new Date(Math.round((num - 25569) * 86400 * 1000));
+            const y = d.getUTCFullYear();
+            const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+            const day = String(d.getUTCDate()).padStart(2, '0');
+            devDateISO = `${y}-${m}-${day}`;
+            hasExactDate = true;
+            break;
+          }
+
           const parts = rawDate.split(/[-/.]/);
           if (parts.length === 3) {
             if (parts[0].length === 4) devDateISO = `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
             else if (parts[2].length === 4) devDateISO = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+            else if (parts[2].length === 2) devDateISO = `20${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+            hasExactDate = true;
+            break;
+          }
+        }
+      }
+
+      if (!devDateISO) {
+        for (const k of Object.keys(attrs)) {
+          if (/^month$|^received.*month$/i.test(k.trim()) && attrs[k]) {
+            const raw = String(attrs[k]).trim().toUpperCase();
+            for (const [mName, mNum] of Object.entries(MONTH_INDEX_MAP)) {
+              if (raw === mName || raw.startsWith(mName)) {
+                devDateISO = `2026-${mNum}-01`;
+                rawDate = String(attrs[k]).trim();
+                hasExactDate = false;
+                break;
+              }
+            }
           }
           if (devDateISO) break;
         }
       }
+
       if (!devDateISO) {
-        devDateISO = (dev.updated_at || dev.created_at || '').split(' ')[0] || todayISO;
+        devDateISO = '1970-01-01';
+        rawDate = 'Unspecified Date';
+        hasExactDate = false;
       }
 
-      if (devDateISO >= activeStartDate && devDateISO <= activeEndDate) {
+      let inRange = false;
+      if (range === 'today') inRange = hasExactDate && devDateISO === todayISO;
+      else if (range === 'yesterday') inRange = hasExactDate && devDateISO === yesterdayISO;
+      else if (range === 'this_week') inRange = hasExactDate && devDateISO >= weekAgoISO && devDateISO <= todayISO;
+      else if (range === 'this_month') inRange = devDateISO >= firstDayOfMonthISO && devDateISO <= todayISO;
+      else if (range === 'all') inRange = true;
+      else if (range === 'custom') inRange = devDateISO >= activeStartDate && devDateISO <= activeEndDate;
+
+      if (inRange) {
         // Extract cost & payment status
         let costVal = 0;
         const costKeys = ['TOTAL COST', 'TOTAL_COST', 'COST', 'SALE PRICE', 'PRICE', 'AMOUNT'];
@@ -1740,15 +1809,6 @@ router.get('/payments-excel', async (req, res) => {
           }
         }
         if (!costVal && dev.purchase_price) costVal = Number(dev.purchase_price);
-
-        const payStatusRaw = attrs['AMOUNT RECEIVED'] || attrs['PAYMENT STATUS'] || (dev.current_status === 'INSTALLED' ? 'PAID' : 'PENDING');
-        const isPaid = String(payStatusRaw).toUpperCase().includes('REC') || 
-                       String(payStatusRaw).toUpperCase().includes('PAID') || 
-                       String(payStatusRaw).toUpperCase().includes('YES') ||
-                       Boolean(attrs['AMOUNT RECEIVED BY']);
-
-        // Strictly ignore any unpaid / pending records
-        if (!isPaid) continue;
 
         totalCollected += costVal;
 
@@ -1772,6 +1832,7 @@ router.get('/payments-excel', async (req, res) => {
         });
       }
     }
+
 
 
     const wb = new ExcelJS.Workbook();
