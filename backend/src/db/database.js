@@ -15,6 +15,19 @@ if (!fs.existsSync(backupDir)) {
 
 const dbPath = path.join(dataDir, 'inventory.db');
 
+// Fallback: If database file doesn't exist or is empty, initialize from initial_seed.db
+if (!fs.existsSync(dbPath) || fs.statSync(dbPath).size === 0) {
+  const seedPath = path.join(__dirname, 'initial_seed.db');
+  if (fs.existsSync(seedPath) && fs.statSync(seedPath).size > 0) {
+    try {
+      fs.copyFileSync(seedPath, dbPath);
+      console.log(`[Database] Initialized database from seed snapshot (${(fs.statSync(dbPath).size / 1024).toFixed(1)} KB).`);
+    } catch (seedErr) {
+      console.warn('[Database] Notice: Failed to copy seed DB:', seedErr.message);
+    }
+  }
+}
+
 const db = new Database(dbPath);
 
 // Enable Foreign Keys & WAL mode for high concurrency & 100% data integrity
@@ -23,6 +36,8 @@ db.pragma('journal_mode = WAL');
 db.pragma('synchronous = NORMAL');
 db.pragma('wal_autocheckpoint = 100');
 db.pragma('busy_timeout = 10000');
+
+const cloudSync = require('./cloudSync');
 
 // Safe, non-blocking native SQLite snapshot backup
 async function createBackup(customName) {
@@ -34,6 +49,8 @@ async function createBackup(customName) {
       await db.backup(targetPath);
       console.log(`[Backup] Safe SQLite snapshot created at: ${targetPath}`);
     }
+    // Also trigger cloud sync
+    cloudSync.triggerDebouncedSync(3000);
   } catch (e) {
     console.warn('[Backup] Notice:', e.message);
   }
@@ -46,9 +63,13 @@ createBackup();
 const checkpointTimer = setInterval(() => {
   try {
     db.pragma('wal_checkpoint(TRUNCATE)');
+    cloudSync.triggerDebouncedSync(5000);
   } catch (e) {}
 }, 5 * 60 * 1000); // Every 5 minutes
 checkpointTimer.unref(); // Prevents timer from keeping CLI scripts alive
+
+// Start background periodic cloud sync
+cloudSync.startPeriodicSync(5);
 
 function flushAndCheckpoint() {
   try {
@@ -60,21 +81,24 @@ function flushAndCheckpoint() {
 
 // Graceful process exit handling to guarantee zero data loss
 let isClosed = false;
-function gracefulClose(signal) {
+async function gracefulClose(signal) {
   if (isClosed) return;
   isClosed = true;
-  console.log(`\n[Database] Signal ${signal || 'EXIT'}: Flushing WAL to disk...`);
+  console.log(`\n[Database] Signal ${signal || 'EXIT'}: Flushing WAL to disk and syncing to cloud...`);
   try {
     flushAndCheckpoint();
+    if (cloudSync.isConfigured()) {
+      await cloudSync.uploadToCloud();
+    }
     db.close();
-    console.log('[Database] Database cleanly saved and closed. Zero data loss.');
+    console.log('[Database] Database cleanly saved, synced and closed. Zero data loss.');
   } catch (e) {
     console.error('[Database] Shutdown error:', e.message);
   }
 }
 
-process.once('SIGINT', () => { gracefulClose('SIGINT'); process.exit(0); });
-process.once('SIGTERM', () => { gracefulClose('SIGTERM'); process.exit(0); });
+process.once('SIGINT', async () => { await gracefulClose('SIGINT'); process.exit(0); });
+process.once('SIGTERM', async () => { await gracefulClose('SIGTERM'); process.exit(0); });
 process.once('beforeExit', () => { gracefulClose('beforeExit'); });
 
 function initDatabase() {
@@ -286,5 +310,7 @@ initDatabase();
 db.createBackup = createBackup;
 db.flushAndCheckpoint = flushAndCheckpoint;
 db.gracefulClose = gracefulClose;
+db.cloudSync = cloudSync;
+db.triggerCloudSync = cloudSync.triggerDebouncedSync;
 
 module.exports = db;

@@ -153,6 +153,15 @@ async function runTests() {
       if (res.status !== 200 || !res.body.success) throw new Error('Dashboard stats failed');
     });
 
+    // 11. Cloud Persistence Status API
+    await assertTest('Cloud Persistence Status API', async () => {
+      const res = await makeRequest(testPort, '/api/backup/cloud-status');
+      if (res.status !== 200 || !res.body.success || typeof res.body.configured !== 'boolean') {
+        throw new Error('Cloud status API failed');
+      }
+    });
+
+
     console.log('====================================================');
     console.log(` RESULT: ${passed} PASSED, ${failed} FAILED`);
     console.log('====================================================');

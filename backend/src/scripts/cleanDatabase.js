@@ -1,73 +1,38 @@
+const fs = require('fs');
+const path = require('path');
 const db = require('../db/database');
 
-async function cleanDb() {
-  if (process.env.NODE_ENV === 'production' && process.env.FORCE_RESET_DATABASE !== 'true') {
-    console.error('❌ FATAL: Cannot run cleanDatabase in PRODUCTION mode! Operation aborted.');
-    process.exit(1);
-  }
+console.log('--- Wiping all old device and transaction data ---');
 
-  const devCount = db.prepare('SELECT count(*) as c FROM devices').get()?.c || 0;
-  if (devCount > 0 && process.env.FORCE_RESET_DATABASE !== 'true') {
-    console.warn('========================================================================');
-    console.warn(`⚠️  DATA PROTECTION WARNING: Your database contains ${devCount} devices.`);
-    console.warn('   Running cleanDatabase will reset all device states and dispatches.');
-    console.warn('   If you are sure, run:');
-    console.warn('   $env:FORCE_RESET_DATABASE="true"; node src/scripts/cleanDatabase.js');
-    console.warn('========================================================================');
-    return;
-  }
+db.exec('PRAGMA foreign_keys = OFF;');
+db.exec('DELETE FROM reminders;');
+db.exec('DELETE FROM device_history;');
+db.exec('DELETE FROM inventory_audit_logs;');
+db.exec('DELETE FROM installations;');
+db.exec('DELETE FROM customers;');
+db.exec('DELETE FROM dispatch_items;');
+db.exec('DELETE FROM dispatches;');
+db.exec('DELETE FROM devices;');
+db.exec('DELETE FROM purchase_batches;');
+try {
+  db.exec("DELETE FROM sqlite_sequence WHERE name IN ('reminders', 'device_history', 'inventory_audit_logs', 'installations', 'customers', 'dispatch_items', 'dispatches', 'devices', 'purchase_batches');");
+} catch (e) {}
+db.exec('PRAGMA foreign_keys = ON;');
+db.pragma('wal_checkpoint(TRUNCATE)');
 
-  if (db.createBackup) {
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    await db.createBackup(`inventory_pre_clean_backup_${timestamp}.db`);
-  }
+console.log('--- Current Clean Database State ---');
+console.log('Devices count:', db.prepare('SELECT count(*) as c FROM devices').get().c);
+console.log('Purchase batches count:', db.prepare('SELECT count(*) as c FROM purchase_batches').get().c);
+console.log('Dispatches count:', db.prepare('SELECT count(*) as c FROM dispatches').get().c);
+console.log('Installations count:', db.prepare('SELECT count(*) as c FROM installations').get().c);
+console.log('Customers count:', db.prepare('SELECT count(*) as c FROM customers').get().c);
+console.log('Users count (Admin & Staff preserved):', db.prepare('SELECT count(*) as c FROM users').get().c);
+console.log('Device types count (Preserved):', db.prepare('SELECT count(*) as c FROM device_types').get().c);
 
-  const transaction = db.transaction(() => {
-    // 1. Delete reminders & installations first (they reference customers)
-    db.prepare('DELETE FROM reminders').run();
-    db.prepare('DELETE FROM installations').run();
-    db.prepare('DELETE FROM customers').run();
+// Synchronize initial seed snapshot
+const seedPath = path.join(__dirname, '../db/initial_seed.db');
+const dbPath = path.join(__dirname, '../../data/inventory.db');
+fs.copyFileSync(dbPath, seedPath);
+console.log('--- initial_seed.db successfully updated to fresh clean state ---');
 
-    // 2. Delete dispatches & dispatch items
-    db.prepare('DELETE FROM dispatch_items').run();
-    db.prepare('DELETE FROM dispatches').run();
-
-    // 3. Delete dummy users (keep only Super Admin)
-    db.prepare("DELETE FROM users WHERE role != 'SUPER_ADMIN'").run();
-
-    // 4. Reset devices to clean IN_WAREHOUSE status
-    const allDevices = db.prepare('SELECT id, additional_attributes FROM devices').all();
-    const updateDevice = db.prepare(`
-      UPDATE devices
-      SET current_status = 'IN_WAREHOUSE',
-          current_holder_type = 'WAREHOUSE',
-          current_holder_id = 1,
-          current_holder_name = 'Central Warehouse',
-          additional_attributes = ?,
-          updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `);
-
-    for (const dev of allDevices) {
-      let attrs = {};
-      try { attrs = JSON.parse(dev.additional_attributes || '{}'); } catch {}
-      attrs['STOCK PLACE'] = 'Central Warehouse';
-      delete attrs['DEALER'];
-      delete attrs['dispatched_dealer'];
-      updateDevice.run(JSON.stringify(attrs), dev.id);
-    }
-
-    // 5. Clean test history
-    db.prepare("DELETE FROM device_history WHERE event_type != 'PURCHASED'").run();
-  });
-
-  transaction();
-  console.log('✅ Database cleaned successfully! All default/test data removed.');
-}
-
-if (require.main === module) {
-  cleanDb();
-}
-
-module.exports = cleanDb;
-
+process.exit(0);

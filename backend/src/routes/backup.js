@@ -64,4 +64,43 @@ router.get('/download-live', async (req, res) => {
   }
 });
 
+// Get Cloud Persistence Status
+router.get('/cloud-status', (req, res) => {
+  try {
+    const cloudSync = require('../db/cloudSync');
+    res.json({ success: true, ...cloudSync.getSyncStatus() });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Trigger Immediate Cloud Persistence Sync
+router.post('/sync-cloud', async (req, res) => {
+  try {
+    const cloudSync = require('../db/cloudSync');
+    if (!cloudSync.isConfigured()) {
+      return res.status(400).json({
+        success: false,
+        error: 'Cloud storage is not configured. Set S3/R2 credentials in environment variables.',
+      });
+    }
+    const result = await cloudSync.uploadToCloud();
+    if (result.success) {
+      return res.json({
+        success: true,
+        message: 'Database successfully synced to cloud storage',
+        ...result,
+      });
+    } else {
+      return res.status(500).json({
+        success: false,
+        error: result.error || result.reason,
+      });
+    }
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;
+

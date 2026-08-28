@@ -60,32 +60,49 @@ app.use((err, req, res, next) => {
   res.status(500).json({ success: false, error: err.message || 'Internal Server Error' });
 });
 
-const server = app.listen(PORT, () => {
-  console.log(`=======================================================`);
-  console.log(` FuelTracks IMS API Server running on port ${PORT}`);
-  console.log(` Health check: http://localhost:${PORT}/api/health`);
-  console.log(`=======================================================`);
-});
+async function startServer() {
+  const cloudSync = require('./db/cloudSync');
+  if (cloudSync.isConfigured()) {
+    console.log('[Startup] Restoring latest database snapshot from Cloud Storage...');
+    await cloudSync.restoreFromCloud();
+  }
 
-// Graceful shutdown handling for server
-function gracefulShutdown(signal) {
-  console.log(`\n[Server] Received ${signal}. Stopping HTTP server...`);
-  server.close(() => {
-    console.log('[Server] HTTP connections closed.');
-    const db = require('./db/database');
-    if (db.gracefulClose) {
-      db.gracefulClose(signal);
-    }
-    process.exit(0);
+  // Eagerly initialize DB
+  const db = require('./db/database');
+
+  const server = app.listen(PORT, () => {
+    const status = cloudSync.getSyncStatus();
+    console.log(`=======================================================`);
+    console.log(` FuelTracks IMS API Server running on port ${PORT}`);
+    console.log(` Health check: http://localhost:${PORT}/api/health`);
+    console.log(` Cloud Persistence: ${status.configured ? 'ENABLED (' + status.provider + ')' : 'LOCAL ONLY (Configure S3/R2 to persist)'}`);
+    console.log(`=======================================================`);
   });
 
-  // Force close if connections remain open after 5 seconds
-  setTimeout(() => {
-    console.warn('[Server] Forcefully closing pending connections.');
-    process.exit(0);
-  }, 5000).unref();
+  // Graceful shutdown handling for server
+  async function gracefulShutdown(signal) {
+    console.log(`\n[Server] Received ${signal}. Stopping HTTP server...`);
+    server.close(async () => {
+      console.log('[Server] HTTP connections closed.');
+      if (db.gracefulClose) {
+        await db.gracefulClose(signal);
+      }
+      process.exit(0);
+    });
+
+    // Force close if connections remain open after 10 seconds
+    setTimeout(() => {
+      console.warn('[Server] Forcefully closing pending connections.');
+      process.exit(0);
+    }, 10000).unref();
+  }
+
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 }
 
-process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+startServer().catch((err) => {
+  console.error('[Startup] Fatal server error:', err);
+  process.exit(1);
+});
 

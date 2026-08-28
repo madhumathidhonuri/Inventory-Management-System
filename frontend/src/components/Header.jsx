@@ -15,10 +15,15 @@ import {
   ExternalLink,
   LogOut,
   Download,
-  Database
+  Database,
+  Cloud,
+  CloudCheck,
+  CheckCircle2,
+  AlertCircle
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { globalSearchDevices } from '../services/api';
+import { globalSearchDevices, fetchCloudSyncStatus, triggerCloudSyncNow } from '../services/api';
+
 
 export default function Header({ onOpenScanner, onOpenTraceDrawer }) {
   const { user, roleInfo, logout, isMobileMode, setIsMobileMode } = useAuth();
@@ -297,8 +302,25 @@ export default function Header({ onOpenScanner, onOpenTraceDrawer }) {
                     <Database className="w-3.5 h-3.5 text-indigo-600" />
                     <span>Download Live DB Backup</span>
                   </a>
+
+                  <button
+                    onClick={async () => {
+                      try {
+                        const res = await triggerCloudSyncNow();
+                        alert(`Cloud Sync: ${res.message || 'Database snapshot uploaded to Cloud Storage!'}`);
+                      } catch (err) {
+                        alert(err.message || 'Cloud sync not configured yet. Add S3/R2 credentials in Render.');
+                      }
+                    }}
+                    className="w-full text-left px-3 py-2 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-100 flex items-center gap-2 transition-colors cursor-pointer"
+                    title="Manually trigger immediate cloud persistence sync"
+                  >
+                    <Cloud className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Sync to Cloud Now</span>
+                  </button>
                 </div>
               )}
+
 
               <div className="pt-1 border-t border-slate-100">
                 <button

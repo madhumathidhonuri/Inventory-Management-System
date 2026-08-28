@@ -526,6 +526,20 @@ export function getLiveBackupDownloadUrl() {
   return `${API_BASE}/backup/download-live`;
 }
 
+export async function fetchCloudSyncStatus() {
+  const res = await fetch(`${API_BASE}/backup/cloud-status`);
+  if (!res.ok) throw new Error('Failed to fetch cloud sync status');
+  return res.json();
+}
+
+export async function triggerCloudSyncNow() {
+  const res = await fetch(`${API_BASE}/backup/sync-cloud`, { method: 'POST' });
+  const data = await res.json();
+  if (!res.ok || !data.success) throw new Error(data.error || 'Failed to sync with cloud');
+  return data;
+}
+
+
 
 
 
