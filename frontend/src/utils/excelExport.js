@@ -224,12 +224,13 @@ export async function exportDevicesToExcel(filename, sheetName, devices = [], cu
     return '';
   };
 
-  // Configure Excel Columns
+  // Configure Excel Columns in exact uploaded sequence
   worksheet.columns = exportCols.map((col, idx) => ({
-    header: col,
+    header: String(col).startsWith('__EMPTY') ? '' : col,
     key: `col_${idx}`,
     width: colWidths[col]
   }));
+
 
   // Style Header Row (Row 1)
   const headerRow = worksheet.getRow(1);

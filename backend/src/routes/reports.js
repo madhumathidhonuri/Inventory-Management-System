@@ -764,11 +764,23 @@ router.get('/export', (req, res) => {
 
     const worksheet = xlsx.utils.json_to_sheet(data);
 
+    // Clean up any __EMPTY header labels in the first row of worksheet so they remain in exact position as blank/nameless cells
+    const wsRange = xlsx.utils.decode_range(worksheet['!ref'] || 'A1:A1');
+    for (let c = wsRange.s.c; c <= wsRange.e.c; c++) {
+      const cellAddress = xlsx.utils.encode_cell({ r: wsRange.s.r, c });
+      const cell = worksheet[cellAddress];
+      if (cell && typeof cell.v === 'string' && cell.v.startsWith('__EMPTY')) {
+        cell.v = '';
+        cell.t = 's';
+        if (cell.w) cell.w = '';
+      }
+    }
+
     // Auto-calculate column widths for clean Excel presentation
     if (data.length > 0) {
       const colKeys = Object.keys(data[0]);
       worksheet['!cols'] = colKeys.map(key => {
-        let maxLen = key.length;
+        let maxLen = key.startsWith('__EMPTY') ? 10 : key.length;
         for (let i = 0; i < Math.min(data.length, 50); i++) {
           const valStr = String(data[i][key] || '');
           if (valStr.length > maxLen) maxLen = valStr.length;
@@ -776,6 +788,7 @@ router.get('/export', (req, res) => {
         return { wch: Math.min(Math.max(maxLen + 3, 12), 40) };
       });
     }
+
 
     const workbook = xlsx.utils.book_new();
     xlsx.utils.book_append_sheet(workbook, worksheet, sheetName);

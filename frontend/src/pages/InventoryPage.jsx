@@ -1947,7 +1947,10 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
                   {displayedColumns.map((col) => (
                     <th key={col} className="p-3.5 font-bold border-l border-slate-200/80 bg-slate-100/50 text-slate-800 group">
                       <div className="flex items-center justify-between gap-2">
-                        <span>{col}</span>
+                        <span className={col.startsWith('__EMPTY') ? 'italic text-slate-400 font-normal' : ''}>
+                          {col.startsWith('__EMPTY') ? '— (Blank)' : col}
+                        </span>
+
                         <div className="flex items-center gap-1 opacity-70 group-hover:opacity-100 transition-opacity">
                           <button
                             onClick={() => { setRenamingCol(col); setNewHeaderName(col); }}

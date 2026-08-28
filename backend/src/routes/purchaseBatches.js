@@ -22,8 +22,27 @@ router.post('/preview', upload.single('file'), (req, res) => {
       return res.status(400).json({ success: false, error: 'Uploaded sheet is empty' });
     }
 
-    const headers = rawData[0].map(h => String(h).trim());
+    // Determine the exact range and full list of columns in positional order
+    const range = xlsx.utils.decode_range(worksheet['!ref'] || 'A1:A1');
+    const headers = [];
+    let emptyIdx = 0;
+
+    // Scan the first row cell-by-cell up to the maximum column index
+    for (let c = range.s.c; c <= range.e.c; c++) {
+      const cellAddress = xlsx.utils.encode_cell({ r: range.s.r, c });
+      const cell = worksheet[cellAddress];
+      const val = cell && cell.v !== undefined && cell.v !== null ? String(cell.v).trim() : '';
+      if (val) {
+        headers.push(val);
+      } else {
+        const emptyKey = emptyIdx === 0 ? '__EMPTY' : `__EMPTY_${emptyIdx}`;
+        headers.push(emptyKey);
+        emptyIdx++;
+      }
+    }
+
     const rowObjects = xlsx.utils.sheet_to_json(worksheet);
+
 
     // 1. Scan rows & headers to find IMEI, SIM, and Price columns intelligently
     let detectedImeiCol = '';
