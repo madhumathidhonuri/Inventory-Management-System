@@ -496,7 +496,7 @@ export default function ReportsPage() {
             )}
           </div>
 
-          {/* 4 Financial Summary KPI Cards */}
+          {/* 4 Clean Payment Metrics KPI Cards */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {/* KPI 1: Today's Collection */}
             <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl text-emerald-950 shadow-2xs">
@@ -520,35 +520,35 @@ export default function ReportsPage() {
               </div>
             </div>
 
-            {/* KPI 3: Pending Due */}
-            <div className="p-4 bg-red-50 border border-red-200 rounded-2xl text-red-950 shadow-2xs">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-red-700">Pending Receivables Due</div>
-              <div className="text-2xl font-black font-mono text-red-800 mt-1">
-                ₹{(paymentsData?.kpis?.period_pending_amount || 0).toLocaleString('en-IN')}
+            {/* KPI 3: Average Collection per Unit */}
+            <div className="p-4 bg-indigo-50 border border-indigo-200 rounded-2xl text-indigo-950 shadow-2xs">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-indigo-700">Avg Collection / Unit</div>
+              <div className="text-2xl font-black font-mono text-indigo-800 mt-1">
+                ₹{(paymentsData?.kpis?.avg_amount_per_unit || 0).toLocaleString('en-IN')}
               </div>
-              <div className="text-[11px] text-red-600 mt-1">
-                {paymentsData?.kpis?.period_pending_count || 0} units unpaid
+              <div className="text-[11px] text-indigo-600 mt-1">
+                per paid device in period
               </div>
             </div>
 
-            {/* KPI 4: Collection Rate */}
+            {/* KPI 4: Active Paying Dealers / Stock Centers */}
             <div className="p-4 bg-purple-50 border border-purple-200 rounded-2xl text-purple-950 shadow-2xs">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-purple-700">Collection Efficiency</div>
+              <div className="text-[10px] font-bold uppercase tracking-wider text-purple-700">Active Stock Locations</div>
               <div className="text-2xl font-black font-mono text-purple-800 mt-1">
-                {paymentsData?.kpis?.collection_rate || 0}%
+                {paymentsData?.kpis?.active_dealers_count || 0} Centers
               </div>
               <div className="text-[11px] text-purple-600 mt-1">
-                Total Billed: ₹{(paymentsData?.kpis?.total_period_billed || 0).toLocaleString('en-IN')}
+                with recorded collections
               </div>
             </div>
           </div>
 
-          {/* Search Bar & Transactions Ledger Table */}
+          {/* Search Bar & Payments Received Ledger Table */}
           <div className="space-y-3">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2">
                 <Table className="w-4 h-4 text-emerald-600" />
-                <span>Transactions Ledger ({paymentsData?.transactions?.length || 0} Devices)</span>
+                <span>Payments Received Ledger ({paymentsData?.transactions?.length || 0} Paid Records)</span>
               </h4>
 
               <div className="relative max-w-sm w-full">
@@ -581,7 +581,7 @@ export default function ReportsPage() {
                 if (filteredTx.length === 0) {
                   return (
                     <div className="text-center py-12 text-xs text-slate-400 bg-slate-50">
-                      No payment records found for {paymentsRange.replace('_', ' ')}.
+                      No payments received found for {paymentsRange.replace('_', ' ')}.
                     </div>
                   );
                 }
@@ -617,16 +617,13 @@ export default function ReportsPage() {
                             )}
                           </td>
                           <td className="py-2.5 px-3.5 text-slate-700">{tx.stock_place}</td>
-                          <td className="py-2.5 px-3.5 text-right font-mono font-bold text-slate-900">
+                          <td className="py-2.5 px-3.5 text-right font-mono font-bold text-emerald-800">
                             {tx.amount_formatted}
                           </td>
                           <td className="py-2.5 px-3.5 text-center">
-                            <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
-                              tx.payment_status === 'PAID'
-                                ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                                : 'bg-red-100 text-red-800 border border-red-200'
-                            }`}>
-                              {tx.payment_status}
+                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 inline-flex items-center gap-1">
+                              <span>✓</span>
+                              <span>{tx.payment_status}</span>
                             </span>
                           </td>
                           <td className="py-2.5 px-3.5 text-slate-600 text-[11px]">{tx.payment_received_by}</td>
@@ -638,6 +635,7 @@ export default function ReportsPage() {
               })()}
             </div>
           </div>
+
         </div>
       )}
 

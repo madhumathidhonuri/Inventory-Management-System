@@ -1747,8 +1747,10 @@ router.get('/payments-excel', async (req, res) => {
                        String(payStatusRaw).toUpperCase().includes('YES') ||
                        Boolean(attrs['AMOUNT RECEIVED BY']);
 
-        if (isPaid) totalCollected += costVal;
-        else totalPending += costVal;
+        // Strictly ignore any unpaid / pending records
+        if (!isPaid) continue;
+
+        totalCollected += costVal;
 
         const custName = attrs['CUSTOMER NAME'] || attrs['Customer Name'] || attrs['CERTIFICATE ISSUED TO'] || '—';
         const custPhone = attrs['CUSTOMER PHONE NUMBER'] || attrs['Customer Phone'] || '—';
@@ -1765,11 +1767,12 @@ router.get('/payments-excel', async (req, res) => {
           customer_phone: custPhone,
           stock_place: stockPlace,
           amount: costVal,
-          status: isPaid ? 'PAID' : 'PENDING',
+          status: 'RECEIVED',
           received_by: receivedBy
         });
       }
     }
+
 
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('Payments Statement');

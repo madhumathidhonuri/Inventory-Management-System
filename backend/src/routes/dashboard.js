@@ -1012,8 +1012,6 @@ router.get('/payments-telemetry', (req, res) => {
 
     let periodCollectedAmount = 0;
     let periodCollectedCount = 0;
-    let periodPendingAmount = 0;
-    let periodPendingCount = 0;
 
     const dateTimelineMap = {};
     const dealerBreakdownMap = {};
@@ -1023,8 +1021,11 @@ router.get('/payments-telemetry', (req, res) => {
       let attrs = {};
       try { attrs = JSON.parse(dev.additional_attributes || '{}'); } catch {}
 
-      const costVal = extractCostValue(attrs, dev.purchase_price);
       const isPaid = isPaymentReceived(attrs, dev.current_status);
+      // Strictly ignore any non-payment / pending records
+      if (!isPaid) continue;
+
+      const costVal = extractCostValue(attrs, dev.purchase_price);
       const paymentDateInfo = extractPaymentDate(attrs, dev);
       const devDateISO = paymentDateInfo.isoDate;
 
@@ -1035,48 +1036,33 @@ router.get('/payments-telemetry', (req, res) => {
       const receivedBy = attrs['AMOUNT RECEIVED BY'] || attrs['Received By'] || attrs['PAYMENT RECEIVED BY'] || attrs['SALES PERSON NAME'] || '—';
 
       // 1. All-time Today's metric
-      if (devDateISO === todayISO && isPaid) {
+      if (devDateISO === todayISO) {
         todayCollectedAmount += costVal;
         todayCollectedCount++;
       }
 
-      // 2. Check if device falls into active selected date range
+      // 2. Check if payment date falls into active selected date range
       const inRange = devDateISO >= activeStartDate && devDateISO <= activeEndDate;
 
       if (inRange) {
-        if (isPaid) {
-          periodCollectedAmount += costVal;
-          periodCollectedCount++;
-        } else {
-          periodPendingAmount += costVal;
-          periodPendingCount++;
-        }
+        periodCollectedAmount += costVal;
+        periodCollectedCount++;
 
         // Timeline aggregation
         if (!dateTimelineMap[devDateISO]) {
-          dateTimelineMap[devDateISO] = { date: devDateISO, collected: 0, paid_count: 0, pending: 0, pending_count: 0 };
+          dateTimelineMap[devDateISO] = { date: devDateISO, collected: 0, paid_count: 0 };
         }
-        if (isPaid) {
-          dateTimelineMap[devDateISO].collected += costVal;
-          dateTimelineMap[devDateISO].paid_count++;
-        } else {
-          dateTimelineMap[devDateISO].pending += costVal;
-          dateTimelineMap[devDateISO].pending_count++;
-        }
+        dateTimelineMap[devDateISO].collected += costVal;
+        dateTimelineMap[devDateISO].paid_count++;
 
         // Dealer aggregation
         if (!dealerBreakdownMap[stockPlace]) {
-          dealerBreakdownMap[stockPlace] = { name: stockPlace, collected: 0, paid_count: 0, pending: 0, pending_count: 0 };
+          dealerBreakdownMap[stockPlace] = { name: stockPlace, collected: 0, paid_count: 0 };
         }
-        if (isPaid) {
-          dealerBreakdownMap[stockPlace].collected += costVal;
-          dealerBreakdownMap[stockPlace].paid_count++;
-        } else {
-          dealerBreakdownMap[stockPlace].pending += costVal;
-          dealerBreakdownMap[stockPlace].pending_count++;
-        }
+        dealerBreakdownMap[stockPlace].collected += costVal;
+        dealerBreakdownMap[stockPlace].paid_count++;
 
-        // Add to itemized transactions list
+        // Add to itemized transactions list (Only actual paid records)
         transactions.push({
           id: dev.id,
           imei_number: dev.imei_number,
@@ -1088,7 +1074,7 @@ router.get('/payments-telemetry', (req, res) => {
           stock_place: stockPlace,
           amount: costVal,
           amount_formatted: `₹${costVal.toLocaleString('en-IN')}`,
-          payment_status: isPaid ? 'PAID' : 'PENDING',
+          payment_status: 'RECEIVED',
           payment_date: paymentDateInfo.rawValue || devDateISO,
           payment_date_iso: devDateISO,
           payment_received_by: receivedBy
@@ -1096,9 +1082,7 @@ router.get('/payments-telemetry', (req, res) => {
       }
     }
 
-    const totalBilledPeriod = periodCollectedAmount + periodPendingAmount;
-    const collectionRate = totalBilledPeriod > 0 ? Math.round((periodCollectedAmount / totalBilledPeriod) * 100) : (periodCollectedCount > 0 ? 100 : 0);
-
+    const avgAmountPerUnit = periodCollectedCount > 0 ? Math.round(periodCollectedAmount / periodCollectedCount) : 0;
     const timeline = Object.values(dateTimelineMap).sort((a, b) => b.date.localeCompare(a.date));
     const dealerBreakdown = Object.values(dealerBreakdownMap).sort((a, b) => b.collected - a.collected);
 
@@ -1117,16 +1101,15 @@ router.get('/payments-telemetry', (req, res) => {
           today_collected_count: todayCollectedCount,
           period_collected_amount: periodCollectedAmount,
           period_collected_count: periodCollectedCount,
-          period_pending_amount: periodPendingAmount,
-          period_pending_count: periodPendingCount,
-          total_period_billed: totalBilledPeriod,
-          collection_rate: collectionRate
+          avg_amount_per_unit: avgAmountPerUnit,
+          active_dealers_count: dealerBreakdown.length
         },
         timeline,
         dealer_breakdown: dealerBreakdown,
         transactions
       }
     });
+
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
