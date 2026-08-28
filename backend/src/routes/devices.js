@@ -867,7 +867,15 @@ router.post('/bulk-delete', (req, res) => {
     });
 
     const count = transaction();
+
+    // Auto-sync cleared state to Supabase Cloud Storage
+    try {
+      const cloudSync = require('../db/cloudSync');
+      cloudSync.triggerDebouncedSync(1000);
+    } catch (e) {}
+
     res.json({ success: true, count, message: `Successfully deleted ${count} device record(s)` });
+
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
