@@ -1,6 +1,6 @@
 # FuelTracks Technologies — Enterprise Inventory & Fleet Management Platform
 
-An enterprise-grade, full-stack **Inventory Management & Telematics Operations System (IMS)** designed for tracking GPS trackers, AIS-140 / VLTD devices, fuel level sensors, OBD units, and M2M SIM cards by IMEI across their entire lifecycle — from smart vendor Excel ingestion, centralized warehouse storage, dealer dispatches, and Delivery Challans (DCN) to vehicle installations, KYC customer CRM, RMA warranty repairs, automated WhatsApp payment acknowledgements, and executive financial reporting.
+An enterprise-grade, full-stack **Inventory Management & Telematics Operations System (IMS)** designed for tracking GPS trackers, AIS-140 / VLTD devices, fuel level sensors, OBD units, and M2M SIM cards by IMEI across their entire lifecycle — from smart vendor Excel ingestion, centralized warehouse storage, dealer dispatches, and Delivery Challans (DCN) to vehicle installations, project categorization, KYC customer CRM, RMA warranty repairs, automated WhatsApp payment acknowledgements, and executive financial reporting.
 
 ---
 
@@ -8,21 +8,35 @@ An enterprise-grade, full-stack **Inventory Management & Telematics Operations S
 
 ### 1. 📊 Executive Telemetry & Real-Time Dashboard
 - **5-Metric Live Fleet Summary**: Real-time counters for **Total Master Stock**, **Total In-Stock**, **Installed In Vehicles**, **With Dealers / Branches**, and **Unassigned Central Warehouse Stock**.
-- **Financial & Payment Collection Telemetry**: Tracks collected revenue vs pending amounts, active collection rates, and 1-click **Monthly Payments Excel Statements**.
+- **Financial & Payment Collection Telemetry**: Tracks collected revenue vs pending amounts, active collection rates, and payments received today with custom date-range filters.
+- **1-Click Monthly Payments Excel Statements**: Instant download of formatted `.xlsx` financial records with collection percentages and breakdowns.
 - **Dealer & Branch Stock Allocation Matrix**: Real-time breakdown of device allocations per dealer with 1-click dossier views and **Reset Stock Holding** actions.
 - **Dead-Stock & Aging Analysis Engine**: Color-coded aging brackets (`< 30 Days`, `30–60 Days`, `> 60 Days`) with 1-click **WhatsApp Stock Nudge Notices** to dealers for idle stock reconciliation.
 - **Telecom & M2M SIM Validity Watcher**: Real-time carrier analytics (Airtel, Vi, Jio, BSNL) with 30-day pre-expiry alerts and bulk SIM validity updates.
 
 ---
 
-### 2. 📑 Smart Vendor Excel Ingestion & Auto-Mapper
-- **Intelligent Header Detection**: Automatically identifies `IMEI`, `SIM Number`, `Cost / Price`, `Vehicle Number`, and vendor custom attributes from any spreadsheet (*Tracknow, Vamosys, Volty, BSTPL, etc.*).
+### 2. 🏷️ Project Category System (`VLTD`, `TG MINING`, `AP MINING`, `GENERAL`)
+- **Quick 1-Click Category Badging**: Instant selection for major government/fleet project categories:
+  - `VLTD` (AIS-140 / Commercial Passenger Vehicles)
+  - `TG MINING` (Telangana Mining Department Projects)
+  - `AP MINING` (Andhra Pradesh Mining Department Projects)
+  - `GENERAL` (Standard Commercial & Private GPS Tracking)
+  - `+ Custom Category` (Type and assign any custom department or project name)
+- **Omnipresent Category Filter**: Quick filter pills across Installation logs, Inventory tables, and Device Specification Passports.
+
+---
+
+### 3. 📑 Smart Vendor Excel Ingestion & Positional Column Preservation
+- **Brand-Specific Column Detection**: Tailored column templates for different hardware vendors (*Vamosys, Volty, Tracknow, BSTPL, etc.*).
+- **Exact Nameless / Blank Header Column Preservation**: Preserves empty or nameless columns in their exact 1-to-1 positional order during both Excel upload and formatted Excel export.
+- **Intelligent Header Detection**: Automatically identifies `IMEI`, `SIM Number`, `Cost / Price`, `Vehicle Number`, and vendor custom attributes from any spreadsheet.
 - **Interactive Visual Column Mapper**: Review and remap columns dynamically with row-by-row validation before importing into **Central Warehouse Stock**.
 - **Excel Batch Tracker**: Filter the dashboard and inventory grid by specific Excel upload sheets and import dates.
 
 ---
 
-### 3. 📦 Dynamic Inventory Spreadsheet Grid & Lifecycle Traceability
+### 4. 📦 Dynamic Inventory Spreadsheet Grid & Lifecycle Traceability
 - **Full Custom Column Preservation**: Ingests and displays all vendor custom headers (`Stock Place`, `Sim 1`, `Vehicle Number`, `Vahan ID`, `Certificate Date`, etc.).
 - **Multi-Select & Bulk Stock Movement**: Select multiple rows via checkboxes to transfer or dispatch **50+ IMEIs** in **1 click**.
 - **Inline Cell Editing & Audit Diff**: Direct table editing with before $\rightarrow$ after audit logs and column permission locks.
@@ -30,7 +44,7 @@ An enterprise-grade, full-stack **Inventory Management & Telematics Operations S
 
 ---
 
-### 4. 🚚 Stock Dispatches, Digital Delivery Challans (DCN) & Delete Controls
+### 5. 🚚 Stock Dispatches, Digital Delivery Challans (DCN) & Delete Controls
 - **Digital Delivery Challan (DCN)**: Generates official serialized Delivery Challans (`FT-DCN-2026-XXXX`) with printable layouts, dispatch metadata, and serialized IMEI handover tables.
 - **1-Click WhatsApp Challan Sharing**: Send formatted dispatch handover manifests directly to dealers via WhatsApp.
 - **Stock Dispatches & Assign Management**: Dispatch stock to registered or custom dealers with bulk barcode scanning or comma-separated IMEI inputs.
@@ -41,7 +55,7 @@ An enterprise-grade, full-stack **Inventory Management & Telematics Operations S
 
 ---
 
-### 5. 👥 Customer KYC Directory & Formatted Excel Export
+### 6. 👥 Customer KYC Directory & Formatted Excel Export
 - **Comprehensive Customer KYC Fields**: Captures and manages complete customer records:
   - `Customer Name`, `Phone Number`, `Aadhar Number`, `PAN Number`, `Chassis Number`, `Engine Number`, `Vehicle Number`, `Email`.
 - **1-Click KYC Excel Export**: Download formatted, professional `.xlsx` customer directories directly from the CRM and Reports Hub.
@@ -49,8 +63,8 @@ An enterprise-grade, full-stack **Inventory Management & Telematics Operations S
 
 ---
 
-### 6. 🛠️ Vehicle Installations & 1-Click WhatsApp Payment Hub
-- **Rapid Installation Entry**: Single-step deployment recording IMEI, vehicle registration, customer contact, GPS software credentials, and sale price.
+### 7. 🛠️ Vehicle Installations & 1-Click WhatsApp Payment Hub
+- **Rapid Installation Entry**: Single-step deployment recording IMEI, vehicle registration, customer contact, GPS software credentials, project category, and sale price.
 - **Instant 1-Click WhatsApp Payment Received Acknowledgement**:
   - Replaces paper slips with instant, professional WhatsApp confirmation messages containing:
     - *Customer Name & Contact*
@@ -59,11 +73,11 @@ An enterprise-grade, full-stack **Inventory Management & Telematics Operations S
     - *Payment Mode / Ref ID*
     - *Confirmation that tracking services are active*
 - **1-Click WhatsApp UPI Payment Request**: Send instant payment requests with direct tap-to-pay deep links and QR codes.
-- **1-Click App Login Sharing**: Send Volty Track mobile app login credentials (User ID and Password) to vehicle owners via WhatsApp.
+- **1-Click App Login Sharing**: Send mobile app login credentials (User ID and Password) to vehicle owners via WhatsApp.
 
 ---
 
-### 7. 🔧 RMA & Warranty Repairs Pipeline
+### 8. 🔧 RMA & Warranty Repairs Pipeline
 - **4-Stage Lifecycle Tracking**:
   1. `FAULTY_REPORTED` (Defective device reported from field / dealer)
   2. `RECEIVED_LAB` (Received at central technical testing bench)
@@ -73,9 +87,17 @@ An enterprise-grade, full-stack **Inventory Management & Telematics Operations S
 
 ---
 
-### 8. 🔐 Authentication & Role-Based Permissions
-- **Super Admin Portal**: Master administrative control with clean profile presentation.
-- **Role Permission Matrix**: Granular column-level edit permissions for Operations and Sales teams.
+### 9. 🔐 Access Control & 1-Click Factory Reset
+- **Granular Role Permissions**: Customize exact editable column permissions for Operations and Sales teams.
+- **1-Click Full System Factory Reset**: Safely purge all devices, batches, installations, dispatches, customers, and extra user roles to start completely fresh (while preserving the master Super Admin login).
+
+---
+
+### 10. ☁️ Cloud Persistence & Zero Data Loss Engine
+- **Cloud Storage Sync**: Automatic database persistence compatible with Supabase S3, Cloudflare R2, and AWS S3.
+- **Automatic Pre-Boot Cloud Restore**: Automatically downloads the latest database snapshot from cloud storage on container startup/reboot.
+- **Instant Mutation Sync**: Automatically pushes changes to cloud storage within 1 second of any Excel upload, installation, or device edit.
+- **Crash-Safe SQLite WAL Mode**: Configured with `synchronous = NORMAL` and non-blocking background snapshot backups.
 
 ---
 
@@ -86,8 +108,9 @@ An enterprise-grade, full-stack **Inventory Management & Telematics Operations S
 | **Frontend** | React 19, Vite, Vanilla CSS Design System, Lucide Icons, SheetJS (`xlsx`), `qrcode` |
 | **Backend** | Node.js, Express.js REST API |
 | **Database** | SQLite (`better-sqlite3`) with WAL (Write-Ahead Logging) mode |
+| **Cloud Storage** | S3-Compatible Storage (Supabase S3, Cloudflare R2, AWS S3) |
 | **Scanning** | `html5-qrcode` Camera & Barcode Reader |
-| **Deployment** | Compatible with Render, Railway, AWS EC2, VPS, and Docker |
+| **Deployment** | Render, Railway, AWS EC2, VPS, Docker |
 
 ---
 
@@ -114,44 +137,38 @@ npm run dev
 
 ---
 
-## 🏭 Production Deployment & Durability
+## 🏭 Production Deployment & Cloud Setup
 
-### 1. Build Production Frontend
+### 1. Build Production Bundle
 ```bash
 npm run build
 ```
-*(Compiles and code-splits React application into optimized static assets in `frontend/dist`).*
 
 ### 2. Start Production Server
 ```bash
 npm start
 ```
-*(Runs Express server on port `5000`, serving both `/api/*` REST endpoints and the compiled single-page web app).*
 
-### 3. Process Management (PM2)
-```bash
-# Start with pre-configured ecosystem config
-pm2 start ecosystem.config.js
+### 3. Cloud Storage Persistence Setup (Render / Free Containers)
+To keep data safely persisted across redeployments on ephemeral servers like Render:
+1. Go to your **Render Dashboard** ➔ Web Service ➔ **Environment**.
+2. Add the following variables:
 
-# Save process list for automatic server reboot recovery
-pm2 save
-pm2 startup
-```
-
-### 4. Zero Data Loss & Storage Durability
-- **Crash-Safe SQLite WAL Mode**: Configured with `synchronous = NORMAL` and aggressive page autocheckpoints.
-- **Graceful Shutdown Interceptor**: Intercepts `SIGINT`, `SIGTERM`, and process exits to flush cached WAL frames to disk before terminating.
-- **Automated Snapshots**: Daily non-blocking SQLite `.db` backups saved automatically in `/backend/data/backups/`.
-- **Live Database Download**: Download live database snapshots anytime via `GET /api/backup/download-live`.
-- **Accidental Reset Guard**: Destructive scripts (`seed.js`, `clear.js`) are hard-locked against wiping existing device records without explicit `FORCE_RESET_DATABASE=true` flags and blocked completely in `production`.
+| Environment Variable | Description | Example Value |
+|---|---|---|
+| `S3_ENDPOINT` | Supabase / S3 API Endpoint | `https://<ref>.supabase.co/storage/v1/s3` |
+| `S3_ACCESS_KEY_ID` | Storage Access Key ID | `<your-access-key>` |
+| `S3_SECRET_ACCESS_KEY` | Storage Secret Key | `<your-secret-key>` |
+| `S3_BUCKET` | Storage Bucket Name | `ims-database-backup` |
+| `S3_REGION` | Storage Region | `ap-south-1` *(or `auto`)* |
 
 ---
 
 ## 🔑 Default Administrator Credentials
 
-| Role | Username / Email | Password | Access Level |
+| Role | Username / Mobile | Password | Access Level |
 |---|---|---|---|
-| **Super Admin** | `admin@fueltracks.in` | `admin` | Full Master Control (All modules, settings, dispatches, user roles) |
+| **Super Admin** | `admin@fueltracks.in` *(or `9999999999`)* | `123456` *(or `admin`)* | Master Admin Control (All modules, dispatches, settings, and user permissions) |
 
 ---
 
@@ -162,17 +179,17 @@ Inventory-Management-System/
 ├── backend/
 │   ├── data/                 # SQLite database storage & /backups/
 │   ├── src/
-│   │   ├── db/               # DB schema, migrations, backups, and seed scripts
-│   │   ├── routes/           # REST API routes (devices, dashboard, dispatches, backup, users, etc.)
+│   │   ├── db/               # DB schema, cloud sync (S3/Supabase), migrations, backups
+│   │   ├── routes/           # REST API routes (devices, dashboard, dispatches, backup, users, reports, etc.)
 │   │   ├── scripts/          # Database maintenance and cleanup utilities
-│   │   ├── test/             # Automated integration test runner
+│   │   ├── test/             # Automated integration test suite
 │   │   └── index.js          # Express server entrypoint & graceful shutdown
 │   └── package.json
 ├── frontend/
 │   ├── src/
-│   │   ├── components/       # Delivery Challan, RMA Modal, Scanner, Journey Drawer
+│   │   ├── components/       # Delivery Challan, RMA Modal, Scanner, Journey Drawer, QR Modal
 │   │   ├── context/          # AuthContext & Column Permission Matrix
-│   │   ├── pages/            # Dashboard, Inventory, Dispatches, Upload, CRM, Installations, Reports
+│   │   ├── pages/            # Dashboard, Inventory, Dispatches, Upload, CRM, Installations, Reports, Users
 │   │   ├── services/         # REST API client services
 │   │   ├── utils/            # WhatsApp templates, UPI generator, Excel formatters
 │   │   ├── App.jsx           # Application routing & layout
@@ -189,4 +206,3 @@ Inventory-Management-System/
 
 ## 📄 License
 FuelTracks Technologies — Proprietary Inventory & Fleet Management System.
-
