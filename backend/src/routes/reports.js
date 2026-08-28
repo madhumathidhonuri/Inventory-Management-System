@@ -1390,6 +1390,59 @@ function getInstallationDateValue(dev, attrs = {}) {
   return '';
 }
 
+// Helper: Extract Customer Name across all possible Excel header keys
+function getCustomerName(attrs = {}) {
+  const custKeys = [
+    'CUSTOMER NAME', 'Customer Name', 'customer_name', 'Customer name',
+    'CUSTOMER', 'Customer', 'customer',
+    'CERTIFICATE ISSUED TO', 'Certificate Issued To', 'certificate_issued_to',
+    'CLIENT NAME', 'Client Name', 'Client', 'CLIENT',
+    'PARTY NAME', 'Party Name',
+    'BENEFICIARY NAME', 'Beneficiary Name',
+    'NAME', 'Name', 'name'
+  ];
+  for (const k of custKeys) {
+    if (attrs[k] && String(attrs[k]).trim()) return String(attrs[k]).trim();
+  }
+  return '';
+}
+
+// Helper: Extract Vehicle Number across all possible Excel header keys
+function getVehicleNumber(dev = {}, attrs = {}) {
+  const vehKeys = [
+    'VEHICLE NUMBER', 'Vehicle Number', 'vehicle_number', 'Vehicle number',
+    'VEH NO', 'Veh No', 'veh_no', 'Veh no',
+    'VEHICLE NO', 'Vehicle No', 'vehicle_no',
+    'REG NUMBER', 'Reg Number', 'reg_number',
+    'REG NO', 'Reg No', 'reg_no',
+    'VEHICLE', 'Vehicle', 'vehicle'
+  ];
+  for (const k of vehKeys) {
+    if (attrs[k] && String(attrs[k]).trim()) return String(attrs[k]).trim();
+  }
+  return dev.vehicle_number || '';
+}
+
+// Helper: Extract Customer Phone across all possible Excel header keys
+function getCustomerPhone(attrs = {}) {
+  const phoneKeys = [
+    'CUSTOMER PHONE NUMBER', 'Customer Phone Number', 'customer_phone_number',
+    'CUSTOMER PHONE', 'Customer Phone',
+    'CUSTOMER CONTACT', 'Customer Contact', 'customer_contact',
+    'CONTACT NUMBER', 'Contact Number', 'contact_number',
+    'PHONE NUMBER', 'Phone Number', 'phone_number',
+    'MOBILE NUMBER', 'Mobile Number', 'mobile_number',
+    'PRIMARY MOBILE', 'Primary Mobile',
+    'PHONE', 'Phone', 'phone',
+    'MOBILE', 'Mobile', 'mobile',
+    'CONTACT', 'Contact', 'contact'
+  ];
+  for (const k of phoneKeys) {
+    if (attrs[k] && String(attrs[k]).trim()) return String(attrs[k]).trim();
+  }
+  return '';
+}
+
 // Helper: Query all customers & vehicles across installations and device inventory
 function getCustomerDirectoryRecords() {
   const records = [];
@@ -1412,9 +1465,9 @@ function getCustomerDirectoryRecords() {
       i.aadhar_number,
       i.pan_number,
       i.chasis_number,
+      i.engine_number,
       i.installation_location,
       c.email,
-      c.engine_number,
       dt.name as device_model,
       d.additional_attributes
     FROM installations i
