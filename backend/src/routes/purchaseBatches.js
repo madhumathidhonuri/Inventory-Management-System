@@ -41,7 +41,8 @@ router.post('/preview', upload.single('file'), (req, res) => {
       }
     }
 
-    const rowObjects = xlsx.utils.sheet_to_json(worksheet);
+    // Parse row objects using explicit positional headers to preserve blank/nameless column positions exactly
+    const rowObjects = xlsx.utils.sheet_to_json(worksheet, { header: headers, range: range.s.r + 1, defval: '' });
 
 
     // 1. Scan rows & headers to find IMEI, SIM, and Price columns intelligently
