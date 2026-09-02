@@ -23,7 +23,7 @@ export default function Sidebar({ activeTab, setActiveTab }) {
 
   return (
     <aside className="w-64 bg-white border-r border-slate-200 flex flex-col justify-between hidden md:flex min-h-[calc(100vh-57px)]">
-      
+
       <div className="p-3 space-y-1">
         <div className="px-3 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
           Main Modules
@@ -36,11 +36,10 @@ export default function Sidebar({ activeTab, setActiveTab }) {
             <button
               key={item.id}
               onClick={() => setActiveTab(item.id)}
-              className={`w-full text-left px-3 py-2.5 rounded-xl text-xs font-medium flex items-center space-x-3 transition-all ${
-                isActive
+              className={`w-full text-left px-3 py-2.5 rounded-xl text-xs font-medium flex items-center space-x-3 transition-all ${isActive
                   ? 'bg-blue-50 text-blue-700 border border-blue-200 font-semibold shadow-2xs'
                   : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-              }`}
+                }`}
             >
               <Icon className={`w-4 h-4 ${isActive ? 'text-blue-600' : 'text-slate-400'}`} />
               <span>{item.label}</span>

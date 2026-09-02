@@ -167,8 +167,8 @@ router.get('/dealers-summary', (req, res) => {
       const placeKey = Object.keys(attrs).find(k => /stock.*place/i.test(k));
       const place = (placeKey && attrs[placeKey] ? String(attrs[placeKey]).trim() : d.current_holder_name || 'Unassigned').trim();
 
-      const dateKey = Object.keys(attrs).find(k => /stock.*place.*date|date/i.test(k));
-      const dateVal = dateKey && attrs[dateKey] ? String(attrs[dateKey]).trim() : '';
+      const dateKey = Object.keys(attrs).find(k => /stock.*place.*date|dispatch.*date|^stock.*date$/i.test(k.trim()));
+      const dateVal = (dateKey && attrs[dateKey]) || attrs['STOCK PLACE DATE'] || attrs['Stock Place Date'] || '';
 
       const vehKey = Object.keys(attrs).find(k => /vehicle|veh_no|reg_no/i.test(k));
       const isInstalled = Boolean(vehKey && attrs[vehKey]) || d.current_status === 'INSTALLED';
@@ -881,6 +881,152 @@ router.post('/bulk-delete', (req, res) => {
   }
 });
 
+// Helper: Detect Device Name and Device Type based on IMEI number
+function detectDeviceByImei(rawImei) {
+  const clean = String(rawImei || '').trim();
+  if (!clean || clean.length < 4) {
+    return {
+      imei: clean,
+      device_name: 'Unknown Device',
+      device_type_id: null,
+      device_type_name: 'Unknown',
+      exists: false
+    };
+  }
+
+  // 1. Exact IMEI match in devices table
+  const exact = db.prepare(`
+    SELECT d.id, d.imei_number, d.device_type_id, d.current_status, d.current_holder_name,
+           d.additional_attributes, dt.name as device_type_name, dt.category as device_type_category
+    FROM devices d
+    LEFT JOIN device_types dt ON d.device_type_id = dt.id
+    WHERE d.imei_number = ?
+    LIMIT 1
+  `).get(clean);
+
+  if (exact) {
+    let attrs = {};
+    try { attrs = JSON.parse(exact.additional_attributes || '{}'); } catch {}
+    const explicitName = attrs['DEVICE NAME'] || attrs['Device Name'] || attrs['MODEL'] || attrs['Device Model'] || exact.device_type_name;
+    const stockPlace = exact.current_holder_name || attrs['STOCK PLACE'] || 'Central Warehouse';
+
+    return {
+      imei: clean,
+      device_id: exact.id,
+      device_name: explicitName || exact.device_type_name || 'GPS Tracker',
+      device_type_id: exact.device_type_id,
+      device_type_name: exact.device_type_name || 'GPS Tracker',
+      device_type_category: exact.device_type_category || 'AIS140',
+      stock_place: stockPlace,
+      current_status: exact.current_status,
+      exists: true,
+      detection_source: 'database_match'
+    };
+  }
+
+  // 2. Lookup matching TAC prefix (8, 7, 6, 5 digits) from existing devices in database
+  for (const len of [8, 7, 6, 5]) {
+    if (clean.length >= len) {
+      const prefix = clean.slice(0, len);
+      const prefixMatch = db.prepare(`
+        SELECT d.device_type_id, d.additional_attributes, dt.name as device_type_name, dt.category as device_type_category
+        FROM devices d
+        JOIN device_types dt ON d.device_type_id = dt.id
+        WHERE d.imei_number LIKE ?
+        LIMIT 1
+      `).get(`${prefix}%`);
+
+      if (prefixMatch) {
+        let attrs = {};
+        try { attrs = JSON.parse(prefixMatch.additional_attributes || '{}'); } catch {}
+        const explicitName = attrs['DEVICE NAME'] || attrs['Device Name'] || attrs['MODEL'] || prefixMatch.device_type_name;
+
+        return {
+          imei: clean,
+          device_name: explicitName || prefixMatch.device_type_name,
+          device_type_id: prefixMatch.device_type_id,
+          device_type_name: prefixMatch.device_type_name,
+          device_type_category: prefixMatch.device_type_category || 'AIS140',
+          exists: false,
+          detection_source: `prefix_${len}_match`
+        };
+      }
+    }
+  }
+
+  // 3. Fallback heuristic from known GPS Tracker TAC databases & active device_types
+  const allTypes = db.prepare('SELECT id, name, category FROM device_types WHERE active = 1').all();
+  let matchedType = null;
+  if (/^8683|^8613|^8603/i.test(clean)) {
+    matchedType = allTypes.find(t => /volty/i.test(t.name));
+  } else if (/^8649|^8628|^8670/i.test(clean)) {
+    matchedType = allTypes.find(t => /track/i.test(t.name)) || allTypes.find(t => /vamo/i.test(t.name));
+  } else if (/^8699|^8655/i.test(clean)) {
+    matchedType = allTypes.find(t => /vamo/i.test(t.name));
+  }
+
+  if (!matchedType && allTypes.length > 0) {
+    matchedType = allTypes[0];
+  }
+
+  return {
+    imei: clean,
+    device_name: matchedType ? matchedType.name : 'GPS Tracker',
+    device_type_id: matchedType ? matchedType.id : null,
+    device_type_name: matchedType ? matchedType.name : 'GPS Tracker',
+    exists: false,
+    detection_source: 'heuristic'
+  };
+}
+
+// GET /api/devices/detect/:imei - Detect device name & type for a single IMEI
+router.get('/detect/:imei', (req, res) => {
+  try {
+    const result = detectDeviceByImei(req.params.imei);
+    res.json({ success: true, data: result });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/devices/detect-batch - Detect device names & types for multiple IMEIs
+router.post('/detect-batch', (req, res) => {
+  try {
+    const { imeis } = req.body;
+    if (!Array.isArray(imeis) || imeis.length === 0) {
+      return res.status(400).json({ success: false, error: 'At least one IMEI is required' });
+    }
+
+    const detections = imeis.map(i => detectDeviceByImei(i)).filter(Boolean);
+    const typeCountMap = {};
+    detections.forEach(d => {
+      if (d.device_type_id) {
+        typeCountMap[d.device_type_id] = (typeCountMap[d.device_type_id] || 0) + 1;
+      }
+    });
+
+    let primaryTypeId = null;
+    let maxCount = 0;
+    for (const [tId, count] of Object.entries(typeCountMap)) {
+      if (count > maxCount) {
+        maxCount = count;
+        primaryTypeId = parseInt(tId);
+      }
+    }
+
+    const primaryType = detections.find(d => d.device_type_id === primaryTypeId);
+
+    res.json({
+      success: true,
+      data: detections,
+      detected_type_id: primaryTypeId,
+      detected_type_name: primaryType ? primaryType.device_type_name : (detections[0]?.device_type_name || 'GPS Tracker')
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // POST /api/devices/bulk-assign-dealer - Bulk assign scanned IMEIs to a Dealer / Stock Place with date & history
 router.post('/bulk-assign-dealer', (req, res) => {
   const { imeis, stock_place, stock_place_date, status = 'WITH_DEALER', performed_by = 'Admin', remarks = '', device_type_id } = req.body;
@@ -899,13 +1045,13 @@ router.post('/bulk-assign-dealer', (req, res) => {
     const updatedDevices = [];
     const missingImeis = [];
 
-    // Resolve intelligent default device type (prioritize VAMO/VAMOSYS/TRACKNOW/VOLTY instead of BSTPL)
+    // Resolve intelligent default device type
     let defaultTypeId = device_type_id ? parseInt(device_type_id) : null;
     if (!defaultTypeId) {
       const preferredType = db.prepare(`
         SELECT id FROM device_types 
         WHERE name NOT IN ('BSTPL')
-        ORDER BY (CASE WHEN name LIKE '%VAMO%' THEN 1 WHEN name LIKE '%TRACK%' THEN 2 WHEN name LIKE '%VOLTY%' THEN 3 ELSE 4 END), id DESC 
+        ORDER BY (CASE WHEN name LIKE '%VOLTY%' THEN 1 WHEN name LIKE '%TRACK%' THEN 2 WHEN name LIKE '%VAMO%' THEN 3 ELSE 4 END), id DESC 
         LIMIT 1
       `).get();
       defaultTypeId = preferredType ? preferredType.id : 1;
@@ -916,29 +1062,34 @@ router.post('/bulk-assign-dealer', (req, res) => {
         const imei = String(rawImei).trim();
         if (!imei) continue;
 
+        const detected = detectDeviceByImei(imei);
+        const resolvedTypeId = device_type_id ? parseInt(device_type_id) : (detected.device_type_id || defaultTypeId);
+
         let dev = db.prepare('SELECT * FROM devices WHERE imei_number = ?').get(imei);
         
         if (!dev) {
-          // If not in database yet, auto-create the device record with the assigned Stock Place & Date
+          // If not in database yet, auto-create the device record with the assigned Stock Place & Date & detected Device Name
           const initAttrs = {
+            'DEVICE NAME': detected.device_name || 'GPS Tracker',
             'STOCK PLACE': cleanPlace,
             'STOCK PLACE DATE': cleanDate
           };
           const info = db.prepare(`
             INSERT INTO devices (imei_number, device_type_id, purchase_date, vendor_name, current_status, current_holder_type, current_holder_name, additional_attributes)
             VALUES (?, ?, ?, 'Direct Entry', ?, 'DEALER', ?, ?)
-          `).run(imei, defaultTypeId, cleanDate, status, cleanPlace, JSON.stringify(initAttrs));
+          `).run(imei, resolvedTypeId, cleanDate, status, cleanPlace, JSON.stringify(initAttrs));
 
           const newId = info.lastInsertRowid;
 
           db.prepare(`
             INSERT INTO device_history (device_id, imei_number, event_type, event_date, from_holder, to_holder, performed_by, remarks)
             VALUES (?, ?, 'DISPATCHED', datetime('now'), 'Unassigned', ?, ?, ?)
-          `).run(newId, imei, cleanPlace, performed_by, `Device added & dispatched to ${cleanPlace} on ${cleanDate}`);
+          `).run(newId, imei, cleanPlace, performed_by, `Device (${detected.device_name}) added & dispatched to ${cleanPlace} on ${cleanDate}`);
 
           updatedDevices.push({
             id: newId,
             imei_number: imei,
+            device_name: detected.device_name,
             stock_place: cleanPlace,
             stock_place_date: cleanDate
           });
@@ -948,12 +1099,24 @@ router.post('/bulk-assign-dealer', (req, res) => {
         let attrs = {};
         try { attrs = JSON.parse(dev.additional_attributes || '{}'); } catch {}
 
-        // Preserve case or update existing key
+        // Ensure DEVICE NAME is recorded if not present
+        if (!attrs['DEVICE NAME'] && !attrs['Device Name']) {
+          attrs['DEVICE NAME'] = detected.device_name || 'GPS Tracker';
+        }
+
+        // Preserve case or update existing key specifically for stock place and stock place date
         const placeKey = Object.keys(attrs).find(k => /stock.*place/i.test(k)) || 'STOCK PLACE';
-        const dateKey = Object.keys(attrs).find(k => /stock.*place.*date|date/i.test(k)) || 'STOCK PLACE DATE';
+        const dateKey = Object.keys(attrs).find(k => /stock.*place.*date|dispatch.*date|^stock.*date$/i.test(k.trim()));
 
         attrs[placeKey] = cleanPlace;
-        attrs[dateKey] = cleanDate;
+        attrs['STOCK PLACE'] = cleanPlace;
+        if (attrs['Stock Place'] !== undefined) attrs['Stock Place'] = cleanPlace;
+
+        if (dateKey) {
+          attrs[dateKey] = cleanDate;
+        }
+        attrs['STOCK PLACE DATE'] = cleanDate;
+        if (attrs['Stock Place Date'] !== undefined) attrs['Stock Place Date'] = cleanDate;
 
         const attrsJson = JSON.stringify(attrs);
 

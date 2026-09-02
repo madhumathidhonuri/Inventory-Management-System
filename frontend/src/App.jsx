@@ -20,7 +20,7 @@ import MobileAppView from './pages/MobileAppView';
 function MainLayout() {
   const { isMobileMode } = useAuth();
   const [activeTab, setActiveTab] = useState('dashboard');
-  
+
   // Drawer & Scanner States
   const [traceDrawerOpen, setTraceDrawerOpen] = useState(false);
   const [traceImei, setTraceImei] = useState('');
@@ -98,7 +98,7 @@ function MainLayout() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans">
-      
+
       {/* Top Navigation Header */}
       <Header
         onOpenScanner={() => openScannerWithCallback(null)}
@@ -107,7 +107,7 @@ function MainLayout() {
 
       {/* Main Workspace */}
       <div className="flex-1 flex overflow-hidden">
-        
+
         {/* Left Sidebar (Hidden in Mobile Mode) */}
         {!isMobileMode && (
           <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />

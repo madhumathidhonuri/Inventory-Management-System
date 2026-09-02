@@ -238,7 +238,11 @@ function getAmountReceivedStatus(attrs = {}) {
 
 // Helper: Extract Date
 function getDateValue(device, attrs = {}) {
-  const dateKey = Object.keys(attrs).find(k => /certificate.*date|stock.*date|date/i.test(k));
+  const explicitDate = attrs['STOCK PLACE DATE'] || attrs['Stock Place Date'] || attrs['CERTIFICATE ISSUED DATE'] || attrs['Certificate Issued Date'] || attrs['INSTALLATION DATE'] || attrs['Installation Date'];
+  if (explicitDate) {
+    return formatExcelDate(explicitDate);
+  }
+  const dateKey = Object.keys(attrs).find(k => /certificate.*date|stock.*date|dispatch.*date|^date$/i.test(k.trim()));
   if (dateKey && attrs[dateKey]) {
     return formatExcelDate(attrs[dateKey]);
   }

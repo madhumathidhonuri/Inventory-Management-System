@@ -49,7 +49,8 @@ import {
   bulkAssignDealer,
   bulkTransferDevices,
   fetchAuditLogs,
-  updateQuickPayment
+  updateQuickPayment,
+  detectDevicesByImeis
 } from '../services/api';
 import DeviceDetailCardModal from '../components/DeviceDetailCardModal';
 import FitmentReceiptModal from '../components/FitmentReceiptModal';
@@ -168,6 +169,7 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
   // Bulk Assign to Dealer Modal State
   const [isBulkAssignModalOpen, setIsBulkAssignModalOpen] = useState(false);
   const [bulkAssignImeisText, setBulkAssignImeisText] = useState('');
+  const [bulkAssignDetectedModel, setBulkAssignDetectedModel] = useState('');
   const [bulkAssignStockPlace, setBulkAssignStockPlace] = useState('');
   const [bulkAssignDate, setBulkAssignDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [bulkAssignRemarks, setBulkAssignRemarks] = useState('');
@@ -2925,9 +2927,28 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
                     required
                     placeholder="864920050019101&#10;864920050019102&#10;864920050019103..."
                     value={bulkAssignImeisText}
-                    onChange={(e) => setBulkAssignImeisText(e.target.value)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setBulkAssignImeisText(val);
+                      const tokens = val.split(/[\n,;\t\s]+/).map(t => t.trim().toUpperCase()).filter(t => t.length >= 4);
+                      if (tokens.length > 0) {
+                        detectDevicesByImeis(tokens.slice(0, 10)).then(res => {
+                          if (res.success && res.detected_type_name) {
+                            setBulkAssignDetectedModel(res.detected_type_name);
+                          }
+                        }).catch(() => {});
+                      } else {
+                        setBulkAssignDetectedModel('');
+                      }
+                    }}
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-mono text-slate-800 focus:outline-none focus:border-indigo-500 focus:bg-white"
                   />
+                  {bulkAssignDetectedModel && (
+                    <div className="flex items-center gap-1.5 text-[11px] text-indigo-700 font-semibold bg-indigo-50/70 p-2 rounded-xl border border-indigo-100 animate-in fade-in-50">
+                      <Sparkles className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                      <span>Auto-detected Device Model: <strong className="text-indigo-950">{bulkAssignDetectedModel}</strong></span>
+                    </div>
+                  )}
                 </div>
 
                 {/* Dealer / Stock Place Name */}

@@ -21,7 +21,7 @@ import {
   Building
 } from 'lucide-react';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
-import { bulkAssignDealer, fetchDealersSummary, fetchDeviceTypes } from '../services/api';
+import { bulkAssignDealer, fetchDealersSummary, fetchDeviceTypes, detectDevicesByImeis } from '../services/api';
 
 export default function BarcodeScannerModal({
   isOpen,
@@ -40,6 +40,8 @@ export default function BarcodeScannerModal({
   const [isFlashOn, setIsFlashOn] = useState(false);
   const [hasTorch, setHasTorch] = useState(false);
   const [lastScannedImei, setLastScannedImei] = useState('');
+  const [lastDetectedModel, setLastDetectedModel] = useState('');
+  const [detectedMap, setDetectedMap] = useState({});
   const [simulatedSampleIdx, setSimulatedSampleIdx] = useState(0);
 
   // Device Types State
@@ -59,11 +61,34 @@ export default function BarcodeScannerModal({
     fetchDeviceTypes().then(res => {
       if (res.success && Array.isArray(res.data)) {
         setDeviceTypes(res.data);
-        const preferred = res.data.find(d => /vamo/i.test(d.name)) || res.data.find(d => /track/i.test(d.name)) || res.data[0];
+        const preferred = res.data.find(d => /volty/i.test(d.name)) || res.data.find(d => /track/i.test(d.name)) || res.data[0];
         if (preferred) setSelectedDeviceTypeId(preferred.id);
       }
     }).catch(() => { });
   }, []);
+
+  const detectImeisAsync = async (imeiList) => {
+    if (!imeiList || imeiList.length === 0) return;
+    try {
+      const res = await detectDevicesByImeis(imeiList);
+      if (res.success && Array.isArray(res.data)) {
+        const newMap = {};
+        res.data.forEach(d => {
+          newMap[d.imei] = d;
+        });
+        setDetectedMap(prev => ({ ...prev, ...newMap }));
+
+        if (res.detected_type_id) {
+          setSelectedDeviceTypeId(res.detected_type_id);
+        }
+        if (res.detected_type_name) {
+          setLastDetectedModel(res.detected_type_name);
+        }
+      }
+    } catch (e) {
+      console.warn('Auto-detect device error:', e);
+    }
+  };
 
   const scannerRef = useRef(null);
   const lastScannedTimeRef = useRef(0);
@@ -121,6 +146,9 @@ export default function BarcodeScannerModal({
       if (prev.includes(clean)) return prev;
       return [clean, ...prev];
     });
+
+    // Auto detect device name and type from IMEI
+    detectImeisAsync([clean]);
   };
 
   // Hardware USB/Bluetooth Barcode Scanner Listener
@@ -326,6 +354,7 @@ export default function BarcodeScannerModal({
 
     if (tokens.length > 0) {
       tokens.forEach(tok => addImei(tok));
+      detectImeisAsync(tokens);
       setBulkPasteText('');
       setShowPasteModal(false);
     }
@@ -551,9 +580,16 @@ export default function BarcodeScannerModal({
 
             {/* Live Instant Recognition Banner */}
             {lastScannedImei && (
-              <div className="mb-2 p-2 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center gap-2 text-emerald-800 text-xs font-mono animate-in fade-in-50">
-                <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span className="truncate">Scanned: <strong>{lastScannedImei}</strong></span>
+              <div className="mb-2 p-2 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-between gap-2 text-emerald-800 text-xs font-mono animate-in fade-in-50">
+                <div className="flex items-center gap-2 truncate">
+                  <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span className="truncate">Scanned: <strong>{lastScannedImei}</strong></span>
+                </div>
+                {(detectedMap[lastScannedImei]?.device_name || lastDetectedModel) && (
+                  <span className="bg-emerald-600 text-white px-2 py-0.5 rounded-lg text-[10px] font-sans font-bold shadow-2xs shrink-0">
+                    Model: {detectedMap[lastScannedImei]?.device_name || lastDetectedModel}
+                  </span>
+                )}
               </div>
             )}
 
@@ -562,27 +598,42 @@ export default function BarcodeScannerModal({
                 <div className="h-full flex flex-col items-center justify-center text-center text-xs text-slate-400 p-4 space-y-2">
                   <Barcode className="w-8 h-8 text-slate-300 stroke-1" />
                   <p>Point camera at barcode or trigger your USB Barcode Gun.</p>
-                  <p className="text-[10px] text-slate-400">Scans immediately upon detection!</p>
+                  <p className="text-[10px] text-slate-400">Scans and detects device model automatically!</p>
                 </div>
               ) : (
-                scannedImeis.map((imei, idx) => (
-                  <div
-                    key={idx}
-                    className="flex items-center justify-between p-2.5 bg-white border border-slate-200 rounded-xl text-xs font-mono text-slate-800 shadow-2xs hover:border-blue-300 transition-colors"
-                  >
-                    <span className="flex items-center gap-2">
-                      <span className="text-[10px] text-slate-400 font-sans font-bold">#{scannedImeis.length - idx}</span>
-                      <strong className="text-blue-700">{imei}</strong>
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => removeImei(imei)}
-                      className="text-slate-400 hover:text-red-600 p-1 rounded-md transition-colors cursor-pointer"
+                scannedImeis.map((imei, idx) => {
+                  const det = detectedMap[imei];
+                  return (
+                    <div
+                      key={idx}
+                      className="flex items-center justify-between p-2.5 bg-white border border-slate-200 rounded-xl text-xs font-mono text-slate-800 shadow-2xs hover:border-blue-300 transition-colors gap-2"
                     >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                ))
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <span className="text-[10px] text-slate-400 font-sans font-bold shrink-0">#{scannedImeis.length - idx}</span>
+                        <strong className="text-blue-700 truncate">{imei}</strong>
+                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-sans font-bold shrink-0 border ${
+                          det?.exists
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            : 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                        }`}>
+                          📱 {det?.device_name || det?.device_type_name || 'Detecting...'}
+                        </span>
+                        {det?.stock_place && (
+                          <span className="text-[10px] font-sans text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded-sm truncate hidden sm:inline-block">
+                            📍 {det.stock_place}
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeImei(imei)}
+                        className="text-slate-400 hover:text-red-600 p-1 rounded-md transition-colors cursor-pointer shrink-0"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  );
+                })
               )}
             </div>
           </div>
@@ -723,16 +774,23 @@ export default function BarcodeScannerModal({
                   />
                 </div>
 
-                {/* Device Type / Vendor (if newly scanned) */}
+                {/* Device Type / Model (Auto Detected from IMEI) */}
                 {deviceTypes.length > 0 && (
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-slate-700">
-                      Device Type / Model (e.g. VAMO, VAMOSYS, VOLTY, TRACKNOW)
-                    </label>
+                  <div className="space-y-1.5 p-3 bg-slate-50 border border-slate-200 rounded-2xl">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-indigo-600" /> Device Model / Type
+                      </label>
+                      {lastDetectedModel && (
+                        <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-100 text-indigo-800 border border-indigo-200">
+                          Detected: {lastDetectedModel}
+                        </span>
+                      )}
+                    </div>
                     <select
                       value={selectedDeviceTypeId}
                       onChange={(e) => setSelectedDeviceTypeId(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-900 focus:outline-none focus:border-indigo-500 focus:bg-white"
+                      className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-900 focus:outline-none focus:border-indigo-500"
                     >
                       {deviceTypes.map(dt => (
                         <option key={dt.id} value={dt.id}>{dt.name} ({dt.category})</option>

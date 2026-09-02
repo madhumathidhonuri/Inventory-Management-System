@@ -383,6 +383,22 @@ export async function bulkAssignDealer(payload) {
   return res.json();
 }
 
+export async function detectDeviceByImei(imei) {
+  const res = await fetch(`${API_BASE}/devices/detect/${encodeURIComponent(imei)}`);
+  if (!res.ok) throw new Error('Failed to detect device');
+  return res.json();
+}
+
+export async function detectDevicesByImeis(imeis) {
+  const res = await fetch(`${API_BASE}/devices/detect-batch`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ imeis })
+  });
+  if (!res.ok) throw new Error('Failed to detect devices');
+  return res.json();
+}
+
 export async function fetchDealersSummary() {
   const res = await fetch(`${API_BASE}/devices/dealers-summary`);
   if (!res.ok) throw new Error('Failed to fetch dealers summary');

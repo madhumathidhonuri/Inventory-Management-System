@@ -288,7 +288,7 @@ export default function PaymentQrModal({
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-200">
-      
+
       {/* Print Specific Styles */}
       <style>{`
         @media print {
@@ -315,7 +315,7 @@ export default function PaymentQrModal({
       `}</style>
 
       <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-xl shadow-2xl overflow-hidden flex flex-col max-h-[95vh] animate-in zoom-in-95 duration-200">
-        
+
         {/* Modal Header */}
         <div className="px-6 py-4 bg-slate-900 text-white flex items-center justify-between no-print border-b border-slate-800">
           <div className="flex items-center gap-3">
@@ -456,7 +456,7 @@ export default function PaymentQrModal({
 
           {/* Main Printable Card */}
           <div id="printable-qr-card" className="bg-white border-2 border-slate-200 rounded-3xl p-6 shadow-sm space-y-5">
-            
+
             {/* Customer & Vehicle Info Badge */}
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-slate-900 text-white p-4 rounded-2xl">
               <div>
@@ -488,11 +488,10 @@ export default function PaymentQrModal({
                   setQrMode('COMPANY_QR');
                   localStorage.setItem('fueltracks_qr_mode', 'COMPANY_QR');
                 }}
-                className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                  qrMode === 'COMPANY_QR'
+                className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${qrMode === 'COMPANY_QR'
                     ? 'bg-white text-slate-900 shadow-xs'
                     : 'text-slate-600 hover:text-slate-900'
-                }`}
+                  }`}
               >
                 <span>🏢 Official Company QR</span>
                 {companyQrImage && <span className="w-2 h-2 rounded-full bg-emerald-500" />}
@@ -504,11 +503,10 @@ export default function PaymentQrModal({
                   setQrMode('DYNAMIC_UPI');
                   localStorage.setItem('fueltracks_qr_mode', 'DYNAMIC_UPI');
                 }}
-                className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                  qrMode === 'DYNAMIC_UPI'
+                className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${qrMode === 'DYNAMIC_UPI'
                     ? 'bg-white text-slate-900 shadow-xs'
                     : 'text-slate-600 hover:text-slate-900'
-                }`}
+                  }`}
               >
                 <span>⚡ Dynamic Amount UPI</span>
               </button>
@@ -536,7 +534,7 @@ export default function PaymentQrModal({
 
             {/* QR Code Presentation Box */}
             <div className="flex flex-col items-center justify-center p-6 bg-radial from-slate-50 to-slate-100/60 rounded-3xl border border-slate-200 text-center space-y-3">
-              
+
               <div className="p-3 bg-white rounded-2xl shadow-md border border-slate-200/80 inline-block">
                 {qrMode === 'COMPANY_QR' && companyQrImage ? (
                   <img
@@ -567,7 +565,7 @@ export default function PaymentQrModal({
                   <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
                   <span>Verified Merchant: {payeeName}</span>
                 </div>
-                
+
                 <div className="flex items-center justify-center gap-2 text-xs font-mono text-slate-600 pt-1">
                   <span>UPI ID: <strong>{upiId}</strong></span>
                   <button
@@ -626,7 +624,7 @@ export default function PaymentQrModal({
 
         {/* Modal Bottom Actions Bar */}
         <div className="px-6 py-4 bg-white border-t border-slate-200 flex flex-wrap items-center justify-between gap-3 no-print">
-          
+
           <div className="flex items-center gap-2">
             <button
               onClick={handleCopyLink}

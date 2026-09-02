@@ -156,7 +156,7 @@ router.post('/', (req, res) => {
 
     // 4. Update Device Status, Holder & Attributes
     let attrs = {};
-    try { attrs = JSON.parse(dev.additional_attributes || '{}'); } catch {}
+    try { attrs = JSON.parse(dev.additional_attributes || '{}'); } catch { }
 
     if (req.body.additional_attributes && typeof req.body.additional_attributes === 'object') {
       attrs = { ...attrs, ...req.body.additional_attributes };
@@ -260,7 +260,7 @@ router.post('/', (req, res) => {
     try {
       const cloudSync = require('../db/cloudSync');
       cloudSync.triggerDebouncedSync(1000);
-    } catch (e) {}
+    } catch (e) { }
 
     res.json({
       success: true,
@@ -363,7 +363,7 @@ router.post('/bulk', (req, res) => {
 
       // 4. Update Device Attributes
       let attrs = {};
-      try { attrs = JSON.parse(dev.additional_attributes || '{}'); } catch {}
+      try { attrs = JSON.parse(dev.additional_attributes || '{}'); } catch { }
       attrs['VEHICLE NUMBER'] = cleanVehicle;
       attrs['CUSTOMER NAME'] = cleanName;
       attrs['CUSTOMER PHONE NUMBER'] = cleanPhone;
