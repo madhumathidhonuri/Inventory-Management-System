@@ -101,6 +101,31 @@ An enterprise-grade, full-stack **Inventory Management & Telematics Operations S
 
 ---
 
+### 11. 💰 Device Payments & Collections Hub
+- **Dedicated Device Payments Ledger**: Real-time collections ledger tracking payments received for installed devices / vehicles.
+- **Live Realization Telemetry**: 4 KPI cards tracking **Total Payments Collected**, **Pending Receivables**, **Today's Collections**, and **Units Realization Status** (Fully Paid, Partial, Unpaid).
+- **Automated Balance Tracking**: Auto-computes pending balance ($$\text{Sale Price} - \text{Amount Paid}$$) and payment status (`PAID`, `PARTIAL`, `PENDING`).
+- **Payment Method & UTR Verification**: Record UPI reference numbers, Cash, Bank Transfers, and Cheques with 1-click UTR copying.
+- **1-Click WhatsApp Payment Receipt**: Send official WhatsApp payment confirmation messages directly to vehicle owners with balance breakdown.
+- **1-Click Excel Collections Statement**: Download formatted `.xlsx` collections registers with currency formatting and summary totals.
+
+---
+
+### 12. 💳 Operational Expenses Hub, Rate Master & P&L Statement
+- **Operational Expenses Hub**: Log and categorize field expenditures:
+  - *Technician Travel & Fuel* (site visits & conveyance).
+  - *Courier & Logistics* (dealer dispatches & parcel freight).
+  - *Technician Installation Payouts / Incentives*.
+  - *Office & General Operations* (rent, bills, petty cash).
+- **Fast Text-Based Logging**: Zero image upload delay with instant UTR/reference number tracking and category pill filters.
+- **1-Click Monthly Expenses Excel Export**: Formatted `.xlsx` statements for accounting and audits.
+- **Device Pricing & Rate Master**:
+  - Configure **Vendor Purchase Cost**, **Dealer Transfer Price**, **Retail Installation Price**, and project tiers (`GENERAL`, `VLTD`, `TG MINING`, `AP MINING`).
+  - Real-time Gross Margin (₹) and Margin % preview.
+- **Executive P&L Financial Report**: Real-time business profitability tracking ($$\text{Hardware Revenue} - \text{Hardware Cost} - \text{Operating Expenses}$$) with visual distribution progress bars.
+
+---
+
 ## 🛠️ Architecture & Tech Stack
 
 | Layer | Technology |
