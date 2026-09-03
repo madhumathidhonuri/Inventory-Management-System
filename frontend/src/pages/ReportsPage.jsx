@@ -27,7 +27,12 @@ import {
   Building,
   UserCheck,
   CreditCard as PanIcon,
-  Shield
+  Shield,
+  TrendingUp,
+  PieChart,
+  DollarSign,
+  Wallet,
+  Percent
 } from 'lucide-react';
 import {
   fetchReportOptions,
@@ -36,11 +41,12 @@ import {
   fetchCustomerDirectory,
   getCustomerDirectoryExportUrl,
   fetchPaymentsTelemetry,
-  getPaymentsExcelDownloadUrl
+  getPaymentsExcelDownloadUrl,
+  fetchPnLSummary
 } from '../services/api';
 
 export default function ReportsPage() {
-  const [activeTab, setActiveTab] = useState('payments_statement'); // 'payments_statement' | 'customer_directory' | 'daily_matrix' | 'custom_builder'
+  const [activeTab, setActiveTab] = useState('payments_statement'); // 'payments_statement' | 'pnl_statement' | 'customer_directory' | 'daily_matrix' | 'custom_builder'
   const [loadingOptions, setLoadingOptions] = useState(true);
   const [dailyMatrixLoading, setDailyMatrixLoading] = useState(false);
   const [dailyMatrix, setDailyMatrix] = useState(null);
@@ -58,6 +64,19 @@ export default function ReportsPage() {
   const [paymentsData, setPaymentsData] = useState(null);
   const [paymentsLoading, setPaymentsLoading] = useState(false);
   const [paymentsSearch, setPaymentsSearch] = useState('');
+
+  // P&L Statement State
+  const [pnlData, setPnlData] = useState(null);
+  const [pnlLoading, setPnlLoading] = useState(false);
+  const [pnlRange, setPnlRange] = useState('this_month');
+  const [pnlStartDate, setPnlStartDate] = useState(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+  });
+  const [pnlEndDate, setPnlEndDate] = useState(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
+  });
 
 
   const [options, setOptions] = useState({
@@ -113,13 +132,55 @@ export default function ReportsPage() {
     }
   };
 
+  const loadPnLData = async () => {
+    setPnlLoading(true);
+    try {
+      const res = await fetchPnLSummary({
+        startDate: pnlStartDate,
+        endDate: pnlEndDate
+      });
+      if (res.success) {
+        setPnlData(res.data);
+      }
+    } catch (err) {
+      console.error('Failed to load P&L summary:', err);
+    } finally {
+      setPnlLoading(false);
+    }
+  };
+
+  const handlePnLRangeChange = (rangeKey) => {
+    setPnlRange(rangeKey);
+    const now = new Date();
+    if (rangeKey === 'this_month') {
+      const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+      const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
+      setPnlStartDate(firstDay);
+      setPnlEndDate(lastDay);
+    } else if (rangeKey === 'last_month') {
+      const firstDay = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().split('T')[0];
+      const lastDay = new Date(now.getFullYear(), now.getMonth(), 0).toISOString().split('T')[0];
+      setPnlStartDate(firstDay);
+      setPnlEndDate(lastDay);
+    } else if (rangeKey === 'all_time') {
+      setPnlStartDate('');
+      setPnlEndDate('');
+    }
+  };
+
   useEffect(() => {
     loadPaymentsStatement();
   }, [paymentsRange, paymentStartDate, paymentEndDate]);
 
   useEffect(() => {
+    loadPnLData();
+  }, [pnlStartDate, pnlEndDate]);
+
+  useEffect(() => {
     if (activeTab === 'customer_directory') {
       loadCustomerDirectory();
+    } else if (activeTab === 'pnl_statement') {
+      loadPnLData();
     }
   }, [activeTab]);
 
@@ -346,10 +407,29 @@ export default function ReportsPage() {
           }`}
         >
           <Receipt className="w-4 h-4" />
-          <span>Daily & Custom Range Payments Statement</span>
+          <span>Daily Payments Statement</span>
           {paymentsData?.kpis && (
             <span className="px-2 py-0.5 rounded-full text-[10px] bg-white/20 text-white font-bold">
               Today: ₹{(paymentsData.kpis.today_collected_amount || 0).toLocaleString('en-IN')}
+            </span>
+          )}
+        </button>
+
+        <button
+          onClick={() => setActiveTab('pnl_statement')}
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 border ${
+            activeTab === 'pnl_statement'
+              ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
+              : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+          }`}
+        >
+          <TrendingUp className="w-4 h-4" />
+          <span>P&L & Operating Margin</span>
+          {pnlData && (
+            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+              pnlData.net_profit >= 0 ? 'bg-emerald-500/20 text-emerald-100' : 'bg-rose-500/20 text-rose-100'
+            }`}>
+              Net: ₹{Number(pnlData.net_profit || 0).toLocaleString('en-IN')}
             </span>
           )}
         </button>
@@ -363,7 +443,7 @@ export default function ReportsPage() {
           }`}
         >
           <UserCheck className="w-4 h-4" />
-          <span>Customer & Vehicle Directory (KYC Master)</span>
+          <span>Customer Directory (KYC)</span>
           <span className="px-2 py-0.5 rounded-full text-[10px] bg-white/20 text-white font-bold">
             {customerDirectory.length} Records
           </span>
@@ -378,7 +458,7 @@ export default function ReportsPage() {
           }`}
         >
           <Table className="w-4 h-4" />
-          <span>Daily Master Stock Distribution Matrix</span>
+          <span>Daily Distribution Matrix</span>
           <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-white/20 text-white font-normal">
             Auto-Prepared
           </span>
@@ -396,6 +476,299 @@ export default function ReportsPage() {
           <span>Tailored Report & Billing Register Export</span>
         </button>
       </div>
+
+      {/* TAB: Executive Profit & Loss (P&L) Statement */}
+      {activeTab === 'pnl_statement' && (
+        <div className="glass-panel p-6 rounded-2xl space-y-6 border border-slate-200 shadow-sm animate-fadeIn">
+          {/* Section Header */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  <TrendingUp className="w-5 h-5 text-blue-600" /> Executive Profit & Loss (P&L) Statement
+                </h3>
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-800 border border-blue-200">
+                  {pnlRange.replace('_', ' ').toUpperCase()}
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 mt-1">
+                Real-time financial telemetry factoring Hardware Revenue, Procurement Costs, and Operational Field Expenditures.
+              </p>
+            </div>
+
+            {/* Quick Range Selector */}
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-xl">
+                <button
+                  onClick={() => handlePnLRangeChange('this_month')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                    pnlRange === 'this_month'
+                      ? 'bg-white text-blue-700 shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  This Month
+                </button>
+                <button
+                  onClick={() => handlePnLRangeChange('last_month')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                    pnlRange === 'last_month'
+                      ? 'bg-white text-blue-700 shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Last Month
+                </button>
+                <button
+                  onClick={() => handlePnLRangeChange('all_time')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                    pnlRange === 'all_time'
+                      ? 'bg-white text-blue-700 shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  All Time
+                </button>
+              </div>
+
+              <button
+                onClick={loadPnLData}
+                className="p-2 bg-white border border-slate-200 text-slate-600 rounded-xl hover:bg-slate-50 hover:text-slate-900 transition-all shadow-2xs"
+                title="Refresh Financials"
+              >
+                <RefreshCw className={`w-4 h-4 ${pnlLoading ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
+          </div>
+
+          {/* Big Profit Hero Banner */}
+          <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white p-6 rounded-2xl border border-slate-800 shadow-md">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+              <div>
+                <span className="text-xs font-semibold text-indigo-300 uppercase tracking-wider">
+                  Net Operating Profit ({pnlRange.replace('_', ' ')})
+                </span>
+                <div className="text-3xl md:text-4xl font-extrabold tracking-tight mt-1 flex items-center gap-3">
+                  <span className={pnlData?.net_profit >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
+                    ₹{(pnlData?.net_profit || 0).toLocaleString('en-IN')}
+                  </span>
+                  <span className={`text-xs px-2.5 py-1 rounded-full font-bold border ${
+                    pnlData?.net_profit >= 0 
+                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' 
+                      : 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+                  }`}>
+                    {pnlData?.profit_margin_pct || 0}% Net Margin
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-2">
+                  Net = Billed Revenue (₹{(pnlData?.total_billed_revenue || 0).toLocaleString('en-IN')}) — Hardware Cost (₹{(pnlData?.hardware_cost || 0).toLocaleString('en-IN')}) — Operational Expenses (₹{(pnlData?.operating_expenses || 0).toLocaleString('en-IN')})
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 shrink-0">
+                <div className="bg-white/10 p-3 rounded-xl border border-white/10 text-center">
+                  <div className="text-xs text-indigo-200">Gross Margin</div>
+                  <div className="text-lg font-bold text-white mt-0.5">
+                    ₹{(pnlData?.gross_profit || 0).toLocaleString('en-IN')}
+                  </div>
+                </div>
+                <div className="bg-white/10 p-3 rounded-xl border border-white/10 text-center">
+                  <div className="text-xs text-indigo-200">Installations</div>
+                  <div className="text-lg font-bold text-white mt-0.5">
+                    {pnlData?.total_installations || 0} Units
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* 4 Financial Metric Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* 1. Billed Hardware Revenue */}
+            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
+              <div className="flex items-center justify-between text-slate-500 text-xs font-semibold uppercase">
+                <span>Hardware Revenue</span>
+                <div className="p-1.5 bg-blue-50 text-blue-600 rounded-lg">
+                  <DollarSign className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="text-2xl font-bold text-slate-900 mt-2">
+                ₹{(pnlData?.total_billed_revenue || 0).toLocaleString('en-IN')}
+              </div>
+              <div className="text-[11px] text-slate-400 mt-1">
+                From {pnlData?.total_installations || 0} vehicle installations
+              </div>
+            </div>
+
+            {/* 2. Hardware Procurement Cost */}
+            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
+              <div className="flex items-center justify-between text-slate-500 text-xs font-semibold uppercase">
+                <span>Procurement Cost</span>
+                <div className="p-1.5 bg-amber-50 text-amber-600 rounded-lg">
+                  <Boxes className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="text-2xl font-bold text-slate-900 mt-2">
+                ₹{(pnlData?.hardware_cost || 0).toLocaleString('en-IN')}
+              </div>
+              <div className="text-[11px] text-slate-400 mt-1">
+                Base vendor hardware cost
+              </div>
+            </div>
+
+            {/* 3. Operating Expenses */}
+            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
+              <div className="flex items-center justify-between text-slate-500 text-xs font-semibold uppercase">
+                <span>Operating Expenses</span>
+                <div className="p-1.5 bg-rose-50 text-rose-600 rounded-lg">
+                  <Wallet className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="text-2xl font-bold text-rose-600 mt-2">
+                ₹{(pnlData?.operating_expenses || 0).toLocaleString('en-IN')}
+              </div>
+              <div className="text-[11px] text-slate-400 mt-1">
+                Technician travel, courier & ops
+              </div>
+            </div>
+
+            {/* 4. Net Operating Profit */}
+            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
+              <div className="flex items-center justify-between text-slate-500 text-xs font-semibold uppercase">
+                <span>Net Operating Profit</span>
+                <div className="p-1.5 bg-emerald-50 text-emerald-600 rounded-lg">
+                  <TrendingUp className="w-4 h-4" />
+                </div>
+              </div>
+              <div className={`text-2xl font-bold mt-2 ${pnlData?.net_profit >= 0 ? 'text-emerald-700' : 'text-rose-600'}`}>
+                ₹{(pnlData?.net_profit || 0).toLocaleString('en-IN')}
+              </div>
+              <div className="text-[11px] text-slate-400 mt-1">
+                {pnlData?.profit_margin_pct || 0}% of gross revenue
+              </div>
+            </div>
+          </div>
+
+          {/* Breakdown Panels */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Operational Expense Breakdown */}
+            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <h4 className="font-bold text-slate-900 text-xs uppercase tracking-wider flex items-center gap-2">
+                  <Wallet className="w-4 h-4 text-rose-600" /> Operational Expense Distribution
+                </h4>
+                <span className="text-xs font-bold text-rose-700">
+                  Total: ₹{(pnlData?.operating_expenses || 0).toLocaleString('en-IN')}
+                </span>
+              </div>
+
+              <div className="space-y-3 text-xs">
+                {/* Travel */}
+                <div>
+                  <div className="flex justify-between font-semibold text-slate-700 mb-1">
+                    <span>Technician Travel & Fuel</span>
+                    <span>₹{(pnlData?.expense_breakdown?.travel || 0).toLocaleString('en-IN')}</span>
+                  </div>
+                  <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+                    <div
+                      className="bg-amber-500 h-2 rounded-full"
+                      style={{
+                        width: `${pnlData?.operating_expenses > 0 ? ((pnlData.expense_breakdown.travel / pnlData.operating_expenses) * 100) : 0}%`
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {/* Courier */}
+                <div>
+                  <div className="flex justify-between font-semibold text-slate-700 mb-1">
+                    <span>Courier & Parcel Freight</span>
+                    <span>₹{(pnlData?.expense_breakdown?.courier || 0).toLocaleString('en-IN')}</span>
+                  </div>
+                  <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+                    <div
+                      className="bg-blue-500 h-2 rounded-full"
+                      style={{
+                        width: `${pnlData?.operating_expenses > 0 ? ((pnlData.expense_breakdown.courier / pnlData.operating_expenses) * 100) : 0}%`
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {/* Payouts */}
+                <div>
+                  <div className="flex justify-between font-semibold text-slate-700 mb-1">
+                    <span>Technician Installation Payouts</span>
+                    <span>₹{(pnlData?.expense_breakdown?.payout || 0).toLocaleString('en-IN')}</span>
+                  </div>
+                  <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+                    <div
+                      className="bg-emerald-500 h-2 rounded-full"
+                      style={{
+                        width: `${pnlData?.operating_expenses > 0 ? ((pnlData.expense_breakdown.payout / pnlData.operating_expenses) * 100) : 0}%`
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {/* Misc */}
+                <div>
+                  <div className="flex justify-between font-semibold text-slate-700 mb-1">
+                    <span>Office & General Operations</span>
+                    <span>₹{(pnlData?.expense_breakdown?.misc || 0).toLocaleString('en-IN')}</span>
+                  </div>
+                  <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+                    <div
+                      className="bg-purple-500 h-2 rounded-full"
+                      style={{
+                        width: `${pnlData?.operating_expenses > 0 ? ((pnlData.expense_breakdown.misc / pnlData.operating_expenses) * 100) : 0}%`
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Collections & Cash Flow Status */}
+            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <h4 className="font-bold text-slate-900 text-xs uppercase tracking-wider flex items-center gap-2">
+                  <Receipt className="w-4 h-4 text-emerald-600" /> Revenue Collection Telemetry
+                </h4>
+                <span className="text-xs font-bold text-slate-700">
+                  Total Billed: ₹{(pnlData?.total_billed_revenue || 0).toLocaleString('en-IN')}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-xl">
+                  <div className="text-xs font-semibold text-emerald-800 uppercase">Collected Revenue</div>
+                  <div className="text-xl font-bold text-emerald-900 mt-1">
+                    ₹{(pnlData?.collected_revenue || 0).toLocaleString('en-IN')}
+                  </div>
+                  <div className="text-[11px] text-emerald-700 mt-1">
+                    {pnlData?.total_billed_revenue > 0 ? ((pnlData.collected_revenue / pnlData.total_billed_revenue) * 100).toFixed(1) : 0}% Realized
+                  </div>
+                </div>
+
+                <div className="p-4 bg-rose-50/70 border border-rose-200 rounded-xl">
+                  <div className="text-xs font-semibold text-rose-800 uppercase">Pending Receivables</div>
+                  <div className="text-xl font-bold text-rose-900 mt-1">
+                    ₹{(pnlData?.pending_revenue || 0).toLocaleString('en-IN')}
+                  </div>
+                  <div className="text-[11px] text-rose-700 mt-1">
+                    Outstanding balance
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-3 bg-slate-50 rounded-xl border border-slate-100 text-[11px] text-slate-500">
+                💡 <strong>Audit Note:</strong> All financial entries are synchronized directly with verified UTR reference numbers and SQLite transaction integrity.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* TAB: Daily & Custom Range Payments Statement */}
       {activeTab === 'payments_statement' && (

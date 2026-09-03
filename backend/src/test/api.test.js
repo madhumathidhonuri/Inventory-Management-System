@@ -23,6 +23,9 @@ function createTestApp() {
   app.use('/api/users', require('../routes/users'));
   app.use('/api/reports', require('../routes/reports'));
   app.use('/api/backup', require('../routes/backup'));
+  app.use('/api/expenses', require('../routes/expenses'));
+  app.use('/api/device-pricing', require('../routes/devicePricing'));
+  app.use('/api/device-payments', require('../routes/devicePayments'));
 
   return app;
 }
@@ -174,6 +177,80 @@ async function runTests() {
       const res = await makeRequest(testPort, '/api/reports/payments-excel?range=today');
       if (res.status !== 200) {
         throw new Error('Payments Excel endpoint returned status ' + res.status);
+      }
+    });
+
+    // 14. Operational Expenses CRUD & Summary API
+    await assertTest('Operational Expenses API', async () => {
+      // Create expense
+      const createRes = await makeRequest(testPort, '/api/expenses', 'POST', {
+        expense_date: '2026-09-03',
+        category: 'TECHNICIAN_TRAVEL',
+        amount: 450,
+        payment_mode: 'UPI',
+        incurred_by: 'Test Technician',
+        paid_to: 'HP Petrol',
+        utr_number: 'UPI987654321',
+        remarks: 'Test conveyance'
+      });
+      if (createRes.status !== 201 || !createRes.body.success) {
+        throw new Error('Create expense failed');
+      }
+
+      const expenseId = createRes.body.data.id;
+
+      // Fetch summary
+      const sumRes = await makeRequest(testPort, '/api/expenses/summary');
+      if (sumRes.status !== 200 || !sumRes.body.success || sumRes.body.summary.total_amount <= 0) {
+        throw new Error('Expense summary failed');
+      }
+
+      // Cleanup
+      await makeRequest(testPort, `/api/expenses/${expenseId}`, 'DELETE');
+    });
+
+    // 15. Device Pricing & Rate Master API
+    await assertTest('Device Pricing & Rate Master API', async () => {
+      const listRes = await makeRequest(testPort, '/api/device-pricing');
+      if (listRes.status !== 200 || !listRes.body.success) {
+        throw new Error('Device pricing list failed');
+      }
+    });
+
+    // 16. P&L Financial Summary Report API
+    await assertTest('Executive P&L Financial Report API', async () => {
+      const pnlRes = await makeRequest(testPort, '/api/reports/pnl');
+      if (pnlRes.status !== 200 || !pnlRes.body.success || !('net_profit' in pnlRes.body.data)) {
+        throw new Error('P&L summary API failed');
+      }
+    });
+
+    // 17. Expenses Excel Export API
+    await assertTest('Expenses Statement Excel Export API', async () => {
+      const res = await makeRequest(testPort, '/api/expenses/export');
+      if (res.status !== 200) {
+        throw new Error('Expenses export endpoint returned status ' + res.status);
+      }
+    });
+
+    // 18. Device Payments (Collections) API
+    await assertTest('Device Payments Collections API', async () => {
+      const res = await makeRequest(testPort, '/api/device-payments');
+      if (res.status !== 200 || !res.body.success || !Array.isArray(res.body.data)) {
+        throw new Error('Device payments list failed');
+      }
+
+      const sumRes = await makeRequest(testPort, '/api/device-payments/summary');
+      if (sumRes.status !== 200 || !sumRes.body.success || !sumRes.body.summary) {
+        throw new Error('Device payments summary failed');
+      }
+    });
+
+    // 19. Device Payments Excel Export API
+    await assertTest('Device Payments Statement Excel Export API', async () => {
+      const res = await makeRequest(testPort, '/api/device-payments/export');
+      if (res.status !== 200) {
+        throw new Error('Device payments export endpoint returned status ' + res.status);
       }
     });
 

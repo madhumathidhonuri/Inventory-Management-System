@@ -257,6 +257,34 @@ function initDatabase() {
       remarks TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE TABLE IF NOT EXISTS expenses (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      expense_date TEXT NOT NULL,
+      category TEXT NOT NULL CHECK(category IN ('TECHNICIAN_TRAVEL', 'COURIER_FREIGHT', 'TECHNICIAN_PAYOUT', 'OFFICE_MISC', 'OTHER')),
+      amount REAL NOT NULL,
+      payment_mode TEXT DEFAULT 'UPI' CHECK(payment_mode IN ('UPI', 'CASH', 'BANK_TRANSFER', 'CHEQUE', 'CARD')),
+      incurred_by TEXT NOT NULL,
+      paid_to TEXT,
+      utr_number TEXT,
+      linked_entity_type TEXT DEFAULT 'GENERAL',
+      linked_entity_id TEXT,
+      remarks TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS device_pricing (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      device_type_id INTEGER NOT NULL,
+      project_category TEXT DEFAULT 'GENERAL',
+      purchase_cost REAL DEFAULT 0,
+      dealer_price REAL DEFAULT 0,
+      retail_price REAL DEFAULT 0,
+      min_price REAL DEFAULT 0,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (device_type_id) REFERENCES device_types(id) ON DELETE CASCADE,
+      UNIQUE(device_type_id, project_category)
+    );
   `);
 
   // Safe schema migrations for software credentials & payments
@@ -271,6 +299,11 @@ function initDatabase() {
   try { db.exec("ALTER TABLE installations ADD COLUMN software_user_id TEXT;"); } catch (e) { }
   try { db.exec("ALTER TABLE installations ADD COLUMN software_password TEXT;"); } catch (e) { }
   try { db.exec("ALTER TABLE installations ADD COLUMN payment_status TEXT DEFAULT 'PENDING';"); } catch (e) { }
+  try { db.exec("ALTER TABLE installations ADD COLUMN amount_paid REAL DEFAULT NULL;"); } catch (e) { }
+  try { db.exec("ALTER TABLE installations ADD COLUMN payment_date TEXT;"); } catch (e) { }
+  try { db.exec("ALTER TABLE installations ADD COLUMN payment_mode TEXT DEFAULT 'UPI';"); } catch (e) { }
+  try { db.exec("ALTER TABLE installations ADD COLUMN utr_number TEXT;"); } catch (e) { }
+  try { db.exec("ALTER TABLE installations ADD COLUMN payment_remarks TEXT;"); } catch (e) { }
   try { db.exec("ALTER TABLE installations ADD COLUMN aadhar_number TEXT;"); } catch (e) { }
   try { db.exec("ALTER TABLE installations ADD COLUMN pan_number TEXT;"); } catch (e) { }
   try { db.exec("ALTER TABLE installations ADD COLUMN chasis_number TEXT;"); } catch (e) { }

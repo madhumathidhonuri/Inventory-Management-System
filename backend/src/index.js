@@ -47,6 +47,9 @@ async function startServer() {
   app.use('/api/users', require('./routes/users'));
   app.use('/api/reports', require('./routes/reports'));
   app.use('/api/backup', require('./routes/backup'));
+  app.use('/api/expenses', require('./routes/expenses'));
+  app.use('/api/device-pricing', require('./routes/devicePricing'));
+  app.use('/api/device-payments', require('./routes/devicePayments'));
 
   // Serve static React frontend bundle in production
   const frontendDistPath = path.join(__dirname, '../../frontend/dist');

@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Plus, CheckCircle, Code, Tag, RefreshCw, FileSpreadsheet, Download, Edit3, Trash2, Check, X, ShieldAlert } from 'lucide-react';
+import { Settings, Plus, CheckCircle, Code, Tag, RefreshCw, FileSpreadsheet, Download, Edit3, Trash2, Check, X, ShieldAlert, DollarSign } from 'lucide-react';
 import { fetchDeviceTypes, createDeviceType, updateDeviceType } from '../services/api';
 import { downloadStyledTemplate } from '../utils/excelExport';
+import DevicePricingModal from '../components/DevicePricingModal';
 import * as xlsx from 'xlsx';
 
 export default function DeviceTypesPage() {
   const [types, setTypes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
+  const [showPricingModal, setShowPricingModal] = useState(false);
   const [editingType, setEditingType] = useState(null);
   
   // Create Modal state
@@ -165,15 +167,23 @@ export default function DeviceTypesPage() {
           <p className="text-xs text-slate-500">Super Admin catalog: Configure unique Excel sheet columns & schemas for each Device Model</p>
         </div>
 
-        <button
-          onClick={() => {
-            handleCategoryChange('GPS Tracker');
-            setShowModal(true);
-          }}
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-colors shadow-xs"
-        >
-          <Plus className="w-4 h-4" /> Add Device Type
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowPricingModal(true)}
+            className="px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-colors shadow-2xs"
+          >
+            <DollarSign className="w-4 h-4 text-emerald-600" /> Device Rates & Margins
+          </button>
+          <button
+            onClick={() => {
+              handleCategoryChange('GPS Tracker');
+              setShowModal(true);
+            }}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-colors shadow-xs"
+          >
+            <Plus className="w-4 h-4" /> Add Device Type
+          </button>
+        </div>
       </div>
 
       {saveSuccessMsg && (
@@ -431,6 +441,12 @@ export default function DeviceTypesPage() {
           </div>
         </div>
       )}
+
+      {/* Device Pricing / Rate Master Modal */}
+      <DevicePricingModal
+        isOpen={showPricingModal}
+        onClose={() => setShowPricingModal(false)}
+      />
 
     </div>
   );

@@ -2131,5 +2131,95 @@ router.get('/payments-excel', async (req, res) => {
   }
 });
 
+// GET /api/reports/pnl - Comprehensive Profit & Loss Financial Summary
+router.get('/pnl', (req, res) => {
+  try {
+    const { startDate = '', endDate = '' } = req.query;
+
+    let instDateFilter = '';
+    let expDateFilter = '';
+    const instParams = [];
+    const expParams = [];
+
+    if (startDate && endDate) {
+      instDateFilter = ' WHERE i.installation_date >= ? AND i.installation_date <= ?';
+      instParams.push(startDate, endDate);
+      expDateFilter = ' WHERE expense_date >= ? AND expense_date <= ?';
+      expParams.push(startDate, endDate);
+    } else if (startDate) {
+      instDateFilter = ' WHERE i.installation_date >= ?';
+      instParams.push(startDate);
+      expDateFilter = ' WHERE expense_date >= ?';
+      expParams.push(startDate);
+    } else if (endDate) {
+      instDateFilter = ' WHERE i.installation_date <= ?';
+      instParams.push(endDate);
+      expDateFilter = ' WHERE expense_date <= ?';
+      expParams.push(endDate);
+    }
+
+    // 1. Revenue & Hardware Cost from Installations
+    const revQuery = `
+      SELECT 
+        COUNT(i.id) as total_installations,
+        SUM(COALESCE(i.sale_price, 0)) as total_billed_revenue,
+        SUM(CASE WHEN UPPER(i.payment_status) = 'PAID' THEN COALESCE(i.sale_price, 0) ELSE 0 END) as collected_revenue,
+        SUM(CASE WHEN UPPER(i.payment_status) != 'PAID' THEN COALESCE(i.sale_price, 0) ELSE 0 END) as pending_revenue,
+        SUM(COALESCE(d.purchase_price, 0)) as hardware_purchase_cost
+      FROM installations i
+      LEFT JOIN devices d ON i.device_id = d.id
+      ${instDateFilter}
+    `;
+    const revData = db.prepare(revQuery).get(...instParams);
+
+    // 2. Operational Expenses
+    const expQuery = `
+      SELECT 
+        SUM(amount) as total_expenses,
+        COUNT(*) as expense_count,
+        SUM(CASE WHEN category = 'TECHNICIAN_TRAVEL' THEN amount ELSE 0 END) as travel_expenses,
+        SUM(CASE WHEN category = 'COURIER_FREIGHT' THEN amount ELSE 0 END) as courier_expenses,
+        SUM(CASE WHEN category = 'TECHNICIAN_PAYOUT' THEN amount ELSE 0 END) as payout_expenses,
+        SUM(CASE WHEN category = 'OFFICE_MISC' OR category = 'OTHER' THEN amount ELSE 0 END) as misc_expenses
+      FROM expenses
+      ${expDateFilter}
+    `;
+    const expData = db.prepare(expQuery).get(...expParams);
+
+    const totalBilled = revData?.total_billed_revenue || 0;
+    const collectedRevenue = revData?.collected_revenue || 0;
+    const hardwareCost = revData?.hardware_purchase_cost || 0;
+    const totalExpenses = expData?.total_expenses || 0;
+
+    const grossProfit = totalBilled - hardwareCost;
+    const netProfit = grossProfit - totalExpenses;
+    const marginPct = totalBilled > 0 ? ((netProfit / totalBilled) * 100).toFixed(1) : 0;
+
+    res.json({
+      success: true,
+      data: {
+        total_installations: revData?.total_installations || 0,
+        total_billed_revenue: totalBilled,
+        collected_revenue: collectedRevenue,
+        pending_revenue: revData?.pending_revenue || 0,
+        hardware_cost: hardwareCost,
+        gross_profit: grossProfit,
+        operating_expenses: totalExpenses,
+        expense_breakdown: {
+          travel: expData?.travel_expenses || 0,
+          courier: expData?.courier_expenses || 0,
+          payout: expData?.payout_expenses || 0,
+          misc: expData?.misc_expenses || 0,
+        },
+        net_profit: netProfit,
+        profit_margin_pct: Number(marginPct)
+      }
+    });
+  } catch (err) {
+    console.error('[Reports] PnL error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;
 

@@ -575,6 +575,140 @@ export async function factoryResetSystem() {
   return data;
 }
 
+// ==========================================
+// 💳 EXPENSES MANAGEMENT API
+// ==========================================
+export async function fetchExpenses(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  const res = await fetch(`${API_BASE}/expenses?${query}`);
+  if (!res.ok) throw new Error('Failed to fetch expenses');
+  return res.json();
+}
+
+export async function fetchExpenseSummary(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  const res = await fetch(`${API_BASE}/expenses/summary?${query}`);
+  if (!res.ok) throw new Error('Failed to fetch expense summary');
+  return res.json();
+}
+
+export async function createExpense(payload) {
+  const res = await fetch(`${API_BASE}/expenses`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) throw new Error(data.error || 'Failed to record expense');
+  return data;
+}
+
+export async function updateExpense(id, payload) {
+  const res = await fetch(`${API_BASE}/expenses/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) throw new Error(data.error || 'Failed to update expense');
+  return data;
+}
+
+export async function deleteExpense(id) {
+  const res = await fetch(`${API_BASE}/expenses/${id}`, {
+    method: 'DELETE'
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) throw new Error(data.error || 'Failed to delete expense');
+  return data;
+}
+
+export function getExpenseExportUrl(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return `${API_BASE}/expenses/export?${query}`;
+}
+
+// ==========================================
+// 🏷️ DEVICE PRICING & RATE MASTER API
+// ==========================================
+export async function fetchDevicePricing() {
+  const res = await fetch(`${API_BASE}/device-pricing`);
+  if (!res.ok) throw new Error('Failed to fetch device pricing matrix');
+  return res.json();
+}
+
+export async function upsertDevicePricing(payload) {
+  const res = await fetch(`${API_BASE}/device-pricing/upsert`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) throw new Error(data.error || 'Failed to save rate card');
+  return data;
+}
+
+export async function lookupDevicePrice(deviceTypeId, projectCategory = 'GENERAL') {
+  const query = new URLSearchParams({ device_type_id: deviceTypeId, project_category: projectCategory }).toString();
+  const res = await fetch(`${API_BASE}/device-pricing/lookup?${query}`);
+  if (!res.ok) throw new Error('Failed to lookup device price');
+  return res.json();
+}
+
+export async function deleteDevicePricing(id) {
+  const res = await fetch(`${API_BASE}/device-pricing/${id}`, {
+    method: 'DELETE'
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) throw new Error(data.error || 'Failed to delete pricing rule');
+  return data;
+}
+
+// ==========================================
+// 📈 PROFIT & LOSS (P&L) FINANCIAL API
+// ==========================================
+export async function fetchPnLSummary(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  const res = await fetch(`${API_BASE}/reports/pnl?${query}`);
+  if (!res.ok) throw new Error('Failed to fetch P&L financial summary');
+  return res.json();
+}
+
+// ==========================================
+// 💰 DEVICE PAYMENTS / COLLECTIONS API
+// ==========================================
+export async function fetchDevicePayments(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  const res = await fetch(`${API_BASE}/device-payments?${query}`);
+  if (!res.ok) throw new Error('Failed to fetch device payments');
+  return res.json();
+}
+
+export async function fetchDevicePaymentsSummary(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  const res = await fetch(`${API_BASE}/device-payments/summary?${query}`);
+  if (!res.ok) throw new Error('Failed to fetch device payments summary');
+  return res.json();
+}
+
+export async function updateDevicePayment(id, payload) {
+  const res = await fetch(`${API_BASE}/device-payments/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) throw new Error(data.error || 'Failed to record device payment');
+  return data;
+}
+
+export function getDevicePaymentsExportUrl(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return `${API_BASE}/device-payments/export?${query}`;
+}
+
+
+
 
 
 

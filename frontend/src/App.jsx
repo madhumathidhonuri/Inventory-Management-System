@@ -15,6 +15,8 @@ import InstallationPage from './pages/InstallationPage';
 import DeviceTypesPage from './pages/DeviceTypesPage';
 import ReportsPage from './pages/ReportsPage';
 import UserManagementPage from './pages/UserManagementPage';
+import ExpensesPage from './pages/ExpensesPage';
+import DevicePaymentsPage from './pages/DevicePaymentsPage';
 import MobileAppView from './pages/MobileAppView';
 
 function MainLayout() {
@@ -85,6 +87,10 @@ function MainLayout() {
         return <DispatchPage onOpenScannerWithCallback={openScannerWithCallback} onOpenTraceDrawer={openTraceDrawer} />;
       case 'installations':
         return <InstallationPage onOpenScannerWithCallback={openScannerWithCallback} onOpenTraceDrawer={openTraceDrawer} />;
+      case 'device_payments':
+        return <DevicePaymentsPage />;
+      case 'expenses':
+        return <ExpensesPage />;
       case 'types':
         return <DeviceTypesPage />;
       case 'reports':
