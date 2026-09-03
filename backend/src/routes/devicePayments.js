@@ -3,104 +3,217 @@ const router = express.Router();
 const db = require('../db/database');
 const ExcelJS = require('exceljs');
 
-// GET /api/device-payments - List installed device payments with filters
+// Helper function to extract payment and amount details from a device record
+function parseDevicePaymentInfo(d) {
+  let attrs = {};
+  try {
+    attrs = JSON.parse(d.additional_attributes || '{}');
+  } catch {}
+
+  // 1. Extract Device Amount / Cost / Price
+  let amount = 0;
+  for (const k of Object.keys(attrs)) {
+    if (/^cost$|^total.*cost$|^price$|^device.*cost$|^sale.*price$|^amount$/i.test(k.trim())) {
+      const val = parseFloat(String(attrs[k]).replace(/[^0-9.]/g, ''));
+      if (!isNaN(val) && val > 0) {
+        amount = val;
+        break;
+      }
+    }
+  }
+  if (amount === 0 && d.purchase_price && !isNaN(Number(d.purchase_price))) {
+    amount = Number(d.purchase_price);
+  }
+
+  // 2. Extract Payment Status
+  let paymentStatus = 'PENDING';
+  for (const k of Object.keys(attrs)) {
+    if (/^amount.*received$|^payment.*status$|^payment$/i.test(k.trim())) {
+      const val = String(attrs[k] || '').trim().toUpperCase();
+      if (val === 'RECEIVED' || val === 'PAID' || val === 'YES' || val === 'DONE') {
+        paymentStatus = 'RECEIVED';
+        break;
+      }
+    }
+  }
+
+  // 3. Extract Payment Mode
+  let paymentMode = '';
+  for (const k of Object.keys(attrs)) {
+    if (/^amount.*received.*by$|^payment.*mode$|^received.*by$|^payment.*type$/i.test(k.trim())) {
+      if (attrs[k]) {
+        paymentMode = String(attrs[k]).trim();
+        break;
+      }
+    }
+  }
+  if (!paymentMode && paymentStatus === 'RECEIVED') {
+    paymentMode = 'UPI';
+  }
+
+  // 4. Extract UTR / Reference Number
+  let utrNumber = '';
+  for (const k of Object.keys(attrs)) {
+    if (/^utr.*number$|^utr$|^ref.*number$|^transaction.*id$|^upi.*ref$/i.test(k.trim())) {
+      if (attrs[k]) {
+        utrNumber = String(attrs[k]).trim();
+        break;
+      }
+    }
+  }
+
+  // 5. Extract Vehicle Number
+  let vehicleNumber = '';
+  for (const k of Object.keys(attrs)) {
+    if (/^vehicle.*number$|^veh.*no$|^reg.*no$|^vehicle$/i.test(k.trim())) {
+      if (attrs[k]) {
+        vehicleNumber = String(attrs[k]).trim().toUpperCase();
+        break;
+      }
+    }
+  }
+
+  // 6. Extract Customer Name
+  let customerName = '';
+  for (const k of Object.keys(attrs)) {
+    if (/^customer.*name$|^client.*name$|^owner.*name$/i.test(k.trim())) {
+      if (attrs[k]) {
+        customerName = String(attrs[k]).trim();
+        break;
+      }
+    }
+  }
+  if (!customerName) {
+    customerName = d.current_holder_name || 'Central Warehouse';
+  }
+
+  // 7. Extract Customer Phone
+  let customerPhone = '';
+  for (const k of Object.keys(attrs)) {
+    if (/^customer.*phone.*number$|^phone.*number$|^contact.*number$|^phone$|^mobile$/i.test(k.trim())) {
+      if (attrs[k]) {
+        customerPhone = String(attrs[k]).trim();
+        break;
+      }
+    }
+  }
+
+  // 8. Extract Stock Place / Dealer
+  let stockPlace = '';
+  for (const k of Object.keys(attrs)) {
+    if (/^stock.*place$|^dealer$|^branch$|^location$/i.test(k.trim())) {
+      if (attrs[k]) {
+        stockPlace = String(attrs[k]).trim();
+        break;
+      }
+    }
+  }
+  if (!stockPlace) {
+    stockPlace = d.current_holder_name || 'Central Warehouse';
+  }
+
+  // 9. Extract Payment / Installation Date
+  let paymentDate = '';
+  for (const k of Object.keys(attrs)) {
+    if (/^payment.*date$|^received.*date$|^installation.*date$|^date$/i.test(k.trim())) {
+      if (attrs[k]) {
+        paymentDate = String(attrs[k]).trim();
+        break;
+      }
+    }
+  }
+  if (!paymentDate) {
+    paymentDate = d.purchase_date || new Date().toISOString().split('T')[0];
+  }
+
+  // 10. Extract Remarks
+  let paymentRemarks = '';
+  for (const k of Object.keys(attrs)) {
+    if (/^payment.*remarks$|^remarks$|^notes$/i.test(k.trim())) {
+      if (attrs[k]) {
+        paymentRemarks = String(attrs[k]).trim();
+        break;
+      }
+    }
+  }
+
+  return {
+    id: d.id,
+    imei_number: d.imei_number,
+    sim_number: d.sim_number || '',
+    device_type_id: d.device_type_id,
+    device_type_name: d.device_type_name || 'GPS Unit',
+    device_type_category: d.device_type_category || 'GPS Tracker',
+    current_status: d.current_status,
+    current_holder_name: d.current_holder_name,
+    stock_place: stockPlace,
+    vehicle_number: vehicleNumber,
+    customer_name: customerName,
+    customer_phone: customerPhone,
+    device_amount: amount,
+    payment_status: paymentStatus, // 'RECEIVED' or 'PENDING'
+    payment_mode: paymentMode,
+    utr_number: utrNumber,
+    payment_date: paymentDate,
+    payment_remarks: paymentRemarks,
+    updated_at: d.updated_at
+  };
+}
+
+// GET /api/device-payments - List devices from stock inventory with their amounts & payment status
 router.get('/', (req, res) => {
   try {
     const {
       search = '',
-      payment_status = '',
+      payment_status = '', // 'ALL' | 'RECEIVED' | 'PENDING'
+      stock_place = '',
+      device_type_id = '',
       payment_mode = '',
-      startDate = '',
-      endDate = '',
       limit = 100,
       offset = 0
     } = req.query;
 
     let query = `
-      SELECT 
-        i.id,
-        i.device_id,
-        i.imei_number,
-        i.customer_id,
-        i.installation_date,
-        i.installed_by,
-        i.sales_manager,
-        i.sales_person,
-        i.customer_name,
-        i.customer_contact,
-        i.vehicle_number,
-        i.vehicle_type,
-        COALESCE(i.sale_price, 0) as sale_price,
-        CASE 
-          WHEN i.amount_paid IS NOT NULL THEN i.amount_paid
-          WHEN UPPER(i.payment_status) = 'PAID' OR UPPER(i.payment_status) = 'RECEIVED' THEN COALESCE(i.sale_price, 0)
-          ELSE 0
-        END as amount_paid,
-        CASE
-          WHEN i.amount_paid IS NOT NULL THEN MAX(0, COALESCE(i.sale_price, 0) - i.amount_paid)
-          WHEN UPPER(i.payment_status) = 'PAID' OR UPPER(i.payment_status) = 'RECEIVED' THEN 0
-          ELSE COALESCE(i.sale_price, 0)
-        END as balance_amount,
-        CASE
-          WHEN i.amount_paid IS NOT NULL AND i.amount_paid >= COALESCE(i.sale_price, 0) AND COALESCE(i.sale_price, 0) > 0 THEN 'PAID'
-          WHEN i.amount_paid IS NOT NULL AND i.amount_paid > 0 AND i.amount_paid < COALESCE(i.sale_price, 0) THEN 'PARTIAL'
-          WHEN UPPER(i.payment_status) = 'PAID' OR UPPER(i.payment_status) = 'RECEIVED' THEN 'PAID'
-          ELSE 'PENDING'
-        END as calculated_status,
-        i.payment_status,
-        COALESCE(i.payment_date, i.installation_date) as payment_date,
-        COALESCE(i.payment_mode, 'UPI') as payment_mode,
-        COALESCE(i.utr_number, '') as utr_number,
-        COALESCE(i.payment_remarks, '') as payment_remarks,
-        dt.name as device_type_name
-      FROM installations i
-      LEFT JOIN devices d ON i.device_id = d.id
-      LEFT JOIN device_types dt ON d.device_type_id = dt.id
+      SELECT d.*, dt.name as device_type_name, dt.category as device_type_category
+      FROM devices d
+      JOIN device_types dt ON d.device_type_id = dt.id
       WHERE 1=1
     `;
     const params = [];
 
-    if (startDate) {
-      query += ' AND (i.installation_date >= ? OR i.payment_date >= ?)';
-      params.push(startDate, startDate);
+    if (device_type_id) {
+      query += ' AND d.device_type_id = ?';
+      params.push(device_type_id);
     }
-    if (endDate) {
-      query += ' AND (i.installation_date <= ? OR i.payment_date <= ?)';
-      params.push(endDate, endDate);
-    }
-    if (payment_mode) {
-      query += ' AND i.payment_mode = ?';
-      params.push(payment_mode);
+    if (stock_place) {
+      query += ' AND (d.current_holder_name LIKE ? OR d.additional_attributes LIKE ?)';
+      params.push(`%${stock_place}%`, `%${stock_place}%`);
     }
     if (search) {
+      query += ' AND (d.imei_number LIKE ? OR d.sim_number LIKE ? OR d.current_holder_name LIKE ? OR d.additional_attributes LIKE ?)';
       const s = `%${search}%`;
-      query += ' AND (i.vehicle_number LIKE ? OR i.customer_name LIKE ? OR i.customer_contact LIKE ? OR i.imei_number LIKE ? OR i.utr_number LIKE ? OR i.installed_by LIKE ?)';
-      params.push(s, s, s, s, s, s);
+      params.push(s, s, s, s);
     }
 
-    // Filter by calculated status if specified
+    query += ' ORDER BY d.updated_at DESC';
+
+    const rawDevices = db.prepare(query).all(...params);
+    let parsedDevices = rawDevices.map(parseDevicePaymentInfo);
+
+    // Apply in-memory payment filters
     if (payment_status && payment_status !== 'ALL') {
-      if (payment_status === 'PAID') {
-        query += " AND (UPPER(i.payment_status) = 'PAID' OR UPPER(i.payment_status) = 'RECEIVED' OR (i.amount_paid IS NOT NULL AND i.amount_paid >= i.sale_price AND i.sale_price > 0))";
-      } else if (payment_status === 'PARTIAL') {
-        query += " AND (i.amount_paid IS NOT NULL AND i.amount_paid > 0 AND i.amount_paid < i.sale_price)";
-      } else if (payment_status === 'PENDING') {
-        query += " AND (UPPER(i.payment_status) != 'PAID' AND UPPER(i.payment_status) != 'RECEIVED' AND (i.amount_paid IS NULL OR i.amount_paid = 0))";
-      }
+      parsedDevices = parsedDevices.filter(d => d.payment_status === payment_status);
+    }
+    if (payment_mode) {
+      parsedDevices = parsedDevices.filter(d => (d.payment_mode || '').toUpperCase().includes(payment_mode.toUpperCase()));
     }
 
-    // Count
-    const countQuery = `SELECT COUNT(*) as total FROM (${query})`;
-    const totalCount = db.prepare(countQuery).get(...params)?.total || 0;
-
-    query += ' ORDER BY i.installation_date DESC, i.id DESC LIMIT ? OFFSET ?';
-    params.push(Number(limit), Number(offset));
-
-    const rows = db.prepare(query).all(...params);
+    const totalCount = parsedDevices.length;
+    const paginated = parsedDevices.slice(Number(offset), Number(offset) + Number(limit));
 
     res.json({
       success: true,
-      data: rows,
+      data: paginated,
       total: totalCount,
       limit: Number(limit),
       offset: Number(offset)
@@ -111,87 +224,46 @@ router.get('/', (req, res) => {
   }
 });
 
-// GET /api/device-payments/summary - Aggregated stats for KPI cards
+// GET /api/device-payments/summary - Aggregated stats directly from Stock Inventory
 router.get('/summary', (req, res) => {
   try {
-    const { startDate = '', endDate = '' } = req.query;
+    const rawDevices = db.prepare(`
+      SELECT d.*, dt.name as device_type_name, dt.category as device_type_category
+      FROM devices d
+      JOIN device_types dt ON d.device_type_id = dt.id
+    `).all();
 
-    let dateFilter = '';
-    const params = [];
+    const parsed = rawDevices.map(parseDevicePaymentInfo);
 
-    if (startDate && endDate) {
-      dateFilter = ' WHERE (installation_date >= ? AND installation_date <= ?) OR (payment_date >= ? AND payment_date <= ?)';
-      params.push(startDate, endDate, startDate, endDate);
-    } else if (startDate) {
-      dateFilter = ' WHERE installation_date >= ? OR payment_date >= ?';
-      params.push(startDate, startDate);
-    } else if (endDate) {
-      dateFilter = ' WHERE installation_date <= ? OR payment_date <= ?';
-      params.push(endDate, endDate);
-    }
-
-    const rows = db.prepare(`
-      SELECT 
-        COALESCE(sale_price, 0) as sale_price,
-        CASE 
-          WHEN amount_paid IS NOT NULL THEN amount_paid
-          WHEN UPPER(payment_status) = 'PAID' OR UPPER(payment_status) = 'RECEIVED' THEN COALESCE(sale_price, 0)
-          ELSE 0
-        END as amount_paid,
-        payment_status,
-        payment_mode
-      FROM installations
-      ${dateFilter}
-    `).all(...params);
-
-    let totalBilled = 0;
-    let totalCollected = 0;
-    let paidCount = 0;
-    let partialCount = 0;
+    let totalStockAmount = 0;
+    let totalReceivedAmount = 0;
+    let receivedCount = 0;
     let pendingCount = 0;
 
-    rows.forEach(r => {
-      totalBilled += r.sale_price;
-      totalCollected += r.amount_paid;
-
-      if (r.amount_paid >= r.sale_price && r.sale_price > 0) {
-        paidCount++;
-      } else if (r.amount_paid > 0 && r.amount_paid < r.sale_price) {
-        partialCount++;
+    parsed.forEach(d => {
+      const amt = Number(d.device_amount || 0);
+      totalStockAmount += amt;
+      if (d.payment_status === 'RECEIVED') {
+        totalReceivedAmount += amt;
+        receivedCount++;
       } else {
         pendingCount++;
       }
     });
 
-    const pendingBalance = Math.max(0, totalBilled - totalCollected);
-    const collectionRate = totalBilled > 0 ? ((totalCollected / totalBilled) * 100).toFixed(1) : 0;
-
-    // Today's collection
-    const todayStr = new Date().toISOString().split('T')[0];
-    const todayCollected = db.prepare(`
-      SELECT SUM(
-        CASE 
-          WHEN amount_paid IS NOT NULL THEN amount_paid
-          WHEN UPPER(payment_status) = 'PAID' OR UPPER(payment_status) = 'RECEIVED' THEN COALESCE(sale_price, 0)
-          ELSE 0
-        END
-      ) as today_total
-      FROM installations
-      WHERE payment_date = ? OR installation_date = ?
-    `).get(todayStr, todayStr)?.today_total || 0;
+    const pendingAmount = Math.max(0, totalStockAmount - totalReceivedAmount);
+    const realizationRate = totalStockAmount > 0 ? ((totalReceivedAmount / totalStockAmount) * 100).toFixed(1) : 0;
 
     res.json({
       success: true,
       summary: {
-        total_installations: rows.length,
-        total_billed: totalBilled,
-        total_collected: totalCollected,
-        pending_balance: pendingBalance,
-        today_collected: todayCollected,
-        paid_count: paidCount,
-        partial_count: partialCount,
+        total_devices: parsed.length,
+        total_stock_amount: totalStockAmount,
+        total_received_amount: totalReceivedAmount,
+        total_pending_amount: pendingAmount,
+        received_count: receivedCount,
         pending_count: pendingCount,
-        collection_rate_pct: Number(collectionRate)
+        realization_rate_pct: Number(realizationRate)
       }
     });
   } catch (err) {
@@ -200,69 +272,108 @@ router.get('/summary', (req, res) => {
   }
 });
 
-// PATCH /api/device-payments/:id - Record or update payment received for an installed device
+// PATCH /api/device-payments/:id - Quick update device amount & payment directly on inventory device
 router.patch('/:id', (req, res) => {
+  const { id } = req.params;
+  const {
+    device_amount,
+    payment_status,
+    payment_mode,
+    utr_number,
+    payment_date,
+    payment_remarks,
+    performed_by
+  } = req.body;
+
   try {
-    const { id } = req.params;
-    const {
-      amount_paid,
-      payment_mode = 'UPI',
-      payment_date = new Date().toISOString().split('T')[0],
-      utr_number = '',
-      payment_remarks = ''
-    } = req.body;
-
-    const existing = db.prepare('SELECT * FROM installations WHERE id = ?').get(id);
-    if (!existing) {
-      return res.status(404).json({ success: false, error: 'Installation record not found' });
+    const device = db.prepare('SELECT * FROM devices WHERE id = ?').get(id);
+    if (!device) {
+      return res.status(404).json({ success: false, error: 'Device record not found in Stock Inventory' });
     }
 
-    const salePrice = existing.sale_price || 0;
-    const numPaid = parseFloat(amount_paid);
+    let attrs = {};
+    try {
+      attrs = JSON.parse(device.additional_attributes || '{}');
+    } catch {}
 
-    if (isNaN(numPaid) || numPaid < 0) {
-      return res.status(400).json({ success: false, error: 'Amount paid must be a non-negative number' });
+    const isPaid = String(payment_status || '').toUpperCase() === 'RECEIVED' || String(payment_status || '').toUpperCase() === 'PAID';
+
+    // 1. Update Amount / Cost in attributes
+    if (device_amount !== undefined && device_amount !== null && !isNaN(Number(device_amount))) {
+      const numAmt = Number(device_amount);
+      attrs['COST'] = numAmt;
+      attrs['TOTAL COST'] = numAmt;
     }
 
-    let calculatedStatus = 'PENDING';
-    if (numPaid >= salePrice && salePrice > 0) {
-      calculatedStatus = 'PAID';
-    } else if (numPaid > 0 && numPaid < salePrice) {
-      calculatedStatus = 'PARTIAL';
-    } else if (numPaid === 0) {
-      calculatedStatus = 'PENDING';
+    // 2. Update Payment Status
+    attrs['AMOUNT RECEIVED'] = isPaid ? 'RECEIVED' : 'PENDING';
+    attrs['PAYMENT STATUS'] = isPaid ? 'RECEIVED' : 'PENDING';
+
+    // 3. Update Payment Mode
+    if (isPaid && payment_mode) {
+      attrs['AMOUNT RECEIVED BY'] = String(payment_mode).trim();
+    } else if (!isPaid) {
+      delete attrs['AMOUNT RECEIVED BY'];
     }
 
-    const stmt = db.prepare(`
-      UPDATE installations SET
-        amount_paid = ?,
-        payment_status = ?,
-        payment_mode = ?,
-        payment_date = ?,
-        utr_number = ?,
-        payment_remarks = ?
+    // 4. Update UTR Number
+    if (utrNumber !== undefined) {
+      if (utr_number && utr_number.trim()) {
+        attrs['UTR NUMBER'] = String(utr_number).trim();
+      } else {
+        delete attrs['UTR NUMBER'];
+      }
+    }
+
+    // 5. Update Payment Date
+    if (payment_date) {
+      attrs['PAYMENT DATE'] = String(payment_date).trim();
+    }
+
+    // 6. Update Remarks
+    if (payment_remarks !== undefined) {
+      if (payment_remarks && payment_remarks.trim()) {
+        attrs['PAYMENT REMARKS'] = String(payment_remarks).trim();
+      } else {
+        delete attrs['PAYMENT REMARKS'];
+      }
+    }
+
+    const updatedAttrsStr = JSON.stringify(attrs);
+
+    db.prepare(`
+      UPDATE devices
+      SET additional_attributes = ?,
+          updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
-    `);
+    `).run(updatedAttrsStr, id);
 
-    stmt.run(
-      numPaid,
-      calculatedStatus,
-      payment_mode,
-      payment_date,
-      utr_number ? utr_number.trim() : '',
-      payment_remarks ? payment_remarks.trim() : '',
-      id
-    );
+    // Record History Audit
+    const staff = performed_by || 'Staff';
+    const auditRemarks = isPaid
+      ? `Payment marked RECEIVED (Amount: ₹${attrs['COST'] || 0}${payment_mode ? `, Mode: ${payment_mode}` : ''}${utr_number ? `, UTR: ${utr_number}` : ''})`
+      : `Payment marked PENDING (Amount: ₹${attrs['COST'] || 0})`;
 
-    // Also update device holder name or attributes if needed
-    const updated = db.prepare('SELECT * FROM installations WHERE id = ?').get(id);
+    try {
+      db.prepare(`
+        INSERT INTO device_history (device_id, imei_number, event_type, event_date, from_holder, to_holder, performed_by, remarks)
+        VALUES (?, ?, 'PAYMENT_UPDATED', datetime('now'), ?, ?, ?, ?)
+      `).run(id, device.imei_number, device.current_holder_name || 'Stock', device.current_holder_name || 'Stock', staff, auditRemarks);
+    } catch (e) {}
 
     if (db.triggerCloudSync) db.triggerCloudSync(3000);
 
+    const updatedDevice = db.prepare(`
+      SELECT d.*, dt.name as device_type_name, dt.category as device_type_category
+      FROM devices d
+      JOIN device_types dt ON d.device_type_id = dt.id
+      WHERE d.id = ?
+    `).get(id);
+
     res.json({
       success: true,
-      message: 'Payment recorded successfully',
-      data: updated
+      message: 'Device amount & payment updated successfully in Stock Inventory',
+      data: parseDevicePaymentInfo(updatedDevice)
     });
   } catch (err) {
     console.error('[DevicePayments] Update error:', err.message);
@@ -270,84 +381,52 @@ router.patch('/:id', (req, res) => {
   }
 });
 
-// GET /api/device-payments/export - Excel Export
+// GET /api/device-payments/export - Formatted Excel Export from Stock Inventory
 router.get('/export', async (req, res) => {
   try {
-    const { search, payment_status, payment_mode, startDate, endDate } = req.query;
+    const { search, payment_status, stock_place, device_type_id, payment_mode } = req.query;
 
     let query = `
-      SELECT 
-        i.id,
-        i.installation_date,
-        i.vehicle_number,
-        i.customer_name,
-        i.customer_contact,
-        i.imei_number,
-        COALESCE(i.sale_price, 0) as sale_price,
-        CASE 
-          WHEN i.amount_paid IS NOT NULL THEN i.amount_paid
-          WHEN UPPER(i.payment_status) = 'PAID' OR UPPER(i.payment_status) = 'RECEIVED' THEN COALESCE(i.sale_price, 0)
-          ELSE 0
-        END as amount_paid,
-        CASE
-          WHEN i.amount_paid IS NOT NULL THEN MAX(0, COALESCE(i.sale_price, 0) - i.amount_paid)
-          WHEN UPPER(i.payment_status) = 'PAID' OR UPPER(i.payment_status) = 'RECEIVED' THEN 0
-          ELSE COALESCE(i.sale_price, 0)
-        END as balance_amount,
-        CASE
-          WHEN i.amount_paid IS NOT NULL AND i.amount_paid >= COALESCE(i.sale_price, 0) AND COALESCE(i.sale_price, 0) > 0 THEN 'PAID'
-          WHEN i.amount_paid IS NOT NULL AND i.amount_paid > 0 AND i.amount_paid < COALESCE(i.sale_price, 0) THEN 'PARTIAL'
-          WHEN UPPER(i.payment_status) = 'PAID' OR UPPER(i.payment_status) = 'RECEIVED' THEN 'PAID'
-          ELSE 'PENDING'
-        END as calculated_status,
-        COALESCE(i.payment_date, i.installation_date) as payment_date,
-        COALESCE(i.payment_mode, 'UPI') as payment_mode,
-        COALESCE(i.utr_number, '') as utr_number,
-        COALESCE(i.installed_by, '') as installed_by,
-        COALESCE(i.payment_remarks, '') as payment_remarks
-      FROM installations i
+      SELECT d.*, dt.name as device_type_name, dt.category as device_type_category
+      FROM devices d
+      JOIN device_types dt ON d.device_type_id = dt.id
       WHERE 1=1
     `;
     const params = [];
 
-    if (startDate) {
-      query += ' AND (i.installation_date >= ? OR i.payment_date >= ?)';
-      params.push(startDate, startDate);
+    if (device_type_id) {
+      query += ' AND d.device_type_id = ?';
+      params.push(device_type_id);
     }
-    if (endDate) {
-      query += ' AND (i.installation_date <= ? OR i.payment_date <= ?)';
-      params.push(endDate, endDate);
-    }
-    if (payment_mode) {
-      query += ' AND i.payment_mode = ?';
-      params.push(payment_mode);
+    if (stock_place) {
+      query += ' AND (d.current_holder_name LIKE ? OR d.additional_attributes LIKE ?)';
+      params.push(`%${stock_place}%`, `%${stock_place}%`);
     }
     if (search) {
+      query += ' AND (d.imei_number LIKE ? OR d.sim_number LIKE ? OR d.current_holder_name LIKE ? OR d.additional_attributes LIKE ?)';
       const s = `%${search}%`;
-      query += ' AND (i.vehicle_number LIKE ? OR i.customer_name LIKE ? OR i.customer_contact LIKE ? OR i.imei_number LIKE ? OR i.utr_number LIKE ?)';
-      params.push(s, s, s, s, s);
+      params.push(s, s, s, s);
     }
+
+    query += ' ORDER BY d.updated_at DESC';
+
+    const rawDevices = db.prepare(query).all(...params);
+    let parsedDevices = rawDevices.map(parseDevicePaymentInfo);
 
     if (payment_status && payment_status !== 'ALL') {
-      if (payment_status === 'PAID') {
-        query += " AND (UPPER(i.payment_status) = 'PAID' OR UPPER(i.payment_status) = 'RECEIVED' OR (i.amount_paid IS NOT NULL AND i.amount_paid >= i.sale_price AND i.sale_price > 0))";
-      } else if (payment_status === 'PARTIAL') {
-        query += " AND (i.amount_paid IS NOT NULL AND i.amount_paid > 0 AND i.amount_paid < i.sale_price)";
-      } else if (payment_status === 'PENDING') {
-        query += " AND (UPPER(i.payment_status) != 'PAID' AND UPPER(i.payment_status) != 'RECEIVED' AND (i.amount_paid IS NULL OR i.amount_paid = 0))";
-      }
+      parsedDevices = parsedDevices.filter(d => d.payment_status === payment_status);
+    }
+    if (payment_mode) {
+      parsedDevices = parsedDevices.filter(d => (d.payment_mode || '').toUpperCase().includes(payment_mode.toUpperCase()));
     }
 
-    query += ' ORDER BY i.installation_date DESC, i.id DESC';
-    const rows = db.prepare(query).all(...params);
-
     const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet('Device Payments Statement');
+    const worksheet = workbook.addWorksheet('Device Amounts & Payments');
 
     // Title Row
-    worksheet.mergeCells('A1:L1');
+    worksheet.mergeCells('A1:J1');
     const titleCell = worksheet.getCell('A1');
-    titleCell.value = 'FuelTracks Technologies — Device Payments Received (Collections Statement)';
+    titleCell.value = 'FuelTracks Technologies — Stock Inventory Device Amounts & Payments Ledger';
     titleCell.font = { name: 'Arial', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
     titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF065F46' } };
     titleCell.alignment = { vertical: 'middle', horizontal: 'center' };
@@ -357,44 +436,39 @@ router.get('/export', async (req, res) => {
     const headerRow = worksheet.getRow(2);
     headerRow.values = [
       '#',
+      'IMEI Number',
+      'Device Model',
+      'Stock Place / Dealer',
       'Vehicle Number',
       'Customer Name',
-      'Phone Number',
-      'IMEI Number',
-      'Billed Price (₹)',
-      'Amount Received (₹)',
-      'Balance Due (₹)',
-      'Status',
-      'Payment Mode',
-      'UTR / Ref No.',
-      'Payment Date'
+      'Device Amount (₹)',
+      'Payment Status',
+      'Payment Mode / Received By',
+      'UTR / Ref No.'
     ];
     headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
     headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF059669' } };
     headerRow.height = 24;
 
-    let sumBilled = 0;
-    let sumReceived = 0;
-    let sumBalance = 0;
+    let totalAmount = 0;
+    let receivedTotal = 0;
 
-    rows.forEach((r, idx) => {
-      sumBilled += r.sale_price;
-      sumReceived += r.amount_paid;
-      sumBalance += r.balance_amount;
+    parsedDevices.forEach((r, idx) => {
+      const amt = Number(r.device_amount || 0);
+      totalAmount += amt;
+      if (r.payment_status === 'RECEIVED') receivedTotal += amt;
 
       const row = worksheet.addRow([
         idx + 1,
-        r.vehicle_number,
-        r.customer_name,
-        r.customer_contact,
         r.imei_number,
-        r.sale_price,
-        r.amount_paid,
-        r.balance_amount,
-        r.calculated_status,
-        r.payment_mode,
-        r.utr_number || '-',
-        r.payment_date
+        r.device_type_name,
+        r.stock_place,
+        r.vehicle_number || '-',
+        r.customer_name || '-',
+        amt,
+        r.payment_status,
+        r.payment_mode || '-',
+        r.utr_number || '-'
       ]);
 
       if (idx % 2 === 1) {
@@ -409,21 +483,16 @@ router.get('/export', async (req, res) => {
       '',
       '',
       '',
-      sumBilled,
-      sumReceived,
-      sumBalance,
       '',
-      '',
+      totalAmount,
+      `Received: ₹${receivedTotal.toLocaleString('en-IN')}`,
       '',
       ''
     ]);
     summaryRow.font = { bold: true };
     summaryRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
 
-    // Format currency columns
-    worksheet.getColumn(6).numFmt = '₹#,##0.00';
     worksheet.getColumn(7).numFmt = '₹#,##0.00';
-    worksheet.getColumn(8).numFmt = '₹#,##0.00';
 
     worksheet.columns.forEach((column) => {
       let maxLen = 12;
@@ -435,7 +504,7 @@ router.get('/export', async (req, res) => {
     });
 
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename="Device_Payments_Statement_${new Date().toISOString().split('T')[0]}.xlsx"`);
+    res.setHeader('Content-Disposition', `attachment; filename="Stock_Device_Amounts_${new Date().toISOString().split('T')[0]}.xlsx"`);
 
     await workbook.xlsx.write(res);
     res.end();

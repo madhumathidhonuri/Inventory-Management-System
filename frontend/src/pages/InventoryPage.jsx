@@ -30,7 +30,8 @@ import {
   Layers,
   Zap,
   ChevronDown,
-  QrCode
+  QrCode,
+  DollarSign
 } from 'lucide-react';
 import { useAuth, canUserEditField } from '../context/AuthContext';
 import {
@@ -58,6 +59,7 @@ import ConsolidatedReminderModal from '../components/ConsolidatedReminderModal';
 import PaymentQrModal from '../components/PaymentQrModal';
 import RmaManagementModal from '../components/RmaManagementModal';
 import ImeiVerificationSheet from '../components/ImeiVerificationSheet';
+import DeviceAmountModal from '../components/DeviceAmountModal';
 import { buildCustomerCredentialsWhatsAppMessage, buildPaymentDueReminderWhatsAppMessage, formatINR, formatDisplayCellValue } from '../utils/whatsapp';
 import { exportDevicesToExcel } from '../utils/excelExport';
 
@@ -90,6 +92,10 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
   // Device Detail Specification Card Modal State
   const [detailCardImei, setDetailCardImei] = useState(null);
   const [isDetailCardOpen, setIsDetailCardOpen] = useState(false);
+
+  // Device Amount & Payment Modal State
+  const [deviceAmountModalDevice, setDeviceAmountModalDevice] = useState(null);
+  const [isDeviceAmountModalOpen, setIsDeviceAmountModalOpen] = useState(false);
 
   // Multi-Select & Batch Stock Movement State
   const [selectedDeviceIds, setSelectedDeviceIds] = useState(new Set());
@@ -2218,6 +2224,29 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
                               <QrCode className="w-4 h-4" />
                             </button>
 
+                            {/* Enter / Edit Device Amount & Payment Modal Button */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setDeviceAmountModalDevice({
+                                  ...dev,
+                                  device_amount: info.cost || dev.purchase_price || 0,
+                                  payment_status: info.payVal || 'PENDING',
+                                  payment_mode: dev.additional_attributes?.['AMOUNT RECEIVED BY'] || '',
+                                  utr_number: dev.additional_attributes?.['UTR NUMBER'] || '',
+                                  stock_place: info.stockPlace || dev.current_holder_name,
+                                  vehicle_number: info.vehNo,
+                                  customer_name: info.custName,
+                                  customer_phone: info.phone
+                                });
+                                setIsDeviceAmountModalOpen(true);
+                              }}
+                              title="Enter / Edit Device Amount & Payment Receipt"
+                              className="p-1.5 text-emerald-700 hover:text-emerald-900 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
+                            >
+                              <DollarSign className="w-4 h-4" />
+                            </button>
+
                             {/* Quick Inline Edit Pencil */}
                             <button
                               onClick={() => handleStartInlineEdit(dev)}
@@ -3630,6 +3659,16 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
           </div>
         </div>
       )}
+
+      {/* Device Amount & Payment Modal */}
+      <DeviceAmountModal
+        isOpen={isDeviceAmountModalOpen}
+        onClose={() => setIsDeviceAmountModalOpen(false)}
+        device={deviceAmountModalDevice}
+        onSuccess={() => {
+          loadData();
+        }}
+      />
 
     </div>
   );
