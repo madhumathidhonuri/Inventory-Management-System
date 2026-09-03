@@ -25,7 +25,6 @@ function createTestApp() {
   app.use('/api/backup', require('../routes/backup'));
   app.use('/api/expenses', require('../routes/expenses'));
   app.use('/api/device-pricing', require('../routes/devicePricing'));
-  app.use('/api/device-payments', require('../routes/devicePayments'));
 
   return app;
 }
@@ -230,27 +229,6 @@ async function runTests() {
       const res = await makeRequest(testPort, '/api/expenses/export');
       if (res.status !== 200) {
         throw new Error('Expenses export endpoint returned status ' + res.status);
-      }
-    });
-
-    // 18. Device Payments (Collections) API
-    await assertTest('Device Payments Collections API', async () => {
-      const res = await makeRequest(testPort, '/api/device-payments');
-      if (res.status !== 200 || !res.body.success || !Array.isArray(res.body.data)) {
-        throw new Error('Device payments list failed');
-      }
-
-      const sumRes = await makeRequest(testPort, '/api/device-payments/summary');
-      if (sumRes.status !== 200 || !sumRes.body.success || !sumRes.body.summary) {
-        throw new Error('Device payments summary failed');
-      }
-    });
-
-    // 19. Device Payments Excel Export API
-    await assertTest('Device Payments Statement Excel Export API', async () => {
-      const res = await makeRequest(testPort, '/api/device-payments/export');
-      if (res.status !== 200) {
-        throw new Error('Device payments export endpoint returned status ' + res.status);
       }
     });
 

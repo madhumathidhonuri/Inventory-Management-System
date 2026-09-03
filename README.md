@@ -101,17 +101,7 @@ An enterprise-grade, full-stack **Inventory Management & Telematics Operations S
 
 ---
 
-### 11. 💰 Device Payments & Collections Hub
-- **Dedicated Device Payments Ledger**: Real-time collections ledger tracking payments received for installed devices / vehicles.
-- **Live Realization Telemetry**: 4 KPI cards tracking **Total Payments Collected**, **Pending Receivables**, **Today's Collections**, and **Units Realization Status** (Fully Paid, Partial, Unpaid).
-- **Automated Balance Tracking**: Auto-computes pending balance ($$\text{Sale Price} - \text{Amount Paid}$$) and payment status (`PAID`, `PARTIAL`, `PENDING`).
-- **Payment Method & UTR Verification**: Record UPI reference numbers, Cash, Bank Transfers, and Cheques with 1-click UTR copying.
-- **1-Click WhatsApp Payment Receipt**: Send official WhatsApp payment confirmation messages directly to vehicle owners with balance breakdown.
-- **1-Click Excel Collections Statement**: Download formatted `.xlsx` collections registers with currency formatting and summary totals.
-
----
-
-### 12. 💳 Operational Expenses Hub, Rate Master & P&L Statement
+### 11. 💳 Operational Expenses Hub, Rate Master & P&L Statement
 - **Operational Expenses Hub**: Log and categorize field expenditures:
   - *Technician Travel & Fuel* (site visits & conveyance).
   - *Courier & Logistics* (dealer dispatches & parcel freight).

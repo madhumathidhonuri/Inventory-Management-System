@@ -674,39 +674,6 @@ export async function fetchPnLSummary(params = {}) {
   return res.json();
 }
 
-// ==========================================
-// 💰 DEVICE PAYMENTS / COLLECTIONS API
-// ==========================================
-export async function fetchDevicePayments(params = {}) {
-  const query = new URLSearchParams(params).toString();
-  const res = await fetch(`${API_BASE}/device-payments?${query}`);
-  if (!res.ok) throw new Error('Failed to fetch device payments');
-  return res.json();
-}
-
-export async function fetchDevicePaymentsSummary(params = {}) {
-  const query = new URLSearchParams(params).toString();
-  const res = await fetch(`${API_BASE}/device-payments/summary?${query}`);
-  if (!res.ok) throw new Error('Failed to fetch device payments summary');
-  return res.json();
-}
-
-export async function updateDevicePayment(id, payload) {
-  const res = await fetch(`${API_BASE}/device-payments/${id}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
-  const data = await res.json();
-  if (!res.ok || !data.success) throw new Error(data.error || 'Failed to record device payment');
-  return data;
-}
-
-export function getDevicePaymentsExportUrl(params = {}) {
-  const query = new URLSearchParams(params).toString();
-  return `${API_BASE}/device-payments/export?${query}`;
-}
-
 
 
 
