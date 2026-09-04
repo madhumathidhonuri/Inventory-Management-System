@@ -1461,7 +1461,7 @@ export default function ReportsPage() {
                       <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
                         <tr>
                           <th className="p-3 font-bold text-center">#</th>
-                          <th className="p-3 font-bold">TG Mining Date</th>
+                          <th className="p-3 font-bold">Installation Date</th>
                           <th className="p-3 font-bold">IMEI Number</th>
                           <th className="p-3 font-bold">Device Model</th>
                           <th className="p-3 font-bold">Vehicle / Equipment No</th>

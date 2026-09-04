@@ -1448,7 +1448,7 @@ router.get('/export-daily-distribution', async (req, res) => {
 
     const tgMiningHeaders = [
       'Sl No',
-      'TG Mining Issue Date',
+      'Installation Date',
       'IMEI Number',
       'Device Model',
       'Vehicle / Equipment No',

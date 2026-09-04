@@ -2653,13 +2653,14 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
                       type="button"
                       onClick={() => {
                         const today = new Date().toISOString().split('T')[0];
-                        const newAttrs = {
-                          ...rowFormData.additional_attributes,
-                          'CATEGORY': cat.id,
-                          'DEVICE CATEGORY': cat.id
-                        };
+                        const newAttrs = { ...rowFormData.additional_attributes };
+                        delete newAttrs['DEVICE CATEGORY'];
+                        delete newAttrs['TG MINING DATE'];
+                        delete newAttrs['INSTALLED BY'];
+                        delete newAttrs['Installed By'];
+                        newAttrs['CATEGORY'] = cat.id;
+
                         if (cat.id === 'TG MINING') {
-                          if (!newAttrs['TG MINING DATE']) newAttrs['TG MINING DATE'] = today;
                           if (!newAttrs['INSTALLATION DATE']) newAttrs['INSTALLATION DATE'] = today;
                         }
                         setRowFormData({
@@ -2686,13 +2687,12 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
                   value={rowFormData.additional_attributes['CATEGORY'] || rowFormData.additional_attributes['DEVICE CATEGORY'] || ''}
                   onChange={(e) => {
                     const val = e.target.value.toUpperCase();
-                    const newAttrs = {
-                      ...rowFormData.additional_attributes,
-                      'CATEGORY': val,
-                      'DEVICE CATEGORY': val
-                    };
-                    if (val.includes('TG MINING') && !newAttrs['TG MINING DATE']) {
-                      newAttrs['TG MINING DATE'] = new Date().toISOString().split('T')[0];
+                    const newAttrs = { ...rowFormData.additional_attributes };
+                    delete newAttrs['DEVICE CATEGORY'];
+                    delete newAttrs['TG MINING DATE'];
+                    newAttrs['CATEGORY'] = val;
+                    if (val.includes('TG MINING') && !newAttrs['INSTALLATION DATE']) {
+                      newAttrs['INSTALLATION DATE'] = new Date().toISOString().split('T')[0];
                     }
                     setRowFormData({
                       ...rowFormData,
@@ -2709,21 +2709,19 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-1.5">
                       <Calendar className="w-3.5 h-3.5 text-amber-800" />
-                      <span className="text-[11px] font-bold text-amber-950">TG Mining Issue Date:</span>
+                      <span className="text-[11px] font-bold text-amber-950">Installation Date:</span>
                     </div>
                     <input
                       type="date"
-                      value={rowFormData.additional_attributes['TG MINING DATE'] || rowFormData.additional_attributes['INSTALLATION DATE'] || new Date().toISOString().split('T')[0]}
+                      value={rowFormData.additional_attributes['INSTALLATION DATE'] || rowFormData.additional_attributes['TG MINING DATE'] || new Date().toISOString().split('T')[0]}
                       onChange={(e) => {
                         const dVal = e.target.value;
+                        const newAttrs = { ...rowFormData.additional_attributes };
+                        delete newAttrs['TG MINING DATE'];
+                        newAttrs['INSTALLATION DATE'] = dVal;
                         setRowFormData({
                           ...rowFormData,
-                          additional_attributes: {
-                            ...rowFormData.additional_attributes,
-                            'TG MINING DATE': dVal,
-                            'INSTALLATION DATE': dVal,
-                            'STOCK PLACE DATE': dVal
-                          }
+                          additional_attributes: newAttrs
                         });
                       }}
                       className="bg-white border border-amber-400 rounded-md px-2 py-0.5 text-xs font-bold text-slate-800 shadow-xs focus:outline-none focus:ring-1 focus:ring-amber-500"
@@ -2741,14 +2739,13 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
                       value={rowFormData.additional_attributes['TECHNICIAN'] || rowFormData.additional_attributes['INSTALLED BY'] || rowFormData.additional_attributes['Installed By'] || ''}
                       onChange={(e) => {
                         const nameVal = e.target.value;
+                        const newAttrs = { ...rowFormData.additional_attributes };
+                        delete newAttrs['INSTALLED BY'];
+                        delete newAttrs['Installed By'];
+                        newAttrs['TECHNICIAN'] = nameVal;
                         setRowFormData({
                           ...rowFormData,
-                          additional_attributes: {
-                            ...rowFormData.additional_attributes,
-                            'TECHNICIAN': nameVal,
-                            'INSTALLED BY': nameVal,
-                            'Installed By': nameVal
-                          }
+                          additional_attributes: newAttrs
                         });
                       }}
                       className="bg-white border border-amber-400 rounded-md px-2 py-0.5 text-xs font-bold text-slate-800 shadow-xs focus:outline-none focus:ring-1 focus:ring-amber-500 flex-1 max-w-[200px]"

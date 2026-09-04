@@ -718,7 +718,7 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-1.5">
                         <Calendar className="w-4 h-4 text-amber-800" />
-                        <span className="text-xs font-bold text-amber-950">TG Mining Issue Date:</span>
+                        <span className="text-xs font-bold text-amber-950">Installation Date:</span>
                       </div>
                       <input
                         type="date"
