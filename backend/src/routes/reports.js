@@ -1023,6 +1023,9 @@ function computeDailyDistributionMatrix(requestedDate = null) {
     const custName = attrs['CUSTOMER NAME'] || attrs['CERTIFICATE ISSUED TO'] || attrs['CUSTOMER'] ||
       attrs['Customer Name'] || attrs['customer_name'] || attrs['MINING SITE'] || attrs['SITE NAME'] || '-';
 
+    const installer = attrs['INSTALLED BY'] || attrs['Installed By'] || attrs['TECHNICIAN'] || attrs['Technician'] ||
+      attrs['FITTER'] || attrs['Fitter'] || attrs['INSTALLER'] || attrs['Installer'] || attrs['installed_by'] || dev.current_holder_name || '-';
+
     const chasis = attrs['CHASIS NUMBER'] || attrs['CHASSIS NUMBER'] || attrs['CHASIS NO'] ||
       attrs['CHASSIS NO'] || attrs['chasis_number'] || attrs['chassis_number'] || '-';
 
@@ -1041,6 +1044,7 @@ function computeDailyDistributionMatrix(requestedDate = null) {
         customer_name: custName,
         customer_phone: phone,
         tg_mining_date: tgMiningDate,
+        installed_by: installer,
         chasis_number: chasis,
         engine_number: engine,
         location: locName
@@ -1058,6 +1062,7 @@ function computeDailyDistributionMatrix(requestedDate = null) {
         customer_name: custName,
         customer_phone: phone,
         certificate_issued_date: certDate,
+        installed_by: installer,
         chasis_number: chasis,
         engine_number: engine,
         rto_location: locName
@@ -1430,7 +1435,7 @@ router.get('/export-daily-distribution', async (req, res) => {
     const sec3Row = ws.addRow([`3. TG MINING DEVICES ISSUED / ACTIVATED TODAY (${todayTgMiningDevices.length} Devices Issued on ${targetDate})`]);
     sec3Row.height = 24;
     const sec3RowIndex = sec3Row.number;
-    ws.mergeCells(sec3RowIndex, 1, sec3RowIndex, 8);
+    ws.mergeCells(sec3RowIndex, 1, sec3RowIndex, 9);
     const sec3Cell = ws.getCell(sec3RowIndex, 1);
     sec3Cell.fill = {
       type: 'pattern',
@@ -1447,6 +1452,7 @@ router.get('/export-daily-distribution', async (req, res) => {
       'Device Model',
       'Vehicle / Equipment No',
       'Customer / Mining Site',
+      'Installed By (Technician)',
       'Customer Contact',
       'Stock Place / Location'
     ];
@@ -1470,7 +1476,7 @@ router.get('/export-daily-distribution', async (req, res) => {
     });
 
     if (todayTgMiningDevices.length === 0) {
-      const emptyRow = ws.addRow(['-', targetDate, 'No TG Mining devices issued on this date', '-', '-', '-', '-', '-']);
+      const emptyRow = ws.addRow(['-', targetDate, 'No TG Mining devices issued on this date', '-', '-', '-', '-', '-', '-']);
       emptyRow.height = 22;
       emptyRow.eachCell((cell) => {
         cell.font = { italic: true, size: 9.5, color: { argb: 'FF64748B' } };
@@ -1485,6 +1491,7 @@ router.get('/export-daily-distribution', async (req, res) => {
           item.device_name,
           item.vehicle_number,
           item.customer_name,
+          item.installed_by || '-',
           item.customer_phone,
           item.location || '-'
         ]);

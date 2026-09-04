@@ -712,19 +712,34 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
                   )}
                 </div>
 
-                {/* Inline TG MINING Date Selection */}
+                {/* Inline TG MINING Date & Installed By Selection */}
                 {(category === 'TG MINING' || (category === 'CUSTOM' && customCategoryInput.includes('MINING'))) && (
-                  <div className="flex items-center justify-between gap-2 p-2.5 bg-amber-100/90 border border-amber-300 rounded-xl mt-2">
-                    <div className="flex items-center gap-1.5">
-                      <Calendar className="w-4 h-4 text-amber-800" />
-                      <span className="text-xs font-bold text-amber-950">TG Mining Issue / Activation Date:</span>
+                  <div className="space-y-2 p-3 bg-amber-100/90 border border-amber-300 rounded-xl mt-2 animate-fade-in">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5">
+                        <Calendar className="w-4 h-4 text-amber-800" />
+                        <span className="text-xs font-bold text-amber-950">TG Mining Issue Date:</span>
+                      </div>
+                      <input
+                        type="date"
+                        value={installationDate}
+                        onChange={(e) => setInstallationDate(e.target.value)}
+                        className="bg-white border border-amber-400 rounded-lg px-2.5 py-1 text-xs font-bold text-slate-900 shadow-xs focus:outline-none focus:ring-1 focus:ring-amber-500"
+                      />
                     </div>
-                    <input
-                      type="date"
-                      value={installationDate}
-                      onChange={(e) => setInstallationDate(e.target.value)}
-                      className="bg-white border border-amber-400 rounded-lg px-2.5 py-1 text-xs font-bold text-slate-900 shadow-xs focus:outline-none focus:ring-1 focus:ring-amber-500"
-                    />
+                    <div className="flex items-center justify-between gap-2 pt-2 border-t border-amber-200/80">
+                      <div className="flex items-center gap-1.5">
+                        <UserCheck className="w-4 h-4 text-amber-800" />
+                        <span className="text-xs font-bold text-amber-950">Installed By (Person):</span>
+                      </div>
+                      <input
+                        type="text"
+                        placeholder="e.g. Technician Name / Fitter"
+                        value={installedBy}
+                        onChange={(e) => setInstalledBy(e.target.value)}
+                        className="bg-white border border-amber-400 rounded-lg px-2.5 py-1 text-xs font-bold text-slate-900 shadow-xs focus:outline-none focus:ring-1 focus:ring-amber-500 flex-1 max-w-[200px]"
+                      />
+                    </div>
                   </div>
                 )}
               </div>

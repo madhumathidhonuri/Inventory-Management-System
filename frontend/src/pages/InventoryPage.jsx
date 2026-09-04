@@ -2703,30 +2703,57 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
                 />
               </div>
 
-              {/* Dynamic TG MINING Date Selection */}
+              {/* Dynamic TG MINING Date & Installed By Selection */}
               {((rowFormData.additional_attributes['CATEGORY'] || rowFormData.additional_attributes['DEVICE CATEGORY'] || '').toUpperCase().includes('TG MINING') || (rowFormData.additional_attributes['CATEGORY'] || rowFormData.additional_attributes['DEVICE CATEGORY'] || '').toUpperCase() === 'TG MINING') && (
-                <div className="flex items-center justify-between gap-2 p-2 bg-amber-100/90 border border-amber-300 rounded-lg shadow-xs">
-                  <div className="flex items-center gap-1.5">
-                    <Calendar className="w-3.5 h-3.5 text-amber-800" />
-                    <span className="text-[11px] font-bold text-amber-950">TG Mining Issue / Activation Date:</span>
+                <div className="space-y-2 p-2.5 bg-amber-100/90 border border-amber-300 rounded-lg shadow-xs animate-fade-in">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5">
+                      <Calendar className="w-3.5 h-3.5 text-amber-800" />
+                      <span className="text-[11px] font-bold text-amber-950">TG Mining Issue Date:</span>
+                    </div>
+                    <input
+                      type="date"
+                      value={rowFormData.additional_attributes['TG MINING DATE'] || rowFormData.additional_attributes['INSTALLATION DATE'] || new Date().toISOString().split('T')[0]}
+                      onChange={(e) => {
+                        const dVal = e.target.value;
+                        setRowFormData({
+                          ...rowFormData,
+                          additional_attributes: {
+                            ...rowFormData.additional_attributes,
+                            'TG MINING DATE': dVal,
+                            'INSTALLATION DATE': dVal,
+                            'STOCK PLACE DATE': dVal
+                          }
+                        });
+                      }}
+                      className="bg-white border border-amber-400 rounded-md px-2 py-0.5 text-xs font-bold text-slate-800 shadow-xs focus:outline-none focus:ring-1 focus:ring-amber-500"
+                    />
                   </div>
-                  <input
-                    type="date"
-                    value={rowFormData.additional_attributes['TG MINING DATE'] || rowFormData.additional_attributes['INSTALLATION DATE'] || new Date().toISOString().split('T')[0]}
-                    onChange={(e) => {
-                      const dVal = e.target.value;
-                      setRowFormData({
-                        ...rowFormData,
-                        additional_attributes: {
-                          ...rowFormData.additional_attributes,
-                          'TG MINING DATE': dVal,
-                          'INSTALLATION DATE': dVal,
-                          'STOCK PLACE DATE': dVal
-                        }
-                      });
-                    }}
-                    className="bg-white border border-amber-400 rounded-md px-2 py-0.5 text-xs font-bold text-slate-800 shadow-xs focus:outline-none focus:ring-1 focus:ring-amber-500"
-                  />
+
+                  <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-amber-200/80">
+                    <div className="flex items-center gap-1.5">
+                      <User className="w-3.5 h-3.5 text-amber-800" />
+                      <span className="text-[11px] font-bold text-amber-950">Installed By (Person):</span>
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="e.g. Technician Name / Fitter"
+                      value={rowFormData.additional_attributes['INSTALLED BY'] || rowFormData.additional_attributes['Installed By'] || rowFormData.additional_attributes['TECHNICIAN'] || ''}
+                      onChange={(e) => {
+                        const nameVal = e.target.value;
+                        setRowFormData({
+                          ...rowFormData,
+                          additional_attributes: {
+                            ...rowFormData.additional_attributes,
+                            'INSTALLED BY': nameVal,
+                            'Installed By': nameVal,
+                            'TECHNICIAN': nameVal
+                          }
+                        });
+                      }}
+                      className="bg-white border border-amber-400 rounded-md px-2 py-0.5 text-xs font-bold text-slate-800 shadow-xs focus:outline-none focus:ring-1 focus:ring-amber-500 flex-1 max-w-[200px]"
+                    />
+                  </div>
                 </div>
               )}
             </div>

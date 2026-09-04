@@ -1466,6 +1466,7 @@ export default function ReportsPage() {
                           <th className="p-3 font-bold">Device Model</th>
                           <th className="p-3 font-bold">Vehicle / Equipment No</th>
                           <th className="p-3 font-bold">Customer / Mining Site</th>
+                          <th className="p-3 font-bold">Installed By</th>
                           <th className="p-3 font-bold">Contact Phone</th>
                           <th className="p-3 font-bold">Location / Stock Place</th>
                         </tr>
@@ -1479,6 +1480,11 @@ export default function ReportsPage() {
                             <td className="p-3 text-slate-800 font-semibold">{item.device_name}</td>
                             <td className="p-3 font-mono font-bold text-slate-900">{item.vehicle_number}</td>
                             <td className="p-3 text-slate-900 font-medium">{item.customer_name}</td>
+                            <td className="p-3 font-medium text-slate-800">
+                              <span className="px-2 py-0.5 rounded-md bg-amber-100/70 border border-amber-200 font-semibold text-amber-900">
+                                {item.installed_by && item.installed_by !== '-' ? item.installed_by : 'Technician'}
+                              </span>
+                            </td>
                             <td className="p-3 font-mono font-medium text-amber-800">
                               {item.customer_phone && item.customer_phone !== '-' ? item.customer_phone : '-'}
                             </td>
