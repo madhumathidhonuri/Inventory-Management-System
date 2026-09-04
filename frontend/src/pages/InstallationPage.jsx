@@ -58,7 +58,7 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
   const [paymentStatus, setPaymentStatus] = useState('RECEIVED');
   const [softwareUserId, setSoftwareUserId] = useState('');
   const [softwarePassword, setSoftwarePassword] = useState('');
-  const [installedBy, setInstalledBy] = useState('Technician');
+  const [installedBy, setInstalledBy] = useState('');
   const [installationDate, setInstallationDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [location, setLocation] = useState('');
   const [remarks, setRemarks] = useState('');
@@ -730,11 +730,11 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
                     <div className="flex items-center justify-between gap-2 pt-2 border-t border-amber-200/80">
                       <div className="flex items-center gap-1.5">
                         <UserCheck className="w-4 h-4 text-amber-800" />
-                        <span className="text-xs font-bold text-amber-950">Installed By (Person):</span>
+                        <span className="text-xs font-bold text-amber-950">Technician:</span>
                       </div>
                       <input
                         type="text"
-                        placeholder="e.g. Technician Name / Fitter"
+                        placeholder="e.g. Technician Name"
                         value={installedBy}
                         onChange={(e) => setInstalledBy(e.target.value)}
                         className="bg-white border border-amber-400 rounded-lg px-2.5 py-1 text-xs font-bold text-slate-900 shadow-xs focus:outline-none focus:ring-1 focus:ring-amber-500 flex-1 max-w-[200px]"

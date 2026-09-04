@@ -1023,8 +1023,9 @@ function computeDailyDistributionMatrix(requestedDate = null) {
     const custName = attrs['CUSTOMER NAME'] || attrs['CERTIFICATE ISSUED TO'] || attrs['CUSTOMER'] ||
       attrs['Customer Name'] || attrs['customer_name'] || attrs['MINING SITE'] || attrs['SITE NAME'] || '-';
 
-    const installer = attrs['INSTALLED BY'] || attrs['Installed By'] || attrs['TECHNICIAN'] || attrs['Technician'] ||
-      attrs['FITTER'] || attrs['Fitter'] || attrs['INSTALLER'] || attrs['Installer'] || attrs['installed_by'] || dev.current_holder_name || '-';
+    const rawInstaller = attrs['TECHNICIAN'] || attrs['Technician'] || attrs['INSTALLED BY'] || attrs['Installed By'] ||
+      attrs['FITTER'] || attrs['Fitter'] || attrs['INSTALLER'] || attrs['Installer'] || attrs['installed_by'] || '';
+    const installer = (rawInstaller && String(rawInstaller).trim() && String(rawInstaller).trim().toLowerCase() !== 'technician') ? String(rawInstaller).trim() : '-';
 
     const chasis = attrs['CHASIS NUMBER'] || attrs['CHASSIS NUMBER'] || attrs['CHASIS NO'] ||
       attrs['CHASSIS NO'] || attrs['chasis_number'] || attrs['chassis_number'] || '-';
@@ -1452,7 +1453,7 @@ router.get('/export-daily-distribution', async (req, res) => {
       'Device Model',
       'Vehicle / Equipment No',
       'Customer / Mining Site',
-      'Installed By (Technician)',
+      'TECHNICIAN',
       'Customer Contact',
       'Stock Place / Location'
     ];

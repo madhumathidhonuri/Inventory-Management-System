@@ -2733,21 +2733,21 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
                   <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-amber-200/80">
                     <div className="flex items-center gap-1.5">
                       <User className="w-3.5 h-3.5 text-amber-800" />
-                      <span className="text-[11px] font-bold text-amber-950">Installed By (Person):</span>
+                      <span className="text-[11px] font-bold text-amber-950">Technician:</span>
                     </div>
                     <input
                       type="text"
-                      placeholder="e.g. Technician Name / Fitter"
-                      value={rowFormData.additional_attributes['INSTALLED BY'] || rowFormData.additional_attributes['Installed By'] || rowFormData.additional_attributes['TECHNICIAN'] || ''}
+                      placeholder="e.g. Technician Name"
+                      value={rowFormData.additional_attributes['TECHNICIAN'] || rowFormData.additional_attributes['INSTALLED BY'] || rowFormData.additional_attributes['Installed By'] || ''}
                       onChange={(e) => {
                         const nameVal = e.target.value;
                         setRowFormData({
                           ...rowFormData,
                           additional_attributes: {
                             ...rowFormData.additional_attributes,
+                            'TECHNICIAN': nameVal,
                             'INSTALLED BY': nameVal,
-                            'Installed By': nameVal,
-                            'TECHNICIAN': nameVal
+                            'Installed By': nameVal
                           }
                         });
                       }}
