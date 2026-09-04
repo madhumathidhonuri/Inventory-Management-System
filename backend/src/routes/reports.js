@@ -1178,7 +1178,7 @@ router.get('/daily-distribution', (req, res) => {
   }
 });
 
-// GET /api/reports/export-daily-distribution - Excel export (SINGLE SHEET with Stock Matrix + VLTD Certs + TG Mining)
+// GET /api/reports/export-daily-distribution - Excel export (3 DEDICATED SHEETS: Stock Matrix, VLTD Certificates, TG Mining)
 router.get('/export-daily-distribution', async (req, res) => {
   try {
     const { date } = req.query;
@@ -1190,60 +1190,47 @@ router.get('/export-daily-distribution', async (req, res) => {
     wb.lastModifiedBy = 'Super Admin';
     wb.created = new Date();
 
-    // -------------------------------------------------------------------------
-    // SINGLE UNIFIED SHEET: Stock Matrix + VLTD Certificates + TG Mining
-    // -------------------------------------------------------------------------
-    const ws = wb.addWorksheet('Daily Master Report', {
+    // =========================================================================
+    // SHEET 1: DAILY STOCK MATRIX
+    // =========================================================================
+    const wsMatrix = wb.addWorksheet('Daily Stock Matrix', {
       views: [{ showGridLines: true }]
     });
 
-    const totalColumns = Math.max(locations.length + 6, 9);
+    const matrixTotalCols = locations.length + 6;
 
-    // Main Super Header
-    const titleRow = ws.addRow(['FUELTRACKS TECHNOLOGIES — DAILY MASTER STOCK & DEPLOYMENT REPORT']);
-    titleRow.height = 32;
-    ws.mergeCells(1, 1, 1, totalColumns);
-    const titleCell = ws.getCell(1, 1);
-    titleCell.fill = {
+    // Super Header Banner
+    const mTitleRow = wsMatrix.addRow(['FUELTRACKS TECHNOLOGIES — DAILY INVENTORY STOCK & DISTRIBUTION MATRIX']);
+    mTitleRow.height = 32;
+    wsMatrix.mergeCells(1, 1, 1, matrixTotalCols);
+    const mTitleCell = wsMatrix.getCell(1, 1);
+    mTitleCell.fill = {
       type: 'pattern',
       pattern: 'solid',
-      fgColor: { argb: 'FF1E293B' } // Slate 800 Dark
+      fgColor: { argb: 'FF1E293B' } // Slate 800
     };
-    titleCell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 14, name: 'Calibri' };
-    titleCell.alignment = { vertical: 'middle', horizontal: 'center' };
+    mTitleCell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 13, name: 'Calibri' };
+    mTitleCell.alignment = { vertical: 'middle', horizontal: 'center' };
 
     // Subtitle Row
-    const subRow = ws.addRow([`Report Date: ${targetDate}    |    Generated On: ${generatedAt}    |    VLTD Issued Today: ${todayIssuedDevices.length}    |    TG Mining Issued Today: ${todayTgMiningDevices.length}`]);
-    subRow.height = 22;
-    ws.mergeCells(2, 1, 2, totalColumns);
-    const subCell = ws.getCell(2, 1);
-    subCell.fill = {
+    const mSubRow = wsMatrix.addRow([
+      `Report Date: ${targetDate}    |    Generated On: ${generatedAt}    |    Active Locations: ${locations.length}    |    VLTD Issued Today: ${todayIssuedDevices.length}    |    TG Mining Today: ${todayTgMiningDevices.length}`
+    ]);
+    mSubRow.height = 22;
+    wsMatrix.mergeCells(2, 1, 2, matrixTotalCols);
+    const mSubCell = wsMatrix.getCell(2, 1);
+    mSubCell.fill = {
       type: 'pattern',
       pattern: 'solid',
       fgColor: { argb: 'FF334155' } // Slate 700
     };
-    subCell.font = { bold: true, color: { argb: 'FFE2E8F0' }, size: 9, name: 'Calibri' };
-    subCell.alignment = { vertical: 'middle', horizontal: 'center' };
+    mSubCell.font = { bold: true, color: { argb: 'FFE2E8F0' }, size: 9, name: 'Calibri' };
+    mSubCell.alignment = { vertical: 'middle', horizontal: 'center' };
 
     // Blank Gap Row
-    ws.addRow([]);
+    wsMatrix.addRow([]);
 
-    // =========================================================================
-    // SECTION 1: DAILY INVENTORY DISTRIBUTION MATRIX
-    // =========================================================================
-    const sec1Row = ws.addRow(['1. DAILY INVENTORY DISTRIBUTION MATRIX (LOCATION STOCK & DAILY MOVEMENTS)']);
-    sec1Row.height = 24;
-    const sec1RowIndex = sec1Row.number;
-    ws.mergeCells(sec1RowIndex, 1, sec1RowIndex, locations.length + 6);
-    const sec1Cell = ws.getCell(sec1RowIndex, 1);
-    sec1Cell.fill = {
-      type: 'pattern',
-      pattern: 'solid',
-      fgColor: { argb: 'FF1E3A8A' } // Deep Blue Banner
-    };
-    sec1Cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11, name: 'Calibri' };
-    sec1Cell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
-
+    // Table Header Row
     const matrixHeaders = [
       'DEVICE',
       ...locations,
@@ -1253,14 +1240,14 @@ router.get('/export-daily-distribution', async (req, res) => {
       'TOTAL STOCK',
       'PURCHASED'
     ];
-    const headerRow = ws.addRow(matrixHeaders);
-    headerRow.height = 28;
+    const mHeaderRow = wsMatrix.addRow(matrixHeaders);
+    mHeaderRow.height = 28;
 
-    headerRow.eachCell((cell) => {
+    mHeaderRow.eachCell((cell) => {
       cell.fill = {
         type: 'pattern',
         pattern: 'solid',
-        fgColor: { argb: 'FF366092' } // Steel Blue Header
+        fgColor: { argb: 'FF366092' } // Steel Blue
       };
       cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 9.5, name: 'Calibri' };
       cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
@@ -1272,7 +1259,8 @@ router.get('/export-daily-distribution', async (req, res) => {
       };
     });
 
-    rows.forEach(r => {
+    // Data Rows
+    rows.forEach((r, idx) => {
       const rowValues = [
         r.device_name,
         ...locations.map(loc => r.locations[loc] || ''),
@@ -1282,29 +1270,35 @@ router.get('/export-daily-distribution', async (req, res) => {
         r.in_stock_total || 0,
         r.purchased_total || 0
       ];
-      const dataRow = ws.addRow(rowValues);
+      const dataRow = wsMatrix.addRow(rowValues);
       dataRow.height = 22;
 
+      const isEven = idx % 2 === 1;
       dataRow.eachCell((cell, colNumber) => {
         cell.font = { size: 9.5, name: 'Calibri' };
         cell.alignment = { vertical: 'middle', horizontal: colNumber === 1 ? 'left' : 'center' };
         cell.border = {
-          top: { style: 'thin', color: { argb: 'FFE0E0E0' } },
-          left: { style: 'thin', color: { argb: 'FFE0E0E0' } },
-          bottom: { style: 'thin', color: { argb: 'FFE0E0E0' } },
-          right: { style: 'thin', color: { argb: 'FFE0E0E0' } }
+          top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          right: { style: 'thin', color: { argb: 'FFE2E8F0' } }
         };
+
+        if (isEven) {
+          cell.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: 'FFF8FAFC' }
+          };
+        }
 
         if (colNumber === 1) {
           cell.font = { bold: true, name: 'Calibri', size: 9.5, color: { argb: 'FF1A202C' } };
         } else if (colNumber === locations.length + 2) {
-          // VLTD CERTS TODAY column
           cell.font = { bold: true, color: { argb: 'FF0D5C3A' }, name: 'Calibri' };
         } else if (colNumber === locations.length + 3) {
-          // TG MINING TODAY column
-          cell.font = { bold: true, color: { argb: 'FFB45309' }, name: 'Calibri' }; // Warm Amber
-        } else if (colNumber === locations.length + 4) {
-          // INSTALLED column
+          cell.font = { bold: true, color: { argb: 'FFB45309' }, name: 'Calibri' };
+        } else if (colNumber >= locations.length + 4) {
           cell.font = { bold: true, name: 'Calibri', size: 9.5 };
         }
       });
@@ -1320,16 +1314,16 @@ router.get('/export-daily-distribution', async (req, res) => {
       `TOTAL = ${columnTotals.in_stock_total || 0}`,
       `TOTAL = ${columnTotals.purchased_total || 0}`
     ];
-    const totalRow = ws.addRow(totalRowValues);
-    totalRow.height = 25;
+    const totalRow = wsMatrix.addRow(totalRowValues);
+    totalRow.height = 26;
 
     totalRow.eachCell((cell) => {
       cell.fill = {
         type: 'pattern',
         pattern: 'solid',
-        fgColor: { argb: 'FFED7D31' } // Orange
+        fgColor: { argb: 'FFED7D31' } // Vibrant Orange
       };
-      cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 9, name: 'Calibri' };
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 9.5, name: 'Calibri' };
       cell.alignment = { vertical: 'middle', horizontal: 'center' };
       cell.border = {
         top: { style: 'medium', color: { argb: 'FFC65911' } },
@@ -1339,45 +1333,77 @@ router.get('/export-daily-distribution', async (req, res) => {
       };
     });
 
-    // 2 Blank Rows Gap
-    ws.addRow([]);
-    ws.addRow([]);
+    // Set Column Widths for Sheet 1
+    wsMatrix.columns = [
+      { width: 24 },
+      ...locations.map(() => ({ width: 16 })),
+      { width: 20 },
+      { width: 20 },
+      { width: 16 },
+      { width: 16 },
+      { width: 16 }
+    ];
 
     // =========================================================================
-    // SECTION 2: VLTD CERTIFICATES ISSUED TODAY
+    // SHEET 2: VLTD CERTIFICATES ISSUED
     // =========================================================================
-    const sec2Row = ws.addRow([`2. VLTD CERTIFICATES ISSUED TODAY (${todayIssuedDevices.length} Devices Issued on ${targetDate})`]);
-    sec2Row.height = 24;
-    const sec2RowIndex = sec2Row.number;
-    ws.mergeCells(sec2RowIndex, 1, sec2RowIndex, 9);
-    const sec2Cell = ws.getCell(sec2RowIndex, 1);
-    sec2Cell.fill = {
+    const wsVltd = wb.addWorksheet('VLTD Certificates', {
+      views: [{ showGridLines: true }]
+    });
+
+    // Super Header Banner
+    const vltdTitleRow = wsVltd.addRow(['FUELTRACKS TECHNOLOGIES — VLTD CERTIFICATES ISSUED TODAY']);
+    vltdTitleRow.height = 32;
+    wsVltd.mergeCells(1, 1, 1, 11);
+    const vltdTitleCell = wsVltd.getCell(1, 1);
+    vltdTitleCell.fill = {
       type: 'pattern',
       pattern: 'solid',
-      fgColor: { argb: 'FF0D5C3A' } // Deep Emerald Green Banner
+      fgColor: { argb: 'FF064E3B' } // Deep Emerald Green
     };
-    sec2Cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11, name: 'Calibri' };
-    sec2Cell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+    vltdTitleCell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 13, name: 'Calibri' };
+    vltdTitleCell.alignment = { vertical: 'middle', horizontal: 'center' };
 
-    const certHeaders = [
+    // Subtitle Row
+    const vltdSubRow = wsVltd.addRow([
+      `Report Date: ${targetDate}    |    Total Certificates Issued: ${todayIssuedDevices.length}    |    Generated On: ${generatedAt}`
+    ]);
+    vltdSubRow.height = 22;
+    wsVltd.mergeCells(2, 1, 2, 11);
+    const vltdSubCell = wsVltd.getCell(2, 1);
+    vltdSubCell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF0D5C3A' } // Emerald 800
+    };
+    vltdSubCell.font = { bold: true, color: { argb: 'FFD1FAE5' }, size: 9, name: 'Calibri' };
+    vltdSubCell.alignment = { vertical: 'middle', horizontal: 'center' };
+
+    // Blank Gap Row
+    wsVltd.addRow([]);
+
+    // Table Header Row
+    const vltdHeaders = [
       'Sl No',
       'Certificate Issue Date',
       'IMEI Number',
       'Device Model',
       'Vehicle Number',
       'Customer Name',
+      'TECHNICIAN',
       'Customer Contact',
       'Chassis Number',
-      'Engine Number'
+      'Engine Number',
+      'RTO Location'
     ];
-    const certHeaderRow = ws.addRow(certHeaders);
-    certHeaderRow.height = 26;
+    const vltdHeaderRow = wsVltd.addRow(vltdHeaders);
+    vltdHeaderRow.height = 28;
 
-    certHeaderRow.eachCell((cell) => {
+    vltdHeaderRow.eachCell((cell) => {
       cell.fill = {
         type: 'pattern',
         pattern: 'solid',
-        fgColor: { argb: 'FF15803D' } // Emerald Header
+        fgColor: { argb: 'FF15803D' } // Emerald 700
       };
       cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 9.5, name: 'Calibri' };
       cell.alignment = { vertical: 'middle', horizontal: 'center' };
@@ -1390,63 +1416,117 @@ router.get('/export-daily-distribution', async (req, res) => {
     });
 
     if (todayIssuedDevices.length === 0) {
-      const emptyRow = ws.addRow(['-', targetDate, 'No VLTD certificates issued on this date', '-', '-', '-', '-', '-', '-']);
-      emptyRow.height = 22;
+      const emptyRow = wsVltd.addRow(['-', targetDate, 'No VLTD certificates issued on this date', '-', '-', '-', '-', '-', '-', '-', '-']);
+      emptyRow.height = 24;
       emptyRow.eachCell((cell) => {
         cell.font = { italic: true, size: 9.5, color: { argb: 'FF64748B' } };
         cell.alignment = { vertical: 'middle', horizontal: 'center' };
       });
     } else {
       todayIssuedDevices.forEach((item, idx) => {
-        const r = ws.addRow([
+        const r = wsVltd.addRow([
           idx + 1,
           item.certificate_issued_date || targetDate,
           item.imei_number,
           item.device_name,
-          item.vehicle_number,
-          item.customer_name,
-          item.customer_phone,
-          item.chasis_number,
-          item.engine_number
+          item.vehicle_number || '-',
+          item.customer_name || '-',
+          item.installed_by || '-',
+          item.customer_phone || '-',
+          item.chasis_number || '-',
+          item.engine_number || '-',
+          item.rto_location || '-'
         ]);
-        r.height = 21;
+        r.height = 22;
+
+        const isEven = idx % 2 === 1;
         r.eachCell((cell, colNumber) => {
           cell.font = { size: 9.5, name: 'Calibri' };
-          cell.alignment = { vertical: 'middle', horizontal: colNumber === 1 ? 'center' : 'left' };
-          cell.border = {
-            top: { style: 'thin', color: { argb: 'FFE0E0E0' } },
-            left: { style: 'thin', color: { argb: 'FFE0E0E0' } },
-            bottom: { style: 'thin', color: { argb: 'FFE0E0E0' } },
-            right: { style: 'thin', color: { argb: 'FFE0E0E0' } }
+          cell.alignment = {
+            vertical: 'middle',
+            horizontal: [1, 2, 3, 5, 8, 9, 10, 11].includes(colNumber) ? 'center' : 'left'
           };
-          if (colNumber === 3 || colNumber === 5) {
+          cell.border = {
+            top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+            left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+            bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+            right: { style: 'thin', color: { argb: 'FFE2E8F0' } }
+          };
+
+          if (isEven) {
+            cell.fill = {
+              type: 'pattern',
+              pattern: 'solid',
+              fgColor: { argb: 'FFF0FDF4' } // Very light green zebra
+            };
+          }
+
+          if (colNumber === 2) {
+            cell.font = { bold: true, color: { argb: 'FF047857' }, name: 'Calibri' };
+          } else if (colNumber === 3) {
+            cell.font = { bold: true, color: { argb: 'FF1D4ED8' }, name: 'Calibri' };
+          } else if (colNumber === 5 || colNumber === 6) {
             cell.font = { bold: true, name: 'Calibri', size: 9.5 };
           }
         });
       });
     }
 
-    // 2 Blank Rows Gap
-    ws.addRow([]);
-    ws.addRow([]);
+    // Column widths for Sheet 2
+    wsVltd.columns = [
+      { width: 8 },   // Sl No
+      { width: 22 },  // Issue Date
+      { width: 22 },  // IMEI
+      { width: 18 },  // Model
+      { width: 20 },  // Vehicle No
+      { width: 28 },  // Customer Name
+      { width: 20 },  // TECHNICIAN
+      { width: 18 },  // Contact
+      { width: 22 },  // Chassis
+      { width: 20 },  // Engine
+      { width: 22 }   // RTO Location
+    ];
 
     // =========================================================================
-    // SECTION 3: TG MINING DEVICES ISSUED TODAY
+    // SHEET 3: TG MINING DEPLOYMENTS
     // =========================================================================
-    const sec3Row = ws.addRow([`3. TG MINING DEVICES ISSUED / ACTIVATED TODAY (${todayTgMiningDevices.length} Devices Issued on ${targetDate})`]);
-    sec3Row.height = 24;
-    const sec3RowIndex = sec3Row.number;
-    ws.mergeCells(sec3RowIndex, 1, sec3RowIndex, 9);
-    const sec3Cell = ws.getCell(sec3RowIndex, 1);
-    sec3Cell.fill = {
+    const wsMining = wb.addWorksheet('TG Mining', {
+      views: [{ showGridLines: true }]
+    });
+
+    // Super Header Banner
+    const miningTitleRow = wsMining.addRow(['FUELTRACKS TECHNOLOGIES — TG MINING DEPLOYMENTS / ACTIVATIONS TODAY']);
+    miningTitleRow.height = 32;
+    wsMining.mergeCells(1, 1, 1, 11);
+    const miningTitleCell = wsMining.getCell(1, 1);
+    miningTitleCell.fill = {
       type: 'pattern',
       pattern: 'solid',
-      fgColor: { argb: 'FFB45309' } // Warm Amber / Bronze Banner
+      fgColor: { argb: 'FF78350F' } // Deep Bronze / Amber 900
     };
-    sec3Cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11, name: 'Calibri' };
-    sec3Cell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+    miningTitleCell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 13, name: 'Calibri' };
+    miningTitleCell.alignment = { vertical: 'middle', horizontal: 'center' };
 
-    const tgMiningHeaders = [
+    // Subtitle Row
+    const miningSubRow = wsMining.addRow([
+      `Report Date: ${targetDate}    |    Total TG Mining Devices: ${todayTgMiningDevices.length}    |    Generated On: ${generatedAt}`
+    ]);
+    miningSubRow.height = 22;
+    wsMining.mergeCells(2, 1, 2, 11);
+    const miningSubCell = wsMining.getCell(2, 1);
+    miningSubCell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF92400E' } // Amber 800
+    };
+    miningSubCell.font = { bold: true, color: { argb: 'FFFEF3C7' }, size: 9, name: 'Calibri' };
+    miningSubCell.alignment = { vertical: 'middle', horizontal: 'center' };
+
+    // Blank Gap Row
+    wsMining.addRow([]);
+
+    // Table Header Row
+    const miningHeaders = [
       'Sl No',
       'Installation Date',
       'IMEI Number',
@@ -1455,16 +1535,18 @@ router.get('/export-daily-distribution', async (req, res) => {
       'Customer / Mining Site',
       'TECHNICIAN',
       'Customer Contact',
+      'Chassis Number',
+      'Engine Number',
       'Stock Place / Location'
     ];
-    const tgMiningHeaderRow = ws.addRow(tgMiningHeaders);
-    tgMiningHeaderRow.height = 26;
+    const miningHeaderRow = wsMining.addRow(miningHeaders);
+    miningHeaderRow.height = 28;
 
-    tgMiningHeaderRow.eachCell((cell) => {
+    miningHeaderRow.eachCell((cell) => {
       cell.fill = {
         type: 'pattern',
         pattern: 'solid',
-        fgColor: { argb: 'FFD97706' } // Amber 600 Header
+        fgColor: { argb: 'FFD97706' } // Amber 600
       };
       cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 9.5, name: 'Calibri' };
       cell.alignment = { vertical: 'middle', horizontal: 'center' };
@@ -1477,54 +1559,75 @@ router.get('/export-daily-distribution', async (req, res) => {
     });
 
     if (todayTgMiningDevices.length === 0) {
-      const emptyRow = ws.addRow(['-', targetDate, 'No TG Mining devices issued on this date', '-', '-', '-', '-', '-', '-']);
-      emptyRow.height = 22;
+      const emptyRow = wsMining.addRow(['-', targetDate, 'No TG Mining devices issued on this date', '-', '-', '-', '-', '-', '-', '-', '-']);
+      emptyRow.height = 24;
       emptyRow.eachCell((cell) => {
         cell.font = { italic: true, size: 9.5, color: { argb: 'FF64748B' } };
         cell.alignment = { vertical: 'middle', horizontal: 'center' };
       });
     } else {
       todayTgMiningDevices.forEach((item, idx) => {
-        const r = ws.addRow([
+        const r = wsMining.addRow([
           idx + 1,
           item.tg_mining_date || targetDate,
           item.imei_number,
           item.device_name,
-          item.vehicle_number,
-          item.customer_name,
+          item.vehicle_number || '-',
+          item.customer_name || '-',
           item.installed_by || '-',
-          item.customer_phone,
+          item.customer_phone || '-',
+          item.chasis_number || '-',
+          item.engine_number || '-',
           item.location || '-'
         ]);
-        r.height = 21;
+        r.height = 22;
+
+        const isEven = idx % 2 === 1;
         r.eachCell((cell, colNumber) => {
           cell.font = { size: 9.5, name: 'Calibri' };
-          cell.alignment = { vertical: 'middle', horizontal: colNumber === 1 ? 'center' : 'left' };
-          cell.border = {
-            top: { style: 'thin', color: { argb: 'FFE0E0E0' } },
-            left: { style: 'thin', color: { argb: 'FFE0E0E0' } },
-            bottom: { style: 'thin', color: { argb: 'FFE0E0E0' } },
-            right: { style: 'thin', color: { argb: 'FFE0E0E0' } }
+          cell.alignment = {
+            vertical: 'middle',
+            horizontal: [1, 2, 3, 5, 8, 9, 10, 11].includes(colNumber) ? 'center' : 'left'
           };
-          if (colNumber === 3 || colNumber === 5) {
+          cell.border = {
+            top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+            left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+            bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+            right: { style: 'thin', color: { argb: 'FFE2E8F0' } }
+          };
+
+          if (isEven) {
+            cell.fill = {
+              type: 'pattern',
+              pattern: 'solid',
+              fgColor: { argb: 'FFFFFBEB' } // Very light amber zebra
+            };
+          }
+
+          if (colNumber === 2) {
+            cell.font = { bold: true, color: { argb: 'FFB45309' }, name: 'Calibri' };
+          } else if (colNumber === 3) {
+            cell.font = { bold: true, color: { argb: 'FF1D4ED8' }, name: 'Calibri' };
+          } else if (colNumber === 5 || colNumber === 6) {
             cell.font = { bold: true, name: 'Calibri', size: 9.5 };
           }
         });
       });
     }
 
-    // Set Column Widths for comfortable readability
-    ws.columns = [
-      { width: 8 },
-      { width: 22 },
-      { width: 22 },
-      { width: 20 },
-      { width: 22 },
-      { width: 26 },
-      { width: 20 },
-      { width: 22 },
-      { width: 22 },
-      ...locations.map(() => ({ width: 16 }))
+    // Column widths for Sheet 3
+    wsMining.columns = [
+      { width: 8 },   // Sl No
+      { width: 22 },  // Installation Date
+      { width: 22 },  // IMEI
+      { width: 18 },  // Model
+      { width: 24 },  // Vehicle / Equip No
+      { width: 28 },  // Customer / Site
+      { width: 20 },  // TECHNICIAN
+      { width: 18 },  // Contact
+      { width: 22 },  // Chassis
+      { width: 20 },  // Engine
+      { width: 22 }   // Location
     ];
 
     const filename = `Daily_Master_Report_${targetDate}`;

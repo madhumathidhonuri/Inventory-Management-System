@@ -1405,9 +1405,11 @@ export default function ReportsPage() {
                           <th className="p-3 font-bold">Device Model</th>
                           <th className="p-3 font-bold">Vehicle Number</th>
                           <th className="p-3 font-bold">Customer Name</th>
+                          <th className="p-3 font-bold">TECHNICIAN</th>
                           <th className="p-3 font-bold">Contact Phone</th>
                           <th className="p-3 font-bold">Chassis Number</th>
                           <th className="p-3 font-bold">Engine Number</th>
+                          <th className="p-3 font-bold">RTO Location</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
@@ -1419,11 +1421,21 @@ export default function ReportsPage() {
                             <td className="p-3 text-slate-800 font-semibold">{item.device_name}</td>
                             <td className="p-3 font-mono font-bold text-slate-900">{item.vehicle_number}</td>
                             <td className="p-3 text-slate-900 font-medium">{item.customer_name}</td>
+                            <td className="p-3 font-medium text-slate-800">
+                              {item.installed_by && item.installed_by !== '-' ? (
+                                <span className="px-2 py-0.5 rounded-md bg-emerald-100/70 border border-emerald-200 font-semibold text-emerald-900">
+                                  {item.installed_by}
+                                </span>
+                              ) : (
+                                <span className="text-slate-400 font-mono">—</span>
+                              )}
+                            </td>
                             <td className="p-3 font-mono font-medium text-emerald-800">
                               {item.customer_phone && item.customer_phone !== '-' ? item.customer_phone : '-'}
                             </td>
                             <td className="p-3 font-mono text-slate-600">{item.chasis_number}</td>
                             <td className="p-3 font-mono text-slate-600">{item.engine_number}</td>
+                            <td className="p-3 font-medium text-slate-700">{item.rto_location || '-'}</td>
                           </tr>
                         ))}
                       </tbody>
