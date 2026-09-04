@@ -1287,13 +1287,16 @@ export default function ReportsPage() {
                         </th>
                       ))}
                       <th className="p-3 border-r border-[#1e543e] whitespace-nowrap min-w-[170px] bg-[#0D5C3A] text-emerald-100">
-                        CERTIFICATES ISSUED TODAY
+                        VLTD CERTS TODAY
+                      </th>
+                      <th className="p-3 border-r border-[#92400e] whitespace-nowrap min-w-[170px] bg-[#B45309] text-amber-100">
+                        TG MINING TODAY
                       </th>
                       <th className="p-3 border-r border-[#2a4d77] whitespace-nowrap min-w-[100px]">
                         INSTALLED
                       </th>
                       <th className="p-3 border-r border-[#2a4d77] whitespace-nowrap min-w-[80px]">
-                        TOTAL
+                        TOTAL STOCK
                       </th>
                       <th className="p-3 whitespace-nowrap min-w-[90px]">
                         PURCHASED
@@ -1319,6 +1322,9 @@ export default function ReportsPage() {
                         ))}
                         <td className="p-3 font-mono font-bold text-emerald-900 bg-emerald-100/70 border-r border-slate-200">
                           {r.certificates_issued_today || 0}
+                        </td>
+                        <td className="p-3 font-mono font-bold text-amber-950 bg-amber-100/70 border-r border-slate-200">
+                          {r.tg_mining_issued_today || 0}
                         </td>
                         <td className="p-3 font-mono font-bold text-slate-900 border-r border-slate-200">
                           {r.total_installed || 0}
@@ -1347,6 +1353,9 @@ export default function ReportsPage() {
                       <td className="p-3 border-r border-[#f4b183]/60 font-mono whitespace-nowrap bg-[#c65911]">
                         TOTAL = {dailyMatrix.columnTotals.certificates_issued_today || 0}
                       </td>
+                      <td className="p-3 border-r border-[#f4b183]/60 font-mono whitespace-nowrap bg-[#b45309]">
+                        TOTAL = {dailyMatrix.columnTotals.tg_mining_issued_today || 0}
+                      </td>
                       <td className="p-3 border-r border-[#f4b183]/60 font-mono whitespace-nowrap">
                         TOTAL = {dailyMatrix.columnTotals.total_installed || 0}
                       </td>
@@ -1362,14 +1371,14 @@ export default function ReportsPage() {
                 </table>
               </div>
 
-              {/* Certificates Issued Today Itemized Details Table */}
+              {/* 1. VLTD Certificates Issued Today Itemized Details Table */}
               <div className="bg-white rounded-2xl border border-emerald-200 overflow-hidden shadow-2xs">
                 <div className="p-4 bg-emerald-50/80 border-b border-emerald-200 flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <CheckCircle2 className="w-5 h-5 text-emerald-700" />
                     <div>
                       <h4 className="text-xs font-bold text-emerald-950 uppercase tracking-wider">
-                        Itemized Certificates Issued Today
+                        VLTD Certificates Issued Today
                       </h4>
                       <p className="text-[11px] text-emerald-800">
                         Vehicles and devices with Certificate Issued Date matching {dailyMatrix.targetDate || 'Today'}
@@ -1377,13 +1386,13 @@ export default function ReportsPage() {
                     </div>
                   </div>
                   <span className="px-3 py-1 rounded-full text-xs font-bold font-mono bg-emerald-700 text-white shadow-2xs">
-                    {dailyMatrix.todayIssuedCount || 0} Issued Today
+                    {dailyMatrix.todayIssuedCount || 0} VLTD Issued Today
                   </span>
                 </div>
 
                 {(!dailyMatrix.todayIssuedDevices || dailyMatrix.todayIssuedDevices.length === 0) ? (
-                  <div className="p-8 text-center text-xs text-slate-400">
-                    No vehicle fitments or certificates recorded with issue date matching today ({dailyMatrix.targetDate}).
+                  <div className="p-6 text-center text-xs text-slate-400">
+                    No VLTD certificates issued with date matching {dailyMatrix.targetDate}.
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
@@ -1415,6 +1424,65 @@ export default function ReportsPage() {
                             </td>
                             <td className="p-3 font-mono text-slate-600">{item.chasis_number}</td>
                             <td className="p-3 font-mono text-slate-600">{item.engine_number}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* 2. TG Mining Devices Issued Today Itemized Details Table */}
+              <div className="bg-white rounded-2xl border border-amber-300 overflow-hidden shadow-2xs">
+                <div className="p-4 bg-amber-50/80 border-b border-amber-200 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Layers className="w-5 h-5 text-amber-700" />
+                    <div>
+                      <h4 className="text-xs font-bold text-amber-950 uppercase tracking-wider">
+                        TG Mining Devices Issued / Activated Today
+                      </h4>
+                      <p className="text-[11px] text-amber-800">
+                        Mining equipment & trackers with TG Mining Date matching {dailyMatrix.targetDate || 'Today'}
+                      </p>
+                    </div>
+                  </div>
+                  <span className="px-3 py-1 rounded-full text-xs font-bold font-mono bg-amber-600 text-white shadow-2xs">
+                    {dailyMatrix.todayTgMiningCount || 0} Mining Issued Today
+                  </span>
+                </div>
+
+                {(!dailyMatrix.todayTgMiningDevices || dailyMatrix.todayTgMiningDevices.length === 0) ? (
+                  <div className="p-6 text-center text-xs text-slate-400">
+                    No TG Mining devices recorded with date matching {dailyMatrix.targetDate}.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
+                        <tr>
+                          <th className="p-3 font-bold text-center">#</th>
+                          <th className="p-3 font-bold">TG Mining Date</th>
+                          <th className="p-3 font-bold">IMEI Number</th>
+                          <th className="p-3 font-bold">Device Model</th>
+                          <th className="p-3 font-bold">Vehicle / Equipment No</th>
+                          <th className="p-3 font-bold">Customer / Mining Site</th>
+                          <th className="p-3 font-bold">Contact Phone</th>
+                          <th className="p-3 font-bold">Location / Stock Place</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {dailyMatrix.todayTgMiningDevices.map((item, idx) => (
+                          <tr key={item.id || idx} className="hover:bg-amber-50/40 transition-colors">
+                            <td className="p-3 text-center font-mono text-slate-400">{idx + 1}</td>
+                            <td className="p-3 font-mono font-bold text-amber-800">{item.tg_mining_date}</td>
+                            <td className="p-3 font-mono font-bold text-blue-700">{item.imei_number}</td>
+                            <td className="p-3 text-slate-800 font-semibold">{item.device_name}</td>
+                            <td className="p-3 font-mono font-bold text-slate-900">{item.vehicle_number}</td>
+                            <td className="p-3 text-slate-900 font-medium">{item.customer_name}</td>
+                            <td className="p-3 font-mono font-medium text-amber-800">
+                              {item.customer_phone && item.customer_phone !== '-' ? item.customer_phone : '-'}
+                            </td>
+                            <td className="p-3 font-mono text-slate-600">{item.location || '-'}</td>
                           </tr>
                         ))}
                       </tbody>

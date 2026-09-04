@@ -2652,13 +2652,19 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
                       key={cat.id}
                       type="button"
                       onClick={() => {
+                        const today = new Date().toISOString().split('T')[0];
+                        const newAttrs = {
+                          ...rowFormData.additional_attributes,
+                          'CATEGORY': cat.id,
+                          'DEVICE CATEGORY': cat.id
+                        };
+                        if (cat.id === 'TG MINING') {
+                          if (!newAttrs['TG MINING DATE']) newAttrs['TG MINING DATE'] = today;
+                          if (!newAttrs['INSTALLATION DATE']) newAttrs['INSTALLATION DATE'] = today;
+                        }
                         setRowFormData({
                           ...rowFormData,
-                          additional_attributes: {
-                            ...rowFormData.additional_attributes,
-                            'CATEGORY': cat.id,
-                            'DEVICE CATEGORY': cat.id
-                          }
+                          additional_attributes: newAttrs
                         });
                       }}
                       className={`p-1.5 rounded-lg text-xs font-bold border transition-all text-center cursor-pointer ${
@@ -2680,18 +2686,49 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
                   value={rowFormData.additional_attributes['CATEGORY'] || rowFormData.additional_attributes['DEVICE CATEGORY'] || ''}
                   onChange={(e) => {
                     const val = e.target.value.toUpperCase();
+                    const newAttrs = {
+                      ...rowFormData.additional_attributes,
+                      'CATEGORY': val,
+                      'DEVICE CATEGORY': val
+                    };
+                    if (val.includes('TG MINING') && !newAttrs['TG MINING DATE']) {
+                      newAttrs['TG MINING DATE'] = new Date().toISOString().split('T')[0];
+                    }
                     setRowFormData({
                       ...rowFormData,
-                      additional_attributes: {
-                        ...rowFormData.additional_attributes,
-                        'CATEGORY': val,
-                        'DEVICE CATEGORY': val
-                      }
+                      additional_attributes: newAttrs
                     });
                   }}
                   className="flex-1 bg-white border border-slate-300 rounded-lg p-1.5 text-xs text-slate-900 font-bold uppercase focus:outline-none focus:border-blue-500"
                 />
               </div>
+
+              {/* Dynamic TG MINING Date Selection */}
+              {((rowFormData.additional_attributes['CATEGORY'] || rowFormData.additional_attributes['DEVICE CATEGORY'] || '').toUpperCase().includes('TG MINING') || (rowFormData.additional_attributes['CATEGORY'] || rowFormData.additional_attributes['DEVICE CATEGORY'] || '').toUpperCase() === 'TG MINING') && (
+                <div className="flex items-center justify-between gap-2 p-2 bg-amber-100/90 border border-amber-300 rounded-lg shadow-xs">
+                  <div className="flex items-center gap-1.5">
+                    <Calendar className="w-3.5 h-3.5 text-amber-800" />
+                    <span className="text-[11px] font-bold text-amber-950">TG Mining Issue / Activation Date:</span>
+                  </div>
+                  <input
+                    type="date"
+                    value={rowFormData.additional_attributes['TG MINING DATE'] || rowFormData.additional_attributes['INSTALLATION DATE'] || new Date().toISOString().split('T')[0]}
+                    onChange={(e) => {
+                      const dVal = e.target.value;
+                      setRowFormData({
+                        ...rowFormData,
+                        additional_attributes: {
+                          ...rowFormData.additional_attributes,
+                          'TG MINING DATE': dVal,
+                          'INSTALLATION DATE': dVal,
+                          'STOCK PLACE DATE': dVal
+                        }
+                      });
+                    }}
+                    className="bg-white border border-amber-400 rounded-md px-2 py-0.5 text-xs font-bold text-slate-800 shadow-xs focus:outline-none focus:ring-1 focus:ring-amber-500"
+                  />
+                </div>
+              )}
             </div>
 
             {/* Dynamic Custom Attributes Inputs */}

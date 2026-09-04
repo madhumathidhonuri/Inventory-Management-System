@@ -894,7 +894,57 @@ function extractDeviceCertificateDate(dev = {}, attrs = {}) {
   return null;
 }
 
-// Helper: Compute 100% dynamic Daily Master Inventory Distribution Matrix with Today's Issued Certificates
+// Helper: Check if device belongs to TG MINING category
+function isTgMiningDevice(dev = {}, attrs = {}) {
+  const cat = String(attrs['CATEGORY'] || attrs['DEVICE CATEGORY'] || attrs['PROJECT CATEGORY'] || attrs['PROJECT'] || attrs['Category'] || '').toUpperCase().trim();
+  const typeName = String(dev.device_name || dev.device_type_name || '').toUpperCase().trim();
+  return cat.includes('TG MINING') || cat.includes('TG_MINING') || (cat.includes('MINING') && !cat.includes('AP MINING')) || typeName.includes('TG MINING') || typeName.includes('TG_MINING');
+}
+
+// Helper: Extract normalized YYYY-MM-DD TG Mining date from device & attributes
+function extractTgMiningDate(dev = {}, attrs = {}) {
+  const directKeys = [
+    'TG MINING DATE', 'TG_MINING_DATE', 'Tg Mining Date', 'tg_mining_date',
+    'MINING DATE', 'Mining Date', 'mining_date',
+    'ACTIVATION DATE', 'Activation Date', 'activation_date',
+    'ISSUE DATE', 'Issue Date', 'issue_date',
+    'INSTALLATION DATE', 'Installation Date', 'installation_date',
+    'DATE', 'Date', 'date',
+    'STOCK PLACE DATE', 'Stock Place Date'
+  ];
+
+  for (const k of directKeys) {
+    if (attrs[k] !== undefined && attrs[k] !== null && String(attrs[k]).trim() !== '') {
+      const val = attrs[k];
+      if (typeof val === 'number' || /^\d{5}$/.test(String(val).trim())) {
+        const num = Number(val);
+        if (num > 30000 && num < 60000) {
+          const d = new Date(Math.round((num - 25569) * 86400 * 1000));
+          if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
+        }
+      }
+
+      const str = String(val).trim();
+      const dmy = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+      if (dmy) return `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
+      const ymd = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+      if (ymd) return `${ymd[1]}-${ymd[2].padStart(2, '0')}-${ymd[3].padStart(2, '0')}`;
+
+      const parsed = new Date(str);
+      if (!isNaN(parsed.getTime()) && parsed.getFullYear() > 2020 && parsed.getFullYear() < 2100) {
+        return parsed.toISOString().split('T')[0];
+      }
+    }
+  }
+
+  if (dev.updated_at && (dev.current_status === 'INSTALLED' || dev.current_status === 'WITH_DEALER')) {
+    return dev.updated_at.split('T')[0].split(' ')[0];
+  }
+
+  return null;
+}
+
+// Helper: Compute 100% dynamic Daily Master Inventory Distribution Matrix with Today's Issued Certificates & TG Mining Devices
 function computeDailyDistributionMatrix(requestedDate = null) {
   const targetDate = requestedDate || new Date().toISOString().split('T')[0];
 
@@ -921,6 +971,7 @@ function computeDailyDistributionMatrix(requestedDate = null) {
   const locationsSet = new Set();
   const matrix = {};
   const todayIssuedDevices = [];
+  const todayTgMiningDevices = [];
 
   deviceTypes.forEach(dt => {
     matrix[dt.name] = {
@@ -928,6 +979,7 @@ function computeDailyDistributionMatrix(requestedDate = null) {
       device_name: dt.name,
       locations: {},
       certificates_issued_today: 0,
+      tg_mining_issued_today: 0,
       total_installed: 0,
       total_certificates_issued: 0,
       in_stock_total: 0,
@@ -946,6 +998,7 @@ function computeDailyDistributionMatrix(requestedDate = null) {
         device_name: devName,
         locations: {},
         certificates_issued_today: 0,
+        tg_mining_issued_today: 0,
         total_installed: 0,
         total_certificates_issued: 0,
         in_stock_total: 0,
@@ -953,29 +1006,50 @@ function computeDailyDistributionMatrix(requestedDate = null) {
       };
     }
 
-    const vehNo = String(attrs['VEHICLE NUMBER'] || attrs['VEHICLE NO'] || attrs['vehicle_number'] || attrs['vehicle_no'] || '').trim();
+    const vehNo = String(attrs['VEHICLE NUMBER'] || attrs['VEHICLE NO'] || attrs['vehicle_number'] || attrs['vehicle_no'] || attrs['MACHINERY NUMBER'] || attrs['EQUIPMENT NUMBER'] || '').trim();
     const hasVehicle = Boolean(vehNo && vehNo !== '-' && vehNo !== '—' && vehNo !== 'NULL');
     const isInstalled = dev.current_status === 'INSTALLED' || hasVehicle;
+    const isMining = isTgMiningDevice(dev, attrs);
+
     const certDate = extractDeviceCertificateDate(dev, attrs);
+    const tgMiningDate = extractTgMiningDate(dev, attrs);
 
-    const isIssuedToday = Boolean(certDate && certDate === targetDate);
+    const phone = attrs['CUSTOMER PHONE NUMBER'] || attrs['CUSTOMER PHONE'] || attrs['CUSTOMER CONTACT'] ||
+      attrs['Customer Phone Number'] || attrs['Customer Phone'] || attrs['Customer Contact'] ||
+      attrs['MOBILE'] || attrs['MOBILE NUMBER'] || attrs['PHONE'] || attrs['PHONE NUMBER'] ||
+      attrs['customer_phone'] || attrs['customer_phone_number'] || attrs['customer_contact'] ||
+      attrs['phone_number'] || attrs['phone'] || attrs['mobile'] || '-';
 
-    if (isIssuedToday) {
+    const custName = attrs['CUSTOMER NAME'] || attrs['CERTIFICATE ISSUED TO'] || attrs['CUSTOMER'] ||
+      attrs['Customer Name'] || attrs['customer_name'] || attrs['MINING SITE'] || attrs['SITE NAME'] || '-';
+
+    const chasis = attrs['CHASIS NUMBER'] || attrs['CHASSIS NUMBER'] || attrs['CHASIS NO'] ||
+      attrs['CHASSIS NO'] || attrs['chasis_number'] || attrs['chassis_number'] || '-';
+
+    const engine = attrs['ENGINE NUMBER'] || attrs['ENGINE NO'] || attrs['engine_number'] || '-';
+
+    const locName = attrs['RTO LOCATION'] || attrs['RTO Location'] || attrs['rto_location'] || attrs['STOCK PLACE'] || attrs['LOCATION'] || dev.current_holder_name || '';
+
+    // TG MINING device issued today
+    if (isMining && tgMiningDate && tgMiningDate === targetDate) {
+      matrix[devName].tg_mining_issued_today++;
+      todayTgMiningDevices.push({
+        id: dev.id,
+        imei_number: dev.imei_number,
+        device_name: devName,
+        vehicle_number: vehNo || '-',
+        customer_name: custName,
+        customer_phone: phone,
+        tg_mining_date: tgMiningDate,
+        chasis_number: chasis,
+        engine_number: engine,
+        location: locName
+      });
+    }
+
+    // VLTD certificate issued today (non-mining or explicit cert)
+    if (!isMining && certDate && certDate === targetDate) {
       matrix[devName].certificates_issued_today++;
-      const phone = attrs['CUSTOMER PHONE NUMBER'] || attrs['CUSTOMER PHONE'] || attrs['CUSTOMER CONTACT'] ||
-        attrs['Customer Phone Number'] || attrs['Customer Phone'] || attrs['Customer Contact'] ||
-        attrs['MOBILE'] || attrs['MOBILE NUMBER'] || attrs['PHONE'] || attrs['PHONE NUMBER'] ||
-        attrs['customer_phone'] || attrs['customer_phone_number'] || attrs['customer_contact'] ||
-        attrs['phone_number'] || attrs['phone'] || attrs['mobile'] || '-';
-
-      const custName = attrs['CUSTOMER NAME'] || attrs['CERTIFICATE ISSUED TO'] || attrs['CUSTOMER'] ||
-        attrs['Customer Name'] || attrs['customer_name'] || '-';
-
-      const chasis = attrs['CHASIS NUMBER'] || attrs['CHASSIS NUMBER'] || attrs['CHASIS NO'] ||
-        attrs['CHASSIS NO'] || attrs['chasis_number'] || attrs['chassis_number'] || '-';
-
-      const engine = attrs['ENGINE NUMBER'] || attrs['ENGINE NO'] || attrs['engine_number'] || '-';
-
       todayIssuedDevices.push({
         id: dev.id,
         imei_number: dev.imei_number,
@@ -986,7 +1060,7 @@ function computeDailyDistributionMatrix(requestedDate = null) {
         certificate_issued_date: certDate,
         chasis_number: chasis,
         engine_number: engine,
-        rto_location: attrs['RTO LOCATION'] || attrs['RTO Location'] || attrs['rto_location'] || attrs['STOCK PLACE'] || attrs['LOCATION'] || ''
+        rto_location: locName
       });
     }
 
@@ -1048,6 +1122,7 @@ function computeDailyDistributionMatrix(requestedDate = null) {
   const columnTotals = {
     locations: {},
     certificates_issued_today: 0,
+    tg_mining_issued_today: 0,
     total_installed: 0,
     total_certificates_issued: 0,
     in_stock_total: 0,
@@ -1062,7 +1137,8 @@ function computeDailyDistributionMatrix(requestedDate = null) {
   });
 
   Object.values(matrix).forEach(m => {
-    columnTotals.certificates_issued_today += m.certificates_issued_today;
+    columnTotals.certificates_issued_today += (m.certificates_issued_today || 0);
+    columnTotals.tg_mining_issued_today += (m.tg_mining_issued_today || 0);
     columnTotals.total_installed += (m.total_installed || 0);
     columnTotals.total_certificates_issued += m.total_certificates_issued;
     columnTotals.in_stock_total += m.in_stock_total;
@@ -1077,7 +1153,9 @@ function computeDailyDistributionMatrix(requestedDate = null) {
     rows: Object.values(matrix),
     columnTotals,
     todayIssuedDevices,
+    todayTgMiningDevices,
     todayIssuedCount: todayIssuedDevices.length,
+    todayTgMiningCount: todayTgMiningDevices.length,
     targetDate,
     generatedAt: dateStr
   };
@@ -1094,34 +1172,82 @@ router.get('/daily-distribution', (req, res) => {
   }
 });
 
-// GET /api/reports/export-daily-distribution - Excel export with Certificates Issued Today Sheet
+// GET /api/reports/export-daily-distribution - Excel export (SINGLE SHEET with Stock Matrix + VLTD Certs + TG Mining)
 router.get('/export-daily-distribution', async (req, res) => {
   try {
     const { date } = req.query;
     const matrixData = computeDailyDistributionMatrix(date);
-    const { locations, rows, columnTotals, todayIssuedDevices, targetDate, generatedAt } = matrixData;
+    const { locations, rows, columnTotals, todayIssuedDevices, todayTgMiningDevices, targetDate, generatedAt } = matrixData;
 
     const wb = new ExcelJS.Workbook();
     wb.creator = 'FuelTracks Technologies IMS';
     wb.lastModifiedBy = 'Super Admin';
     wb.created = new Date();
 
-    // -------------------------------------------------------------
-    // SHEET 1: Daily Inventory Distribution Matrix
-    // -------------------------------------------------------------
-    const ws = wb.addWorksheet('Daily Stock Matrix', {
+    // -------------------------------------------------------------------------
+    // SINGLE UNIFIED SHEET: Stock Matrix + VLTD Certificates + TG Mining
+    // -------------------------------------------------------------------------
+    const ws = wb.addWorksheet('Daily Master Report', {
       views: [{ showGridLines: true }]
     });
 
-    const headers = [
+    const totalColumns = Math.max(locations.length + 6, 9);
+
+    // Main Super Header
+    const titleRow = ws.addRow(['FUELTRACKS TECHNOLOGIES — DAILY MASTER STOCK & DEPLOYMENT REPORT']);
+    titleRow.height = 32;
+    ws.mergeCells(1, 1, 1, totalColumns);
+    const titleCell = ws.getCell(1, 1);
+    titleCell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF1E293B' } // Slate 800 Dark
+    };
+    titleCell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 14, name: 'Calibri' };
+    titleCell.alignment = { vertical: 'middle', horizontal: 'center' };
+
+    // Subtitle Row
+    const subRow = ws.addRow([`Report Date: ${targetDate}    |    Generated On: ${generatedAt}    |    VLTD Issued Today: ${todayIssuedDevices.length}    |    TG Mining Issued Today: ${todayTgMiningDevices.length}`]);
+    subRow.height = 22;
+    ws.mergeCells(2, 1, 2, totalColumns);
+    const subCell = ws.getCell(2, 1);
+    subCell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF334155' } // Slate 700
+    };
+    subCell.font = { bold: true, color: { argb: 'FFE2E8F0' }, size: 9, name: 'Calibri' };
+    subCell.alignment = { vertical: 'middle', horizontal: 'center' };
+
+    // Blank Gap Row
+    ws.addRow([]);
+
+    // =========================================================================
+    // SECTION 1: DAILY INVENTORY DISTRIBUTION MATRIX
+    // =========================================================================
+    const sec1Row = ws.addRow(['1. DAILY INVENTORY DISTRIBUTION MATRIX (LOCATION STOCK & DAILY MOVEMENTS)']);
+    sec1Row.height = 24;
+    const sec1RowIndex = sec1Row.number;
+    ws.mergeCells(sec1RowIndex, 1, sec1RowIndex, locations.length + 6);
+    const sec1Cell = ws.getCell(sec1RowIndex, 1);
+    sec1Cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF1E3A8A' } // Deep Blue Banner
+    };
+    sec1Cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11, name: 'Calibri' };
+    sec1Cell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+
+    const matrixHeaders = [
       'DEVICE',
       ...locations,
-      'CERTIFICATES ISSUED TODAY',
+      'VLTD CERTS TODAY',
+      'TG MINING TODAY',
       'INSTALLED',
-      'TOTAL',
+      'TOTAL STOCK',
       'PURCHASED'
     ];
-    const headerRow = ws.addRow(headers);
+    const headerRow = ws.addRow(matrixHeaders);
     headerRow.height = 28;
 
     headerRow.eachCell((cell) => {
@@ -1130,7 +1256,7 @@ router.get('/export-daily-distribution', async (req, res) => {
         pattern: 'solid',
         fgColor: { argb: 'FF366092' } // Steel Blue Header
       };
-      cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 10, name: 'Calibri' };
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 9.5, name: 'Calibri' };
       cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
       cell.border = {
         top: { style: 'thin', color: { argb: 'FFB0C4DE' } },
@@ -1145,15 +1271,16 @@ router.get('/export-daily-distribution', async (req, res) => {
         r.device_name,
         ...locations.map(loc => r.locations[loc] || ''),
         r.certificates_issued_today || 0,
+        r.tg_mining_issued_today || 0,
         r.total_installed || 0,
         r.in_stock_total || 0,
         r.purchased_total || 0
       ];
       const dataRow = ws.addRow(rowValues);
-      dataRow.height = 24;
+      dataRow.height = 22;
 
       dataRow.eachCell((cell, colNumber) => {
-        cell.font = { size: 10, name: 'Calibri' };
+        cell.font = { size: 9.5, name: 'Calibri' };
         cell.alignment = { vertical: 'middle', horizontal: colNumber === 1 ? 'left' : 'center' };
         cell.border = {
           top: { style: 'thin', color: { argb: 'FFE0E0E0' } },
@@ -1163,13 +1290,16 @@ router.get('/export-daily-distribution', async (req, res) => {
         };
 
         if (colNumber === 1) {
-          cell.font = { bold: true, name: 'Calibri', size: 10, color: { argb: 'FF1A202C' } };
+          cell.font = { bold: true, name: 'Calibri', size: 9.5, color: { argb: 'FF1A202C' } };
         } else if (colNumber === locations.length + 2) {
-          // CERTIFICATES ISSUED TODAY column
+          // VLTD CERTS TODAY column
           cell.font = { bold: true, color: { argb: 'FF0D5C3A' }, name: 'Calibri' };
         } else if (colNumber === locations.length + 3) {
+          // TG MINING TODAY column
+          cell.font = { bold: true, color: { argb: 'FFB45309' }, name: 'Calibri' }; // Warm Amber
+        } else if (colNumber === locations.length + 4) {
           // INSTALLED column
-          cell.font = { bold: true, name: 'Calibri', size: 10 };
+          cell.font = { bold: true, name: 'Calibri', size: 9.5 };
         }
       });
     });
@@ -1179,12 +1309,13 @@ router.get('/export-daily-distribution', async (req, res) => {
       'TOTAL',
       ...locations.map(loc => `TOTAL = ${columnTotals.locations[loc] || 0}`),
       `TOTAL = ${columnTotals.certificates_issued_today || 0}`,
+      `TOTAL = ${columnTotals.tg_mining_issued_today || 0}`,
       `TOTAL = ${columnTotals.total_installed || 0}`,
       `TOTAL = ${columnTotals.in_stock_total || 0}`,
       `TOTAL = ${columnTotals.purchased_total || 0}`
     ];
     const totalRow = ws.addRow(totalRowValues);
-    totalRow.height = 26;
+    totalRow.height = 25;
 
     totalRow.eachCell((cell) => {
       cell.fill = {
@@ -1202,21 +1333,25 @@ router.get('/export-daily-distribution', async (req, res) => {
       };
     });
 
-    ws.columns = [
-      { width: 22 },
-      ...locations.map(() => ({ width: 16 })),
-      { width: 26 },
-      { width: 18 },
-      { width: 16 },
-      { width: 16 }
-    ];
+    // 2 Blank Rows Gap
+    ws.addRow([]);
+    ws.addRow([]);
 
-    // -------------------------------------------------------------
-    // SHEET 2: Certificates Issued Today Itemized List
-    // -------------------------------------------------------------
-    const wsCert = wb.addWorksheet(`Certificates Issued Today`, {
-      views: [{ showGridLines: true }]
-    });
+    // =========================================================================
+    // SECTION 2: VLTD CERTIFICATES ISSUED TODAY
+    // =========================================================================
+    const sec2Row = ws.addRow([`2. VLTD CERTIFICATES ISSUED TODAY (${todayIssuedDevices.length} Devices Issued on ${targetDate})`]);
+    sec2Row.height = 24;
+    const sec2RowIndex = sec2Row.number;
+    ws.mergeCells(sec2RowIndex, 1, sec2RowIndex, 9);
+    const sec2Cell = ws.getCell(sec2RowIndex, 1);
+    sec2Cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF0D5C3A' } // Deep Emerald Green Banner
+    };
+    sec2Cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11, name: 'Calibri' };
+    sec2Cell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
 
     const certHeaders = [
       'Sl No',
@@ -1229,32 +1364,35 @@ router.get('/export-daily-distribution', async (req, res) => {
       'Chassis Number',
       'Engine Number'
     ];
-
-    const certHeaderRow = wsCert.addRow(certHeaders);
-    certHeaderRow.height = 28;
+    const certHeaderRow = ws.addRow(certHeaders);
+    certHeaderRow.height = 26;
 
     certHeaderRow.eachCell((cell) => {
       cell.fill = {
         type: 'pattern',
         pattern: 'solid',
-        fgColor: { argb: 'FF0D5C3A' } // Deep Emerald Header
+        fgColor: { argb: 'FF15803D' } // Emerald Header
       };
-      cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 10, name: 'Calibri' };
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 9.5, name: 'Calibri' };
       cell.alignment = { vertical: 'middle', horizontal: 'center' };
       cell.border = {
-        top: { style: 'thin', color: { argb: 'FF81C995' } },
-        left: { style: 'thin', color: { argb: 'FF81C995' } },
-        bottom: { style: 'medium', color: { argb: 'FF083D26' } },
-        right: { style: 'thin', color: { argb: 'FF81C995' } }
+        top: { style: 'thin', color: { argb: 'FF86EFAC' } },
+        left: { style: 'thin', color: { argb: 'FF86EFAC' } },
+        bottom: { style: 'medium', color: { argb: 'FF14532D' } },
+        right: { style: 'thin', color: { argb: 'FF86EFAC' } }
       };
     });
 
     if (todayIssuedDevices.length === 0) {
-      const emptyRow = wsCert.addRow(['-', targetDate, 'No certificates issued on this date', '-', '-', '-', '-', '-', '-']);
-      emptyRow.height = 24;
+      const emptyRow = ws.addRow(['-', targetDate, 'No VLTD certificates issued on this date', '-', '-', '-', '-', '-', '-']);
+      emptyRow.height = 22;
+      emptyRow.eachCell((cell) => {
+        cell.font = { italic: true, size: 9.5, color: { argb: 'FF64748B' } };
+        cell.alignment = { vertical: 'middle', horizontal: 'center' };
+      });
     } else {
       todayIssuedDevices.forEach((item, idx) => {
-        const r = wsCert.addRow([
+        const r = ws.addRow([
           idx + 1,
           item.certificate_issued_date || targetDate,
           item.imei_number,
@@ -1265,9 +1403,9 @@ router.get('/export-daily-distribution', async (req, res) => {
           item.chasis_number,
           item.engine_number
         ]);
-        r.height = 22;
+        r.height = 21;
         r.eachCell((cell, colNumber) => {
-          cell.font = { size: 10, name: 'Calibri' };
+          cell.font = { size: 9.5, name: 'Calibri' };
           cell.alignment = { vertical: 'middle', horizontal: colNumber === 1 ? 'center' : 'left' };
           cell.border = {
             top: { style: 'thin', color: { argb: 'FFE0E0E0' } },
@@ -1276,25 +1414,112 @@ router.get('/export-daily-distribution', async (req, res) => {
             right: { style: 'thin', color: { argb: 'FFE0E0E0' } }
           };
           if (colNumber === 3 || colNumber === 5) {
-            cell.font = { bold: true, name: 'Calibri', size: 10 };
+            cell.font = { bold: true, name: 'Calibri', size: 9.5 };
           }
         });
       });
     }
 
-    wsCert.columns = [
+    // 2 Blank Rows Gap
+    ws.addRow([]);
+    ws.addRow([]);
+
+    // =========================================================================
+    // SECTION 3: TG MINING DEVICES ISSUED TODAY
+    // =========================================================================
+    const sec3Row = ws.addRow([`3. TG MINING DEVICES ISSUED / ACTIVATED TODAY (${todayTgMiningDevices.length} Devices Issued on ${targetDate})`]);
+    sec3Row.height = 24;
+    const sec3RowIndex = sec3Row.number;
+    ws.mergeCells(sec3RowIndex, 1, sec3RowIndex, 8);
+    const sec3Cell = ws.getCell(sec3RowIndex, 1);
+    sec3Cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFB45309' } // Warm Amber / Bronze Banner
+    };
+    sec3Cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11, name: 'Calibri' };
+    sec3Cell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+
+    const tgMiningHeaders = [
+      'Sl No',
+      'TG Mining Issue Date',
+      'IMEI Number',
+      'Device Model',
+      'Vehicle / Equipment No',
+      'Customer / Mining Site',
+      'Customer Contact',
+      'Stock Place / Location'
+    ];
+    const tgMiningHeaderRow = ws.addRow(tgMiningHeaders);
+    tgMiningHeaderRow.height = 26;
+
+    tgMiningHeaderRow.eachCell((cell) => {
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFD97706' } // Amber 600 Header
+      };
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 9.5, name: 'Calibri' };
+      cell.alignment = { vertical: 'middle', horizontal: 'center' };
+      cell.border = {
+        top: { style: 'thin', color: { argb: 'FFFDE68A' } },
+        left: { style: 'thin', color: { argb: 'FFFDE68A' } },
+        bottom: { style: 'medium', color: { argb: 'FF92400E' } },
+        right: { style: 'thin', color: { argb: 'FFFDE68A' } }
+      };
+    });
+
+    if (todayTgMiningDevices.length === 0) {
+      const emptyRow = ws.addRow(['-', targetDate, 'No TG Mining devices issued on this date', '-', '-', '-', '-', '-']);
+      emptyRow.height = 22;
+      emptyRow.eachCell((cell) => {
+        cell.font = { italic: true, size: 9.5, color: { argb: 'FF64748B' } };
+        cell.alignment = { vertical: 'middle', horizontal: 'center' };
+      });
+    } else {
+      todayTgMiningDevices.forEach((item, idx) => {
+        const r = ws.addRow([
+          idx + 1,
+          item.tg_mining_date || targetDate,
+          item.imei_number,
+          item.device_name,
+          item.vehicle_number,
+          item.customer_name,
+          item.customer_phone,
+          item.location || '-'
+        ]);
+        r.height = 21;
+        r.eachCell((cell, colNumber) => {
+          cell.font = { size: 9.5, name: 'Calibri' };
+          cell.alignment = { vertical: 'middle', horizontal: colNumber === 1 ? 'center' : 'left' };
+          cell.border = {
+            top: { style: 'thin', color: { argb: 'FFE0E0E0' } },
+            left: { style: 'thin', color: { argb: 'FFE0E0E0' } },
+            bottom: { style: 'thin', color: { argb: 'FFE0E0E0' } },
+            right: { style: 'thin', color: { argb: 'FFE0E0E0' } }
+          };
+          if (colNumber === 3 || colNumber === 5) {
+            cell.font = { bold: true, name: 'Calibri', size: 9.5 };
+          }
+        });
+      });
+    }
+
+    // Set Column Widths for comfortable readability
+    ws.columns = [
       { width: 8 },
       { width: 22 },
       { width: 22 },
       { width: 20 },
-      { width: 20 },
+      { width: 22 },
       { width: 26 },
-      { width: 18 },
-      { width: 24 },
-      { width: 22 }
+      { width: 20 },
+      { width: 22 },
+      { width: 22 },
+      ...locations.map(() => ({ width: 16 }))
     ];
 
-    const filename = `Daily_Report_Certificates_${targetDate}`;
+    const filename = `Daily_Master_Report_${targetDate}`;
     const buffer = await wb.xlsx.writeBuffer();
 
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');

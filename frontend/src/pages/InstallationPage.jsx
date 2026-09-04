@@ -19,7 +19,8 @@ import {
   QrCode,
   CreditCard,
   Send,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Calendar
 } from 'lucide-react';
 import { recordInstallation, recordBulkInstallations, fetchInstallations, lookupCustomerByPhone, getCustomerDirectoryExportUrl } from '../services/api';
 import { buildCustomerCredentialsWhatsAppMessage, buildPaymentQrWhatsAppMessage, buildPaymentReceivedWhatsAppMessage } from '../utils/whatsapp';
@@ -710,6 +711,22 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
                     />
                   )}
                 </div>
+
+                {/* Inline TG MINING Date Selection */}
+                {(category === 'TG MINING' || (category === 'CUSTOM' && customCategoryInput.includes('MINING'))) && (
+                  <div className="flex items-center justify-between gap-2 p-2.5 bg-amber-100/90 border border-amber-300 rounded-xl mt-2">
+                    <div className="flex items-center gap-1.5">
+                      <Calendar className="w-4 h-4 text-amber-800" />
+                      <span className="text-xs font-bold text-amber-950">TG Mining Issue / Activation Date:</span>
+                    </div>
+                    <input
+                      type="date"
+                      value={installationDate}
+                      onChange={(e) => setInstallationDate(e.target.value)}
+                      className="bg-white border border-amber-400 rounded-lg px-2.5 py-1 text-xs font-bold text-slate-900 shadow-xs focus:outline-none focus:ring-1 focus:ring-amber-500"
+                    />
+                  </div>
+                )}
               </div>
 
               {/* Customer Info Section */}
