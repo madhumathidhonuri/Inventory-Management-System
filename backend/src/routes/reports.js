@@ -1124,6 +1124,13 @@ function computeDailyDistributionMatrix(requestedDate = null) {
     return a.localeCompare(b);
   });
 
+  // Filter out any device types / sheets that have 0 stock, 0 installed, 0 purchased, and 0 activity (e.g. deleted sheets)
+  const validRows = Object.values(matrix).filter(m => 
+    (m.in_stock_total > 0 || m.total_installed > 0 || m.purchased_total > 0 || m.certificates_issued_today > 0 || m.tg_mining_issued_today > 0 || Object.values(m.locations).some(v => v > 0))
+  );
+
+  const finalRows = validRows.length > 0 ? validRows : Object.values(matrix);
+
   // Column totals
   const columnTotals = {
     locations: {},
@@ -1137,12 +1144,12 @@ function computeDailyDistributionMatrix(requestedDate = null) {
 
   allLocations.forEach(loc => {
     columnTotals.locations[loc] = 0;
-    Object.values(matrix).forEach(m => {
+    finalRows.forEach(m => {
       columnTotals.locations[loc] += (m.locations[loc] || 0);
     });
   });
 
-  Object.values(matrix).forEach(m => {
+  finalRows.forEach(m => {
     columnTotals.certificates_issued_today += (m.certificates_issued_today || 0);
     columnTotals.tg_mining_issued_today += (m.tg_mining_issued_today || 0);
     columnTotals.total_installed += (m.total_installed || 0);
@@ -1156,7 +1163,7 @@ function computeDailyDistributionMatrix(requestedDate = null) {
 
   return {
     locations: allLocations,
-    rows: Object.values(matrix),
+    rows: finalRows,
     columnTotals,
     todayIssuedDevices,
     todayTgMiningDevices,
