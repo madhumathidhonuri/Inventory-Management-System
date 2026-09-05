@@ -89,16 +89,11 @@ function getAttrValue(attrs = {}, patterns = []) {
  * Exports complete live inventory dataset (e.g. In-Stock, Installed, Uninstalled, or Device Type List)
  * in the 100% exact column order of the uploaded Excel sheet based on the device.
  */
-export async function exportDevicesToExcel(filename, sheetName, devices = [], customColumns = [], headerColor = '1E3A8A') {
+export async function exportDevicesToExcel(filename, sheetName, devices = [], customColumns = [], headerColor = '1E3A8A', options = {}) {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'FuelTracks IMS';
   workbook.lastModifiedBy = 'Admin';
   workbook.created = new Date();
-
-  const safeSheetName = (sheetName || 'Inventory_Stock').replace(/[^a-zA-Z0-9_\s]/g, '_').substring(0, 30);
-  const worksheet = workbook.addWorksheet(safeSheetName, {
-    views: [{ showGridLines: true }]
-  });
 
   // Determine export columns in exact order
   let exportCols = [];
@@ -224,87 +219,125 @@ export async function exportDevicesToExcel(filename, sheetName, devices = [], cu
     return '';
   };
 
-  // Configure Excel Columns in exact uploaded sequence
-  worksheet.columns = exportCols.map((col, idx) => ({
-    header: String(col).startsWith('__EMPTY') ? '' : col,
-    key: `col_${idx}`,
-    width: colWidths[col]
-  }));
-
-
-  // Style Header Row (Row 1)
-  const headerRow = worksheet.getRow(1);
-  headerRow.height = 28;
-
-  headerRow.eachCell((cell) => {
-    cell.fill = {
-      type: 'pattern',
-      pattern: 'solid',
-      fgColor: { argb: `FF${headerColor.replace('#', '')}` }
-    };
-    cell.font = {
-      name: 'Segoe UI',
-      size: 11,
-      bold: true,
-      color: { argb: 'FFFFFFFF' }
-    };
-    cell.alignment = {
-      vertical: 'middle',
-      horizontal: 'center',
-      wrapText: false
-    };
-    cell.border = {
-      top: { style: 'thin', color: { argb: 'FFD1D5DB' } },
-      left: { style: 'thin', color: { argb: 'FFD1D5DB' } },
-      bottom: { style: 'medium', color: { argb: 'FF0F172A' } },
-      right: { style: 'thin', color: { argb: 'FFD1D5DB' } }
-    };
-  });
-
-  // Populate All Device Records in exact column order
-  devices.forEach((dev, index) => {
-    const rowData = {};
-
-    exportCols.forEach((col, idx) => {
-      const val = extractColumnValue(dev, col);
-      rowData[`col_${idx}`] = val;
-
-      const strLen = String(val).length;
-      if (strLen + 4 > (colWidths[col] || 14)) {
-        colWidths[col] = Math.min(strLen + 4, 45);
-      }
+  // Helper to build and populate a worksheet
+  const populateWorksheet = (title, items, color) => {
+    const cleanTitle = (title || 'Stock').replace(/[:\\/?*[\]]/g, '_').substring(0, 31);
+    const worksheet = workbook.addWorksheet(cleanTitle, {
+      views: [{ showGridLines: true }]
     });
 
-    const row = worksheet.addRow(rowData);
-    row.height = 22;
+    // Calculate dynamic column widths based on headers and data length
+    const colWidths = {};
+    exportCols.forEach(col => {
+      colWidths[col] = Math.max(String(col).length + 4, 14);
+    });
 
-    const isEven = index % 2 === 0;
-    row.eachCell((cell) => {
-      if (!isEven) {
-        cell.fill = {
-          type: 'pattern',
-          pattern: 'solid',
-          fgColor: { argb: 'FFF8FAFC' }
-        };
-      }
-      cell.font = { name: 'Segoe UI', size: 10 };
-      cell.alignment = { vertical: 'middle', horizontal: 'left' };
+    // Configure Excel Columns in exact uploaded sequence
+    worksheet.columns = exportCols.map((col, idx) => ({
+      header: String(col).startsWith('__EMPTY') ? '' : col,
+      key: `col_${idx}`,
+      width: colWidths[col]
+    }));
+
+    // Style Header Row (Row 1)
+    const headerRow = worksheet.getRow(1);
+    headerRow.height = 28;
+
+    headerRow.eachCell((cell) => {
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: `FF${color.replace('#', '')}` }
+      };
+      cell.font = {
+        name: 'Segoe UI',
+        size: 11,
+        bold: true,
+        color: { argb: 'FFFFFFFF' }
+      };
+      cell.alignment = {
+        vertical: 'middle',
+        horizontal: 'center',
+        wrapText: false
+      };
       cell.border = {
-        top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
-        left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
-        bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
-        right: { style: 'thin', color: { argb: 'FFE2E8F0' } }
+        top: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+        left: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+        bottom: { style: 'medium', color: { argb: 'FF0F172A' } },
+        right: { style: 'thin', color: { argb: 'FFD1D5DB' } }
       };
     });
-  });
 
-  // Update column widths with evaluated max content lengths
-  worksheet.columns.forEach((col, idx) => {
-    const headerName = exportCols[idx];
-    if (headerName && colWidths[headerName]) {
-      col.width = Math.max(colWidths[headerName], 14);
+    // Populate All Device Records in exact column order
+    items.forEach((dev, index) => {
+      const rowData = {};
+
+      exportCols.forEach((col, idx) => {
+        const val = extractColumnValue(dev, col);
+        rowData[`col_${idx}`] = val;
+
+        const strLen = String(val).length;
+        if (strLen + 4 > (colWidths[col] || 14)) {
+          colWidths[col] = Math.min(strLen + 4, 45);
+        }
+      });
+
+      const row = worksheet.addRow(rowData);
+      row.height = 22;
+
+      const isEven = index % 2 === 0;
+      row.eachCell((cell) => {
+        if (!isEven) {
+          cell.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: 'FFF8FAFC' }
+          };
+        }
+        cell.font = { name: 'Segoe UI', size: 10 };
+        cell.alignment = { vertical: 'middle', horizontal: 'left' };
+        cell.border = {
+          top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          right: { style: 'thin', color: { argb: 'FFE2E8F0' } }
+        };
+      });
+    });
+
+    // Update column widths with evaluated max content lengths
+    worksheet.columns.forEach((col, idx) => {
+      const headerName = exportCols[idx];
+      if (headerName && colWidths[headerName]) {
+        col.width = Math.max(colWidths[headerName], 14);
+      }
+    });
+
+    return worksheet;
+  };
+
+  // 1. Populate Sheet 1: All Stock / Master Devices
+  const baseName = (sheetName || 'Inventory_Stock').replace(/[^a-zA-Z0-9_\s-]/g, '_').trim();
+  const sheet1Title = options.sheet1Name || (options.newDevices && options.newDevices.length > 0 ? `${baseName} - All Stock` : baseName);
+  populateWorksheet(sheet1Title, devices, headerColor);
+
+  // 2. Populate Sheet 2: New Devices / Latest Batch (if available or specified)
+  let newDevicesList = options.newDevices;
+  if (!newDevicesList && devices.length > 0) {
+    const batchIds = devices.map(d => d.purchase_batch_id).filter(Boolean);
+    if (batchIds.length > 0) {
+      const maxBatchId = Math.max(...batchIds);
+      const candidates = devices.filter(d => d.purchase_batch_id === maxBatchId);
+      if (candidates.length > 0 && candidates.length < devices.length) {
+        newDevicesList = candidates;
+      }
     }
-  });
+  }
+
+  if (newDevicesList && Array.isArray(newDevicesList) && newDevicesList.length > 0) {
+    const sheet2Title = options.sheet2Name || `${baseName} - New Devices`;
+    populateWorksheet(sheet2Title, newDevicesList, '047857'); // Emerald Green header for New Devices
+  }
 
   // Write and trigger download
   const buffer = await workbook.xlsx.writeBuffer();

@@ -1188,12 +1188,47 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
       exportColumns = ['Device IMEI', 'Device Type', ...displayedColumns];
     }
 
+    // Determine Master Stock (Sheet 1) and New Devices (Sheet 2)
+    let masterStock = filteredDevices;
+    let newDevices = [];
+
+    if (batchFilter) {
+      // If user filtered by a specific upload list / batch, find all devices belonging to that device type for Sheet 1
+      const selectedBatch = batches.find(b => b.id.toString() === batchFilter.toString());
+      if (selectedBatch && selectedBatch.device_type_id) {
+        const allTypeDevices = devices.filter(d => String(d.device_type_id) === String(selectedBatch.device_type_id));
+        if (allTypeDevices.length > filteredDevices.length) {
+          masterStock = allTypeDevices;
+          newDevices = filteredDevices;
+        } else {
+          newDevices = filteredDevices;
+        }
+      } else {
+        newDevices = filteredDevices;
+      }
+    } else {
+      // Discover devices from the latest / newest upload batch
+      const batchIds = filteredDevices.map(d => d.purchase_batch_id).filter(Boolean);
+      if (batchIds.length > 0) {
+        const maxBatchId = Math.max(...batchIds);
+        const latestBatchItems = filteredDevices.filter(d => d.purchase_batch_id === maxBatchId);
+        if (latestBatchItems.length > 0) {
+          newDevices = latestBatchItems;
+        }
+      }
+    }
+
     await exportDevicesToExcel(
       fileName,
       activeTypeName,
-      filteredDevices,
+      masterStock,
       exportColumns,
-      '1E3A8A' // Royal Navy Blue Header
+      '1E3A8A', // Royal Navy Blue Header
+      {
+        newDevices: newDevices.length > 0 ? newDevices : null,
+        sheet1Name: `${activeTypeName.slice(0, 16)} - All Stock`,
+        sheet2Name: `${activeTypeName.slice(0, 16)} - New Devices`
+      }
     );
   };
 

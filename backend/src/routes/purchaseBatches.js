@@ -197,9 +197,34 @@ router.post('/confirm', (req, res) => {
         }
       }
 
-      // Preserve exact uploaded Excel columns in their exact sequence
+      // Fetch existing registered columns of the target device type
+      const currentType = db.prepare('SELECT template_columns, custom_fields FROM device_types WHERE id = ?').get(targetDeviceTypeId);
+      let existingCols = [];
+      if (currentType) {
+        try {
+          const parsed = JSON.parse(currentType.template_columns || currentType.custom_fields || '[]');
+          existingCols = Array.isArray(parsed) ? parsed : Object.keys(parsed);
+        } catch {
+          existingCols = [];
+        }
+      }
+
+      // Preserve existing template columns and merge any new columns from upload
       let orderedHeaders = [];
       const seen = new Set();
+
+      // Seed with existing device type template columns to keep all master operational fields intact
+      if (existingCols.length > 0) {
+        existingCols.forEach(h => {
+          const trimmed = String(h || '').trim();
+          if (trimmed && !seen.has(trimmed)) {
+            seen.add(trimmed);
+            orderedHeaders.push(trimmed);
+          }
+        });
+      }
+
+      // Append any new uploaded Excel columns in their exact sequence
       if (Array.isArray(headers) && headers.length > 0) {
         headers.forEach(h => {
           const trimmed = String(h || '').trim();
@@ -221,7 +246,7 @@ router.post('/confirm', (req, res) => {
         }
       }
 
-      // Update device_types custom_fields and template_columns with exact ordered column list
+      // Update device_types custom_fields and template_columns with merged complete column list
       db.prepare('UPDATE device_types SET custom_fields = ?, template_columns = ? WHERE id = ?').run(
         JSON.stringify(orderedHeaders),
         JSON.stringify(orderedHeaders),
