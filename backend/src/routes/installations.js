@@ -405,10 +405,21 @@ router.post('/bulk', (req, res) => {
   });
 });
 
-// GET /api/installations - List installations
+// Helper: Extract clean Category from installation record
+function extractInstCategory(inst) {
+  let devAttrs = {};
+  try {
+    devAttrs = typeof inst.device_additional_attributes === 'string'
+      ? JSON.parse(inst.device_additional_attributes || '{}')
+      : (inst.device_additional_attributes || {});
+  } catch {}
+  return (devAttrs['CATEGORY'] || devAttrs['DEVICE CATEGORY'] || inst.vehicle_type || 'VLTD').toString().toUpperCase().trim();
+}
+
+// GET /api/installations - List installations with category filtering & category counts breakdown
 router.get('/', (req, res) => {
   try {
-    const { search, installer, customer_id, date_from, date_to } = req.query;
+    const { search, installer, customer_id, date_from, date_to, category } = req.query;
     let query = `
       SELECT i.*, d.sim_number, d.additional_attributes as device_additional_attributes, dt.name as device_type_name
       FROM installations i
@@ -446,8 +457,230 @@ router.get('/', (req, res) => {
 
     query += ` ORDER BY i.installation_date DESC, i.id DESC`;
 
-    const list = db.prepare(query).all(...params);
-    res.json({ success: true, count: list.length, data: list });
+    const allList = db.prepare(query).all(...params);
+
+    // Compute category counts breakdown
+    const counts = {
+      all: allList.length,
+      tg_mining: 0,
+      ap_mining: 0,
+      vltd: 0,
+      general: 0,
+      by_category: {}
+    };
+
+    allList.forEach(inst => {
+      const cat = extractInstCategory(inst);
+      counts.by_category[cat] = (counts.by_category[cat] || 0) + 1;
+      if (cat.includes('TG MINING') || (cat.includes('TG') && cat.includes('MINING'))) {
+        counts.tg_mining++;
+      } else if (cat.includes('AP MINING') || (cat.includes('AP') && cat.includes('MINING'))) {
+        counts.ap_mining++;
+      } else if (cat.includes('VLTD')) {
+        counts.vltd++;
+      } else if (cat.includes('GENERAL')) {
+        counts.general++;
+      }
+    });
+
+    let filteredList = allList;
+    if (category && category !== 'ALL') {
+      const catUpper = category.toUpperCase().trim();
+      filteredList = allList.filter(inst => {
+        const cat = extractInstCategory(inst);
+        return cat.includes(catUpper) || catUpper.includes(cat);
+      });
+    }
+
+    res.json({
+      success: true,
+      count: filteredList.length,
+      total_count: allList.length,
+      counts,
+      data: filteredList
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/installations/export - Server-side Excel export with category filtering
+router.get('/export', async (req, res) => {
+  try {
+    const ExcelJS = require('exceljs');
+    const { category, search, installer, customer_id, date_from, date_to } = req.query;
+
+    let query = `
+      SELECT i.*, d.sim_number, d.additional_attributes as device_additional_attributes, dt.name as device_type_name
+      FROM installations i
+      JOIN devices d ON i.device_id = d.id
+      JOIN device_types dt ON d.device_type_id = dt.id
+      WHERE 1=1
+    `;
+
+    const params = [];
+
+    if (search) {
+      query += ` AND (i.customer_name LIKE ? OR i.customer_contact LIKE ? OR i.vehicle_number LIKE ? OR i.imei_number LIKE ?)`;
+      params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
+    }
+
+    if (installer) {
+      query += ` AND i.installed_by = ?`;
+      params.push(installer);
+    }
+
+    if (customer_id) {
+      query += ` AND i.customer_id = ?`;
+      params.push(customer_id);
+    }
+
+    if (date_from) {
+      query += ` AND i.installation_date >= ?`;
+      params.push(date_from);
+    }
+
+    if (date_to) {
+      query += ` AND i.installation_date <= ?`;
+      params.push(date_to);
+    }
+
+    query += ` ORDER BY i.installation_date DESC, i.id DESC`;
+
+    let list = db.prepare(query).all(...params);
+
+    const safeCategory = (category || 'ALL').toUpperCase().trim();
+    if (safeCategory !== 'ALL') {
+      list = list.filter(inst => {
+        const cat = extractInstCategory(inst);
+        return cat.includes(safeCategory) || safeCategory.includes(cat);
+      });
+    }
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'FuelTracks IMS';
+    workbook.created = new Date();
+
+    const sheetName = (safeCategory === 'ALL' ? 'All Installations' : `${safeCategory} Installs`).substring(0, 31);
+    const worksheet = workbook.addWorksheet(sheetName, { views: [{ showGridLines: true }] });
+
+    let themeColor = '1E293B';
+    if (safeCategory.includes('TG MINING')) themeColor = 'B45309';
+    else if (safeCategory.includes('AP MINING')) themeColor = '7E22CE';
+    else if (safeCategory.includes('VLTD')) themeColor = '1D4ED8';
+    else if (safeCategory.includes('GENERAL')) themeColor = '047857';
+
+    worksheet.columns = [
+      { key: 'sl_no', width: 8 },
+      { key: 'installation_date', width: 16 },
+      { key: 'category', width: 16 },
+      { key: 'vehicle_number', width: 18 },
+      { key: 'vehicle_type', width: 18 },
+      { key: 'imei_number', width: 20 },
+      { key: 'sim_number', width: 18 },
+      { key: 'customer_name', width: 24 },
+      { key: 'customer_contact', width: 16 },
+      { key: 'software_user_id', width: 20 },
+      { key: 'software_password', width: 16 },
+      { key: 'installed_by', width: 18 },
+      { key: 'installation_location', width: 20 },
+      { key: 'sale_price', width: 14 },
+      { key: 'payment_status', width: 16 },
+      { key: 'remarks', width: 26 }
+    ];
+
+    // Banner
+    worksheet.mergeCells('A1:P1');
+    const titleCell = worksheet.getCell('A1');
+    titleCell.value = safeCategory === 'ALL'
+      ? 'FUELTRACKS TECHNOLOGIES — MASTER VEHICLE INSTALLATIONS REPORT'
+      : `FUELTRACKS TECHNOLOGIES — ${safeCategory} PROJECT INSTALLATION REPORT`;
+    titleCell.font = { name: 'Segoe UI', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
+    titleCell.alignment = { vertical: 'middle', horizontal: 'center' };
+    titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${themeColor}` } };
+    worksheet.getRow(1).height = 36;
+
+    // Subtitle
+    worksheet.mergeCells('A2:P2');
+    const metaCell = worksheet.getCell('A2');
+    const totalRev = list.reduce((sum, item) => sum + (parseFloat(item.sale_price) || 0), 0);
+    metaCell.value = `Category: ${safeCategory}  |  Records: ${list.length}  |  Revenue: ₹${totalRev.toLocaleString('en-IN')}  |  Generated: ${new Date().toISOString().split('T')[0]}`;
+    metaCell.font = { name: 'Segoe UI', size: 9.5, italic: true, bold: true, color: { argb: 'FF1E293B' } };
+    metaCell.alignment = { vertical: 'middle', horizontal: 'center' };
+    metaCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
+    worksheet.getRow(2).height = 22;
+
+    worksheet.addRow([]);
+
+    const headers = [
+      'Sl No', 'Date', 'Category', 'Vehicle Number', 'Vehicle Type',
+      'Device IMEI', 'SIM Number', 'Customer Name', 'Phone Number',
+      'GPS Software ID', 'GPS Password', 'Technician', 'City / Location',
+      'Price (₹)', 'Payment Status', 'Remarks'
+    ];
+    const headerRow = worksheet.addRow(headers);
+    headerRow.height = 28;
+    headerRow.eachCell(cell => {
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${themeColor}` } };
+      cell.font = { name: 'Segoe UI', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.alignment = { vertical: 'middle', horizontal: 'center' };
+    });
+
+    list.forEach((inst, index) => {
+      let devAttrs = {};
+      try {
+        devAttrs = typeof inst.device_additional_attributes === 'string'
+          ? JSON.parse(inst.device_additional_attributes || '{}')
+          : (inst.device_additional_attributes || {});
+      } catch {}
+
+      const itemCat = extractInstCategory(inst);
+      const softwareUser = inst.software_user_id || devAttrs['SOFTWARE USER ID'] || devAttrs['GPS USER ID'] || '—';
+      const softwarePass = inst.software_password || devAttrs['SOFTWARE PASSWORD'] || devAttrs['GPS PASSWORD'] || '—';
+      const priceNum = parseFloat(inst.sale_price) || 0;
+      const payStatus = (inst.payment_status || 'RECEIVED').toUpperCase();
+      const isPaid = payStatus.includes('REC') || payStatus.includes('PAID');
+
+      const rowData = [
+        index + 1,
+        inst.installation_date || '—',
+        itemCat,
+        inst.vehicle_number || '—',
+        inst.vehicle_type || 'Commercial',
+        String(inst.imei_number || '—'),
+        inst.sim_number || devAttrs['SIM NUMBER'] || devAttrs['SIM'] || '—',
+        inst.customer_name || '—',
+        inst.customer_contact || '—',
+        softwareUser,
+        softwarePass,
+        inst.installed_by || '—',
+        inst.installation_location || '—',
+        priceNum,
+        isPaid ? 'PAID' : 'PENDING',
+        inst.remarks || '—'
+      ];
+
+      const row = worksheet.addRow(rowData);
+      row.height = 22;
+      row.eachCell((cell, colNumber) => {
+        cell.font = { name: 'Segoe UI', size: 9.5 };
+        if (colNumber === 1 || colNumber === 2 || colNumber === 3) cell.alignment = { vertical: 'middle', horizontal: 'center' };
+        else if (colNumber === 14) {
+          cell.numFmt = '₹#,##0.00';
+          cell.alignment = { vertical: 'middle', horizontal: 'right' };
+        } else if (colNumber === 15) {
+          cell.alignment = { vertical: 'middle', horizontal: 'center' };
+          cell.font = { name: 'Segoe UI', size: 9.5, bold: true, color: { argb: isPaid ? 'FF166534' : 'FF991B1B' } };
+        } else {
+          cell.alignment = { vertical: 'middle', horizontal: 'left' };
+        }
+      });
+    });
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${safeCategory.replace(/\s+/g, '_')}_Installations_${new Date().toISOString().split('T')[0]}.xlsx"`);
+    await workbook.xlsx.write(res);
+    res.end();
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }

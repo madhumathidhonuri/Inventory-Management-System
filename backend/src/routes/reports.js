@@ -334,6 +334,32 @@ router.get('/options', (req, res) => {
 
     const availableMonths = Object.values(monthsMap).filter(m => m.total > 0);
 
+    // Compute category counts
+    const categoryCounts = {
+      'ALL': allDevices.length,
+      'TG MINING': 0,
+      'AP MINING': 0,
+      'VLTD': 0,
+      'GENERAL': 0,
+      by_category: {}
+    };
+
+    allDevices.forEach(d => {
+      let attrs = {};
+      try { attrs = JSON.parse(d.additional_attributes || '{}'); } catch {}
+      const cat = (attrs['CATEGORY'] || attrs['DEVICE CATEGORY'] || 'VLTD').toString().toUpperCase().trim();
+      categoryCounts.by_category[cat] = (categoryCounts.by_category[cat] || 0) + 1;
+      if (cat.includes('TG MINING') || (cat.includes('TG') && cat.includes('MINING'))) {
+        categoryCounts['TG MINING']++;
+      } else if (cat.includes('AP MINING') || (cat.includes('AP') && cat.includes('MINING'))) {
+        categoryCounts['AP MINING']++;
+      } else if (cat.includes('VLTD')) {
+        categoryCounts['VLTD']++;
+      } else if (cat.includes('GENERAL')) {
+        categoryCounts['GENERAL']++;
+      }
+    });
+
     res.json({
       success: true,
       data: {
@@ -343,6 +369,8 @@ router.get('/options', (req, res) => {
         batchPlacesMap,
         availableMonths,
         allMonths: MONTH_NAMES,
+        categoryCounts,
+        categories: ['ALL', 'TG MINING', 'AP MINING', 'VLTD', 'GENERAL'],
         stats: {
           totalDevices: allDevices.length,
           installedDevices: totalInstalled,
@@ -367,7 +395,8 @@ function queryFilteredDevices(query) {
     payment_status,
     start_date,
     end_date,
-    search
+    search,
+    category
   } = query;
 
   let sql = `
@@ -431,6 +460,15 @@ function queryFilteredDevices(query) {
       return false;
     }
 
+    // Category filter
+    if (category && category !== 'ALL') {
+      const devCategory = (attrs['CATEGORY'] || attrs['DEVICE CATEGORY'] || dev.device_type_category || 'VLTD').toString().toUpperCase().trim();
+      const targetCat = category.toUpperCase().trim();
+      if (!devCategory.includes(targetCat) && !targetCat.includes(devCategory)) {
+        return false;
+      }
+    }
+
     // Month filter
     if (month && month !== 'ALL') {
       const devMonth = getDeviceMonth(dev, attrs);
@@ -473,6 +511,7 @@ router.get('/preview', (req, res) => {
           device_name: getDeviceName(d, attrs),
           sim_numbers: getSimNumbers(d, attrs),
           device_type_name: d.device_type_name,
+          category: (attrs['CATEGORY'] || attrs['DEVICE CATEGORY'] || d.device_type_category || 'VLTD').toUpperCase(),
           vehicle_number: getVehicleNumber(d, attrs) || 'Unassigned',
           customer_name: getCustomerName(attrs),
           phone_number: getCustomerPhone(attrs),
@@ -490,9 +529,9 @@ router.get('/preview', (req, res) => {
   }
 });
 
-// GET /api/reports/export - Export Excel/CSV with support for Manager Executive Statement format & Monthly Payments
+// GET /api/reports/export - Export Excel/CSV with support for Manager Executive Statement format, Category filter & Monthly Payments
 router.get('/export', (req, res) => {
-  const { type, format, purchase_batch_id, device_type_id, stock_place, installed_filter, report_layout, month, payment_status } = req.query;
+  const { type, format, purchase_batch_id, device_type_id, stock_place, installed_filter, report_layout, month, payment_status, category } = req.query;
 
   try {
     let data = [];
@@ -540,6 +579,7 @@ router.get('/export', (req, res) => {
       const devices = queryFilteredDevices(req.query);
       const mLabel = month ? month.toUpperCase() : 'ALL_MONTHS';
       const pLabel = payment_status ? (payment_status.toUpperCase() === 'RECEIVED' ? 'PAID_RECEIVED' : payment_status.toUpperCase()) : 'ALL_PAYMENTS';
+      const cLabel = (category && category !== 'ALL') ? `_${category.replace(/[^a-zA-Z0-9_-]/g, '_')}` : '';
       
       let typeLabel = '';
       if (device_type_id) {
@@ -550,7 +590,7 @@ router.get('/export', (req, res) => {
         if (pb) typeLabel = `_${(pb.notes || pb.source_file || '').replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9_-]/g, '_')}`;
       }
 
-      filename = `Monthly_Payments_${pLabel}_${mLabel}${typeLabel}_${new Date().toISOString().split('T')[0]}`;
+      filename = `Monthly_Payments_${pLabel}_${mLabel}${cLabel}${typeLabel}_${new Date().toISOString().split('T')[0]}`;
       sheetName = `${mLabel.substring(0, 10)} Payments`;
 
       data = devices.map((dev, idx) => {
@@ -559,6 +599,7 @@ router.get('/export', (req, res) => {
 
         const devMonth = getDeviceMonth(dev, attrs) || mLabel;
         const devName = getDeviceName(dev, attrs);
+        const devCategory = (attrs['CATEGORY'] || attrs['DEVICE CATEGORY'] || dev.device_type_category || 'VLTD').toUpperCase();
         const vehNo = getVehicleNumber(dev, attrs);
         const custName = getCustomerName(attrs);
         const custPhone = getCustomerPhone(attrs);
@@ -572,6 +613,7 @@ router.get('/export', (req, res) => {
         return {
           'Sl No': idx + 1,
           'Month': devMonth,
+          'Project Category': devCategory,
           'IMEI Number': String(dev.imei_number),
           'Device Model / Name': devName || dev.device_type_name || 'GPS Tracker',
           'Vehicle Number': vehNo || (dev.current_status === 'INSTALLED' ? 'Installed' : 'N/A'),
@@ -593,15 +635,17 @@ router.get('/export', (req, res) => {
       }
 
       const devices = queryFilteredDevices(queryParams);
+      const catSuffix = (category && category !== 'ALL') ? `_${category.replace(/[^a-zA-Z0-9_-]/g, '_')}` : '';
 
-      filename = `manager_vehicle_billing_statement_${new Date().toISOString().split('T')[0]}`;
-      sheetName = 'ManagerStatement';
+      filename = `manager_vehicle_billing_statement${catSuffix}_${new Date().toISOString().split('T')[0]}`;
+      sheetName = (category && category !== 'ALL') ? `${category.substring(0, 20)} Statement` : 'ManagerStatement';
 
       data = devices.map((dev, idx) => {
         let attrs = {};
         try { attrs = JSON.parse(dev.additional_attributes || '{}'); } catch {}
 
         const devName = getDeviceName(dev, attrs);
+        const devCategory = (attrs['CATEGORY'] || attrs['DEVICE CATEGORY'] || dev.device_type_category || 'VLTD').toUpperCase();
         const vehNo = getVehicleNumber(dev, attrs);
         const custName = getCustomerName(attrs);
         const custPhone = getCustomerPhone(attrs);
@@ -613,6 +657,7 @@ router.get('/export', (req, res) => {
 
         return {
           'Sl No': idx + 1,
+          'Project Category': devCategory,
           'Device Name': devName || dev.device_type_name || 'GPS Tracker',
           'Vehicle Number': vehNo || (dev.current_status === 'INSTALLED' ? 'Installed' : 'N/A'),
           'Customer Name': custName,

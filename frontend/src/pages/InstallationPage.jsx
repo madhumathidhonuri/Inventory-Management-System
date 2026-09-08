@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Wrench,
   Search,
@@ -20,10 +20,15 @@ import {
   CreditCard,
   Send,
   FileSpreadsheet,
-  Calendar
+  Calendar,
+  Download,
+  ShieldCheck,
+  HardHat,
+  Truck
 } from 'lucide-react';
 import { recordInstallation, recordBulkInstallations, fetchInstallations, lookupCustomerByPhone, getCustomerDirectoryExportUrl } from '../services/api';
 import { buildCustomerCredentialsWhatsAppMessage, buildPaymentQrWhatsAppMessage, buildPaymentReceivedWhatsAppMessage } from '../utils/whatsapp';
+import { exportInstallationsToExcel } from '../utils/excelExport';
 import PaymentQrModal from '../components/PaymentQrModal';
 import { useAuth } from '../context/AuthContext';
 
@@ -34,6 +39,7 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
   const [installations, setInstallations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [exportingExcel, setExportingExcel] = useState(false);
 
   // Payment QR Modal State
   const [paymentQrData, setPaymentQrData] = useState(null);
@@ -93,6 +99,67 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
     }
   };
 
+  // Live Category Counts Calculation
+  const categoryCounts = useMemo(() => {
+    const counts = {
+      'ALL': installations.length,
+      'VLTD': 0,
+      'TG MINING': 0,
+      'AP MINING': 0,
+      'GENERAL': 0,
+    };
+    installations.forEach(inst => {
+      let devAttrs = {};
+      try {
+        devAttrs = typeof inst.device_additional_attributes === 'string'
+          ? JSON.parse(inst.device_additional_attributes || '{}')
+          : (inst.device_additional_attributes || {});
+      } catch {}
+      const cat = (devAttrs['CATEGORY'] || devAttrs['DEVICE CATEGORY'] || inst.vehicle_type || 'VLTD').toUpperCase();
+      if (cat.includes('TG MINING') || (cat.includes('TG') && cat.includes('MINING'))) {
+        counts['TG MINING']++;
+      } else if (cat.includes('AP MINING') || (cat.includes('AP') && cat.includes('MINING'))) {
+        counts['AP MINING']++;
+      } else if (cat.includes('VLTD')) {
+        counts['VLTD']++;
+      } else if (cat.includes('GENERAL')) {
+        counts['GENERAL']++;
+      }
+    });
+    return counts;
+  }, [installations]);
+
+  // Filtered Installations List
+  const filteredInstallations = useMemo(() => {
+    return installations.filter(inst => {
+      if (categoryFilter === 'ALL') return true;
+      let devAttrs = {};
+      try {
+        devAttrs = typeof inst.device_additional_attributes === 'string'
+          ? JSON.parse(inst.device_additional_attributes || '{}')
+          : (inst.device_additional_attributes || {});
+      } catch {}
+      const cat = (devAttrs['CATEGORY'] || devAttrs['DEVICE CATEGORY'] || inst.vehicle_type || '').toUpperCase();
+      return cat.includes(categoryFilter);
+    });
+  }, [installations, categoryFilter]);
+
+  // Category Excel Export Handler
+  const handleExportCategoryExcel = async () => {
+    try {
+      setExportingExcel(true);
+      const safeCat = categoryFilter === 'ALL' ? 'All_Projects' : categoryFilter.replace(/\s+/g, '_');
+      const filename = `${safeCat}_Installations_${new Date().toISOString().split('T')[0]}`;
+      const sheetName = categoryFilter === 'ALL' ? 'All Installations' : `${categoryFilter} Installs`;
+      await exportInstallationsToExcel(filename, sheetName, filteredInstallations, categoryFilter);
+    } catch (err) {
+      console.error('Failed to export Excel:', err);
+      alert('Failed to generate Excel sheet: ' + err.message);
+    } finally {
+      setExportingExcel(false);
+    }
+  };
+
   const handlePhoneChange = async (val) => {
     setPhone(val);
     if (val.trim().length >= 10) {
@@ -144,7 +211,6 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
         vehicle_type: vehicleType,
         category: category === 'CUSTOM' ? (customCategoryInput.trim() || 'CUSTOM') : category,
         aadhar_number: aadharNumber.trim(),
-
         pan_number: panNumber.trim().toUpperCase(),
         chasis_number: chasisNumber.trim().toUpperCase(),
         engine_number: engineNumber.trim().toUpperCase(),
@@ -152,73 +218,61 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
         payment_status: paymentStatus,
         software_user_id: softwareUserId.trim(),
         software_password: softwarePassword.trim(),
-        installed_by: installedBy.trim() || 'Technician',
-        installation_date: installationDate,
+        installed_by: installedBy.trim() || (user?.username || 'Field Tech'),
         installation_location: location.trim(),
+        installation_date: installationDate,
         remarks: remarks.trim()
       });
 
       if (res.success) {
-        const savedImei = imei.trim();
-        const savedVeh = vehicleNumber.trim().toUpperCase();
-        const savedCust = customerName.trim();
-        const savedPhone = phone.trim();
-        const savedPrice = salePrice ? parseFloat(salePrice) : 0;
-        const savedLocation = location.trim();
-        const savedStatus = paymentStatus;
-
-        setSuccessToast(`✅ Successfully linked vehicle ${savedVeh} with IMEI ${savedImei}! Master stock updated to INSTALLED.`);
-        setPostInstallQrPrompt({
-          imei: savedImei,
-          vehicleNumber: savedVeh,
-          customerName: savedCust,
-          customerPhone: savedPhone,
-          salePrice: savedPrice,
-          paymentStatus: savedStatus,
-          stockPlace: savedLocation || 'FuelTracks Central'
-        });
-
-        // 1-Click Option 1 Auto-dispatch: Open WhatsApp with customer payment request and UPI link
-        if (autoSendWhatsAppPayment && savedPhone) {
-          const upiConfigId = localStorage.getItem('fueltracks_merchant_upi') || 'fueltracks@icici';
-          const upiConfigPayee = localStorage.getItem('fueltracks_payee_name') || 'FuelTracks Technologies Pvt Ltd';
-          const { url } = buildPaymentQrWhatsAppMessage({
-            phone: savedPhone,
-            customerName: savedCust,
-            vehicleNumber: savedVeh,
-            imei: savedImei,
-            amount: savedPrice,
-            upiId: upiConfigId,
-            payeeName: upiConfigPayee,
-            stockPlace: savedLocation || 'FuelTracks Central'
+        setSuccessToast(`✅ Installation recorded for ${vehicleNumber.toUpperCase()} (${customerName})!`);
+        
+        if (salePrice && parseFloat(salePrice) > 0) {
+          setPostInstallQrPrompt({
+            customerName: customerName.trim(),
+            customerPhone: phone.trim(),
+            vehicleNumber: vehicleNumber.trim().toUpperCase(),
+            amount: parseFloat(salePrice),
+            imei: imei.trim(),
+            technicianName: installedBy.trim() || user?.username
           });
-          window.open(url, '_blank');
         }
 
         setShowModal(false);
-        // Reset form
-        setImei('');
-        setPhone('');
-        setCustomerName('');
-        setCustomerEmail('');
-        setCustomerAddress('');
-        setVehicleNumber('');
-        setAadharNumber('');
-        setPanNumber('');
-        setChasisNumber('');
-        setEngineNumber('');
-        setSalePrice('');
-        setSoftwareUserId('');
-        setSoftwarePassword('');
-        setCustLookup(null);
+        resetForm();
         loadData();
-        setTimeout(() => setSuccessToast(''), 10000);
+      } else {
+        alert(res.error || 'Failed to record installation');
       }
     } catch (err) {
-      alert(err.message);
+      alert(err.message || 'Error submitting installation');
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const resetForm = () => {
+    setImei('');
+    setPhone('');
+    setCustomerName('');
+    setCustomerEmail('');
+    setCustomerAddress('');
+    setVehicleNumber('');
+    setVehicleType('Commercial / Heavy');
+    setAadharNumber('');
+    setPanNumber('');
+    setChasisNumber('');
+    setEngineNumber('');
+    setSalePrice('');
+    setPaymentStatus('RECEIVED');
+    setSoftwareUserId('');
+    setSoftwarePassword('');
+    setInstalledBy('');
+    setLocation('');
+    setRemarks('');
+    setCategory('VLTD');
+    setCustomCategoryInput('');
+    setCustLookup(null);
   };
 
   // Parse and Submit Bulk WhatsApp Text Batch
@@ -226,41 +280,21 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
     e.preventDefault();
     if (!bulkText.trim()) return;
 
-    // Parse lines: comma, tab, or pipe separated
-    // Expected flexible columns: IMEI, Vehicle, Customer, Phone, LoginID, Password, Price
-    const lines = bulkText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-    const parsedList = [];
-
-    for (const line of lines) {
-      const parts = line.split(/[,\t|]+/).map(p => p.trim());
-      if (parts.length >= 3) {
-        parsedList.push({
-          imei: parts[0],
-          vehicle: parts[1],
-          name: parts[2] || 'Customer',
-          phone: parts[3] || '9999999999',
-          software_user_id: parts[4] || '',
-          software_password: parts[5] || '',
-          sale_price: parts[6] ? parseFloat(parts[6]) : 0,
-          payment_status: 'RECEIVED'
-        });
-      }
-    }
-
-    if (parsedList.length === 0) {
-      alert('Could not parse valid lines. Please format each line as: IMEI, VehicleNumber, CustomerName, Phone, [LoginID], [Password], [Price]');
-      return;
-    }
-
     setBulkSubmitting(true);
+    setBulkResult(null);
     try {
-      const res = await recordBulkInstallations({ installations: parsedList });
+      const res = await recordBulkInstallations({
+        raw_text: bulkText,
+        default_category: category === 'CUSTOM' ? (customCategoryInput.trim() || 'CUSTOM') : category,
+        default_price: salePrice ? parseFloat(salePrice) : 0,
+        installed_by: installedBy.trim() || user?.username
+      });
       if (res.success) {
         setBulkResult(res);
         loadData();
       }
     } catch (err) {
-      alert('Bulk processing failed: ' + err.message);
+      alert(err.message || 'Bulk processing failed');
     } finally {
       setBulkSubmitting(false);
     }
@@ -272,20 +306,19 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
   };
 
   return (
-    <div className="space-y-6">
-      
-      {/* Header Banner */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs">
+    <div className="space-y-5">
+      {/* Top Header & Fast Action Buttons */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-            <Wrench className="w-5 h-5 text-emerald-600" /> Vehicle Installations & WhatsApp Entry Hub
-          </h2>
+          <h1 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+            <Wrench className="w-5 h-5 text-emerald-600" /> Vehicle Installation Hub & CRM
+          </h1>
           <p className="text-xs text-slate-500">
-            Enter WhatsApp technician updates here: auto-updates Vamosys/Volty/TrackNow master stock to <strong>INSTALLED</strong> and creates CRM accounts.
+            Log GPS tracker deployments, project categorization, KYC credentials, and instant Excel reports
           </p>
         </div>
 
-        <div className="flex items-center gap-2 self-start md:self-auto flex-wrap">
+        <div className="flex flex-wrap items-center gap-2">
           {!isDealer && (
             <a
               href={getCustomerDirectoryExportUrl()}
@@ -295,7 +328,7 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
               title="Download full Customer details with Aadhar, PAN, Chassis, Engine in Excel Sheet (.xlsx)"
             >
               <FileSpreadsheet className="w-3.5 h-3.5 text-indigo-600" />
-              <span>📥 Export Customer KYC Excel</span>
+              <span>📥 Export KYC Excel</span>
             </a>
           )}
 
@@ -312,6 +345,94 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
           >
             <Plus className="w-4 h-4" /> + New Installation Entry
           </button>
+        </div>
+      </div>
+
+      {/* Quick Category Summary Cards (Instant Answer for 'How many installed in TG Mining?') */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        {/* Total Installed */}
+        <div
+          onClick={() => setCategoryFilter('ALL')}
+          className={`p-3.5 rounded-2xl border transition-all cursor-pointer ${
+            categoryFilter === 'ALL'
+              ? 'bg-slate-900 text-white border-slate-900 shadow-sm ring-2 ring-slate-400'
+              : 'bg-white text-slate-800 border-slate-200 hover:border-slate-300 shadow-2xs'
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold uppercase tracking-wider opacity-75">All Installed</span>
+            <Car className={`w-4 h-4 ${categoryFilter === 'ALL' ? 'text-slate-300' : 'text-slate-500'}`} />
+          </div>
+          <div className="text-2xl font-black mt-1 font-mono">{categoryCounts['ALL']}</div>
+          <div className="text-[10px] opacity-75 mt-0.5">Total Deployments</div>
+        </div>
+
+        {/* TG MINING */}
+        <div
+          onClick={() => setCategoryFilter('TG MINING')}
+          className={`p-3.5 rounded-2xl border transition-all cursor-pointer ${
+            categoryFilter === 'TG MINING'
+              ? 'bg-amber-600 text-white border-amber-600 shadow-sm ring-2 ring-amber-400'
+              : 'bg-amber-50/70 text-amber-900 border-amber-200 hover:border-amber-300 shadow-2xs'
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold uppercase tracking-wider">TG MINING</span>
+            <HardHat className={`w-4 h-4 ${categoryFilter === 'TG MINING' ? 'text-amber-200' : 'text-amber-600'}`} />
+          </div>
+          <div className="text-2xl font-black mt-1 font-mono">{categoryCounts['TG MINING']}</div>
+          <div className="text-[10px] opacity-80 mt-0.5">Telangana Mining</div>
+        </div>
+
+        {/* AP MINING */}
+        <div
+          onClick={() => setCategoryFilter('AP MINING')}
+          className={`p-3.5 rounded-2xl border transition-all cursor-pointer ${
+            categoryFilter === 'AP MINING'
+              ? 'bg-purple-600 text-white border-purple-600 shadow-sm ring-2 ring-purple-400'
+              : 'bg-purple-50/70 text-purple-900 border-purple-200 hover:border-purple-300 shadow-2xs'
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold uppercase tracking-wider">AP MINING</span>
+            <HardHat className={`w-4 h-4 ${categoryFilter === 'AP MINING' ? 'text-purple-200' : 'text-purple-600'}`} />
+          </div>
+          <div className="text-2xl font-black mt-1 font-mono">{categoryCounts['AP MINING']}</div>
+          <div className="text-[10px] opacity-80 mt-0.5">Andhra Mining</div>
+        </div>
+
+        {/* VLTD */}
+        <div
+          onClick={() => setCategoryFilter('VLTD')}
+          className={`p-3.5 rounded-2xl border transition-all cursor-pointer ${
+            categoryFilter === 'VLTD'
+              ? 'bg-blue-600 text-white border-blue-600 shadow-sm ring-2 ring-blue-400'
+              : 'bg-blue-50/70 text-blue-900 border-blue-200 hover:border-blue-300 shadow-2xs'
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold uppercase tracking-wider">VLTD / AIS-140</span>
+            <ShieldCheck className={`w-4 h-4 ${categoryFilter === 'VLTD' ? 'text-blue-200' : 'text-blue-600'}`} />
+          </div>
+          <div className="text-2xl font-black mt-1 font-mono">{categoryCounts['VLTD']}</div>
+          <div className="text-[10px] opacity-80 mt-0.5">Govt Certifications</div>
+        </div>
+
+        {/* GENERAL */}
+        <div
+          onClick={() => setCategoryFilter('GENERAL')}
+          className={`p-3.5 rounded-2xl border transition-all cursor-pointer ${
+            categoryFilter === 'GENERAL'
+              ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm ring-2 ring-emerald-400'
+              : 'bg-emerald-50/70 text-emerald-900 border-emerald-200 hover:border-emerald-300 shadow-2xs'
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold uppercase tracking-wider">GENERAL</span>
+            <Truck className={`w-4 h-4 ${categoryFilter === 'GENERAL' ? 'text-emerald-200' : 'text-emerald-600'}`} />
+          </div>
+          <div className="text-2xl font-black mt-1 font-mono">{categoryCounts['GENERAL']}</div>
+          <div className="text-[10px] opacity-80 mt-0.5">Commercial & Private</div>
         </div>
       </div>
 
@@ -340,38 +461,74 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
         </div>
       )}
 
-      {/* Filter Bar with Category Selector Pills */}
-      <div className="glass-panel p-4 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-3">
+      {/* Filter Bar with Category Selector Pills & Download Excel Button */}
+      <div className="glass-panel p-4 rounded-2xl flex flex-col lg:flex-row lg:items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mr-1">Project Category:</span>
+          <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mr-1">Filter Category:</span>
           {[
-            { id: 'ALL', label: 'All Projects', active: 'bg-slate-900 text-white' },
-            { id: 'VLTD', label: 'VLTD', active: 'bg-blue-600 text-white' },
-            { id: 'TG MINING', label: 'TG MINING', active: 'bg-amber-600 text-white' },
-            { id: 'AP MINING', label: 'AP MINING', active: 'bg-purple-600 text-white' },
-            { id: 'GENERAL', label: 'GENERAL', active: 'bg-emerald-600 text-white' }
+            { id: 'ALL', label: 'All Projects', countKey: 'ALL', active: 'bg-slate-900 text-white' },
+            { id: 'TG MINING', label: 'TG MINING', countKey: 'TG MINING', active: 'bg-amber-600 text-white' },
+            { id: 'AP MINING', label: 'AP MINING', countKey: 'AP MINING', active: 'bg-purple-600 text-white' },
+            { id: 'VLTD', label: 'VLTD', countKey: 'VLTD', active: 'bg-blue-600 text-white' },
+            { id: 'GENERAL', label: 'GENERAL', countKey: 'GENERAL', active: 'bg-emerald-600 text-white' }
           ].map(p => (
             <button
               key={p.id}
               onClick={() => setCategoryFilter(p.id)}
-              className={`px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
                 categoryFilter === p.id ? p.active : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
               }`}
             >
-              {p.label}
+              <span>{p.label}</span>
+              <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${
+                categoryFilter === p.id ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
+              }`}>
+                {categoryCounts[p.countKey] || 0}
+              </span>
             </button>
           ))}
         </div>
 
-        <div className="relative w-full md:w-80">
-          <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
-          <input
-            type="text"
-            placeholder="Search by Vehicle #, Customer, Phone, IMEI, Software Login..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-4 py-2 text-xs text-slate-900 focus:outline-none focus:border-emerald-500 font-mono"
-          />
+        <div className="flex flex-wrap items-center gap-2">
+          {/* 1-Click Category Excel Download Button */}
+          <button
+            onClick={handleExportCategoryExcel}
+            disabled={exportingExcel || filteredInstallations.length === 0}
+            className={`px-3.5 py-2 text-xs font-bold rounded-xl flex items-center gap-2 shadow-xs transition-all cursor-pointer ${
+              categoryFilter === 'TG MINING'
+                ? 'bg-amber-600 hover:bg-amber-700 text-white'
+                : categoryFilter === 'AP MINING'
+                ? 'bg-purple-600 hover:bg-purple-700 text-white'
+                : categoryFilter === 'VLTD'
+                ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                : categoryFilter === 'GENERAL'
+                ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                : 'bg-emerald-700 hover:bg-emerald-800 text-white'
+            } disabled:opacity-50`}
+            title={`Download ${categoryFilter} Installation records in Excel (.xlsx)`}
+          >
+            {exportingExcel ? (
+              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <FileSpreadsheet className="w-3.5 h-3.5" />
+            )}
+            <span>
+              {exportingExcel
+                ? 'Generating Excel...'
+                : `📥 Download ${categoryFilter === 'ALL' ? 'All' : categoryFilter} Excel (${filteredInstallations.length})`}
+            </span>
+          </button>
+
+          <div className="relative w-full sm:w-64">
+            <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Search Vehicle, Customer, IMEI..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-4 py-2 text-xs text-slate-900 focus:outline-none focus:border-emerald-500 font-mono"
+            />
+          </div>
         </div>
       </div>
 
@@ -381,9 +538,9 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
           <div className="p-12 text-center text-xs text-slate-500 flex items-center justify-center gap-2">
             <RefreshCw className="w-4 h-4 animate-spin text-emerald-600" /> Loading installation records...
           </div>
-        ) : installations.length === 0 ? (
+        ) : filteredInstallations.length === 0 ? (
           <div className="p-12 text-center text-xs text-slate-400">
-            No installation records found. Click <strong>+ New Installation Entry</strong> to log a vehicle install.
+            No {categoryFilter === 'ALL' ? '' : `${categoryFilter} `}installation records found. Click <strong>+ New Installation Entry</strong> to log a vehicle install.
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -403,17 +560,7 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {installations
-                  .filter(inst => {
-                    if (categoryFilter === 'ALL') return true;
-                    let devAttrs = {};
-                    try {
-                      devAttrs = typeof inst.device_additional_attributes === 'string' ? JSON.parse(inst.device_additional_attributes || '{}') : (inst.device_additional_attributes || {});
-                    } catch {}
-                    const cat = (devAttrs['CATEGORY'] || devAttrs['DEVICE CATEGORY'] || inst.vehicle_type || '').toUpperCase();
-                    return cat.includes(categoryFilter);
-                  })
-                  .map((inst) => {
+                {filteredInstallations.map((inst) => {
                   const payStatus = (inst.payment_status || 'RECEIVED').toUpperCase();
                   const isPaid = payStatus.includes('REC') || payStatus.includes('PAID');
 

@@ -477,3 +477,273 @@ export async function exportImeiVerificationToExcel(filename, sheetName, items =
   window.URL.revokeObjectURL(url);
 }
 
+/**
+ * Exports Installation Records to a beautifully styled, executive Excel report (.xlsx)
+ * categorized and formatted for management reviews and department audits.
+ */
+export async function exportInstallationsToExcel(filename, sheetName, installations = [], categoryFilter = 'ALL', options = {}) {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'FuelTracks IMS';
+  workbook.lastModifiedBy = 'Admin';
+  workbook.created = new Date();
+
+  const safeCategory = (categoryFilter || 'ALL').toUpperCase();
+  const safeSheet = (sheetName || (safeCategory === 'ALL' ? 'All Installations' : `${safeCategory} Installs`)).substring(0, 31);
+  const worksheet = workbook.addWorksheet(safeSheet, {
+    views: [{ showGridLines: true }]
+  });
+
+  // Color Theme based on Category
+  let themeColor = '1E293B'; // Slate/Navy for ALL
+  let accentColor = '0EA5E9';
+  if (safeCategory.includes('TG MINING')) {
+    themeColor = 'B45309'; // Amber-700
+    accentColor = 'F59E0B';
+  } else if (safeCategory.includes('AP MINING')) {
+    themeColor = '7E22CE'; // Purple-700
+    accentColor = 'A855F7';
+  } else if (safeCategory.includes('VLTD')) {
+    themeColor = '1D4ED8'; // Blue-700
+    accentColor = '3B82F6';
+  } else if (safeCategory.includes('GENERAL')) {
+    themeColor = '047857'; // Emerald-700
+    accentColor = '10B981';
+  }
+
+  // Setup Column Definitions
+  worksheet.columns = [
+    { key: 'sl_no', width: 8 },
+    { key: 'installation_date', width: 16 },
+    { key: 'category', width: 16 },
+    { key: 'vehicle_number', width: 18 },
+    { key: 'vehicle_type', width: 18 },
+    { key: 'imei_number', width: 20 },
+    { key: 'sim_number', width: 18 },
+    { key: 'customer_name', width: 24 },
+    { key: 'customer_contact', width: 16 },
+    { key: 'software_user_id', width: 20 },
+    { key: 'software_password', width: 16 },
+    { key: 'installed_by', width: 18 },
+    { key: 'installation_location', width: 20 },
+    { key: 'sale_price', width: 14 },
+    { key: 'payment_status', width: 16 },
+    { key: 'remarks', width: 26 }
+  ];
+
+  // Title Banner (Row 1)
+  worksheet.mergeCells('A1:P1');
+  const titleRow = worksheet.getRow(1);
+  titleRow.height = 36;
+  const titleCell = worksheet.getCell('A1');
+  const titleText = safeCategory === 'ALL'
+    ? 'FUELTRACKS TECHNOLOGIES — MASTER VEHICLE INSTALLATIONS REPORT'
+    : `FUELTRACKS TECHNOLOGIES — ${safeCategory} PROJECT INSTALLATION REPORT`;
+  titleCell.value = titleText;
+  titleCell.font = { name: 'Segoe UI', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
+  titleCell.alignment = { vertical: 'middle', horizontal: 'center' };
+  titleCell.fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: `FF${themeColor}` }
+  };
+
+  // Subtitle / Meta Information Bar (Row 2)
+  worksheet.mergeCells('A2:P2');
+  const metaRow = worksheet.getRow(2);
+  metaRow.height = 22;
+  const metaCell = worksheet.getCell('A2');
+  const dateStr = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+  const totalRev = installations.reduce((sum, item) => sum + (parseFloat(item.sale_price) || 0), 0);
+  metaCell.value = `Category Filter: ${safeCategory}    |    Total Installed Records: ${installations.length}    |    Total Revenue: ₹${totalRev.toLocaleString('en-IN')}    |    Report Date: ${dateStr}`;
+  metaCell.font = { name: 'Segoe UI', size: 9.5, italic: true, bold: true, color: { argb: 'FF1E293B' } };
+  metaCell.alignment = { vertical: 'middle', horizontal: 'center' };
+  metaCell.fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: 'FFF1F5F9' }
+  };
+  metaCell.border = {
+    bottom: { style: 'medium', color: { argb: `FF${themeColor}` } }
+  };
+
+  // Spacer (Row 3)
+  worksheet.addRow([]);
+  worksheet.getRow(3).height = 8;
+
+  // Table Headers (Row 4)
+  const headers = [
+    'Sl No',
+    'Date',
+    'Category',
+    'Vehicle Number',
+    'Vehicle Type',
+    'Device IMEI',
+    'SIM Number',
+    'Customer Name',
+    'Phone Number',
+    'GPS Software ID',
+    'GPS Password',
+    'Technician',
+    'City / Location',
+    'Price (₹)',
+    'Payment Status',
+    'Remarks'
+  ];
+
+  const headerRow = worksheet.addRow(headers);
+  headerRow.height = 28;
+  headerRow.eachCell((cell) => {
+    cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: `FF${themeColor}` }
+    };
+    cell.font = { name: 'Segoe UI', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+    cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: false };
+    cell.border = {
+      top: { style: 'thin', color: { argb: 'FF94A3B8' } },
+      left: { style: 'thin', color: { argb: 'FF94A3B8' } },
+      bottom: { style: 'medium', color: { argb: 'FF0F172A' } },
+      right: { style: 'thin', color: { argb: 'FF94A3B8' } }
+    };
+  });
+
+  // Populate Data Rows
+  installations.forEach((inst, index) => {
+    let devAttrs = {};
+    try {
+      devAttrs = typeof inst.device_additional_attributes === 'string'
+        ? JSON.parse(inst.device_additional_attributes || '{}')
+        : (inst.device_additional_attributes || {});
+    } catch {}
+
+    const itemCat = (devAttrs['CATEGORY'] || devAttrs['DEVICE CATEGORY'] || inst.vehicle_type || 'VLTD').toUpperCase();
+    const softwareUser = inst.software_user_id || devAttrs['SOFTWARE USER ID'] || devAttrs['GPS USER ID'] || '—';
+    const softwarePass = inst.software_password || devAttrs['SOFTWARE PASSWORD'] || devAttrs['GPS PASSWORD'] || '—';
+    const priceNum = parseFloat(inst.sale_price) || 0;
+    const payStatus = (inst.payment_status || 'RECEIVED').toUpperCase();
+    const isPaid = payStatus.includes('REC') || payStatus.includes('PAID');
+
+    const rowData = [
+      index + 1,
+      inst.installation_date || '—',
+      itemCat,
+      inst.vehicle_number || '—',
+      inst.vehicle_type || 'Commercial',
+      String(inst.imei_number || '—'),
+      inst.sim_number || devAttrs['SIM NUMBER'] || devAttrs['SIM'] || '—',
+      inst.customer_name || '—',
+      inst.customer_contact || '—',
+      softwareUser,
+      softwarePass,
+      inst.installed_by || '—',
+      inst.installation_location || '—',
+      priceNum,
+      isPaid ? 'PAID' : 'PENDING',
+      inst.remarks || '—'
+    ];
+
+    const row = worksheet.addRow(rowData);
+    row.height = 22;
+
+    const isEven = index % 2 === 0;
+    row.eachCell((cell, colNumber) => {
+      cell.font = { name: 'Segoe UI', size: 9.5 };
+      cell.border = {
+        top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+        left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+        bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+        right: { style: 'thin', color: { argb: 'FFE2E8F0' } }
+      };
+
+      if (!isEven) {
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+      }
+
+      // Column-specific alignments & styling
+      if (colNumber === 1) { // Sl No
+        cell.alignment = { vertical: 'middle', horizontal: 'center' };
+      } else if (colNumber === 2) { // Date
+        cell.alignment = { vertical: 'middle', horizontal: 'center' };
+      } else if (colNumber === 3) { // Category
+        cell.alignment = { vertical: 'middle', horizontal: 'center' };
+        cell.font = { name: 'Segoe UI', size: 9.5, bold: true };
+      } else if (colNumber === 4) { // Vehicle Number
+        cell.font = { name: 'Segoe UI', size: 9.5, bold: true, color: { argb: 'FFB45309' } };
+        cell.alignment = { vertical: 'middle', horizontal: 'left' };
+      } else if (colNumber === 6) { // IMEI
+        cell.font = { name: 'Consolas', size: 9.5, bold: true };
+      } else if (colNumber === 14) { // Sale Price
+        cell.numFmt = '₹#,##0.00';
+        cell.alignment = { vertical: 'middle', horizontal: 'right' };
+      } else if (colNumber === 15) { // Payment Status
+        cell.alignment = { vertical: 'middle', horizontal: 'center' };
+        cell.font = { name: 'Segoe UI', size: 9.5, bold: true };
+        if (isPaid) {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDCFCE7' } };
+          cell.font = { name: 'Segoe UI', size: 9.5, bold: true, color: { argb: 'FF166534' } };
+        } else {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEE2E2' } };
+          cell.font = { name: 'Segoe UI', size: 9.5, bold: true, color: { argb: 'FF991B1B' } };
+        }
+      } else {
+        cell.alignment = { vertical: 'middle', horizontal: 'left' };
+      }
+    });
+  });
+
+  // Summary Row at Bottom
+  if (installations.length > 0) {
+    const summaryRowIndex = worksheet.rowCount + 1;
+    const summaryRowData = [
+      '',
+      '',
+      '',
+      'TOTAL RECORDS',
+      `${installations.length} Devices`,
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      'TOTAL REVENUE',
+      totalRev,
+      '',
+      ''
+    ];
+    const summaryRow = worksheet.addRow(summaryRowData);
+    summaryRow.height = 26;
+    summaryRow.eachCell((cell, colNumber) => {
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
+      cell.font = { name: 'Segoe UI', size: 10, bold: true, color: { argb: 'FF0F172A' } };
+      cell.border = {
+        top: { style: 'medium', color: { argb: `FF${themeColor}` } },
+        bottom: { style: 'medium', color: { argb: `FF${themeColor}` } },
+        left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+        right: { style: 'thin', color: { argb: 'FFCBD5E1' } }
+      };
+      if (colNumber === 14) {
+        cell.numFmt = '₹#,##0.00';
+        cell.alignment = { vertical: 'middle', horizontal: 'right' };
+      } else if (colNumber === 4 || colNumber === 5 || colNumber === 13) {
+        cell.alignment = { vertical: 'middle', horizontal: 'center' };
+      }
+    });
+  }
+
+  // Write and trigger download
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename.endsWith('.xlsx') ? filename : `${filename}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  window.URL.revokeObjectURL(url);
+}
+
+

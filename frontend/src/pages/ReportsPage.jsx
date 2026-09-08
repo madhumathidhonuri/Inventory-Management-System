@@ -91,6 +91,7 @@ export default function ReportsPage() {
   const [filters, setFilters] = useState({
     purchase_batch_id: '',
     stock_place: '',
+    category: '', // '' | 'TG MINING' | 'AP MINING' | 'VLTD' | 'GENERAL'
     installed_filter: 'installed', // 'all' | 'installed' | 'uninstalled'
     status: '',
     device_type_id: '',
@@ -283,6 +284,7 @@ export default function ReportsPage() {
     setFilters({
       purchase_batch_id: '',
       stock_place: '',
+      category: '',
       installed_filter: 'installed',
       status: '',
       device_type_id: '',
@@ -311,11 +313,26 @@ export default function ReportsPage() {
 
   const handlePresetExport = (type, format = 'xlsx') => {
     setDownloading(`${type}_${format}`);
-    window.location.href = `/api/reports/export?type=${type}&format=${format}`;
+    if (type === 'tg_mining') {
+      window.location.href = `/api/reports/export?report_layout=manager&category=TG%20MINING&format=${format}`;
+    } else {
+      window.location.href = `/api/reports/export?type=${type}&format=${format}`;
+    }
     setTimeout(() => setDownloading(null), 2500);
   };
 
   const PRESET_REPORTS = [
+    {
+      id: 'tg_mining',
+      title: 'TG MINING Deployments Register',
+      description: 'Itemized billing & deployment statement of Telangana Mining GPS trackers, vehicle numbers, SIMs, and customer accounts.',
+      icon: Receipt,
+      color: 'text-amber-600',
+      bg: 'bg-amber-50',
+      border: 'border-amber-200',
+      badge: `${options.categoryCounts?.['TG MINING'] || 0} TG Mining Units`,
+      badgeColor: 'bg-amber-100 text-amber-900 font-bold'
+    },
     {
       id: 'manager_statement',
       title: 'Manager Statement & Billing Register',
@@ -1589,8 +1606,10 @@ export default function ReportsPage() {
             <div>
               <strong className="font-bold">Manager Statement Columns Exported:</strong>
               <div className="mt-1 flex flex-wrap gap-1.5">
-                {['Device Name', 'Vehicle Number', 'Customer Name', 'Phone Number', 'SIM Numbers', 'IMEI Number', 'Total Cost', 'Amount Received Status', 'Stock Place', 'Date'].map(col => (
-                  <span key={col} className="bg-white border border-indigo-200 px-2 py-0.5 rounded text-[11px] font-semibold text-indigo-800 shadow-2xs">
+                {['Project Category', 'Device Name', 'Vehicle Number', 'Customer Name', 'Phone Number', 'SIM Numbers', 'IMEI Number', 'Total Cost', 'Amount Received Status', 'Stock Place', 'Date'].map(col => (
+                  <span key={col} className={`px-2 py-0.5 rounded text-[11px] font-semibold shadow-2xs border ${
+                    col === 'Project Category' ? 'bg-amber-100 border-amber-300 text-amber-900 font-bold' : 'bg-white border-indigo-200 text-indigo-800'
+                  }`}>
                     {col}
                   </span>
                 ))}
@@ -1602,10 +1621,28 @@ export default function ReportsPage() {
         {/* Filters Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           
-          {/* 1. Upload List Name */}
+          {/* 1. Project Category Filter */}
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
-              <FileSpreadsheet className="w-3.5 h-3.5 text-blue-600" /> 1. Select List Name
+              <Sparkles className="w-3.5 h-3.5 text-amber-600" /> 1. Project Category
+            </label>
+            <select
+              value={filters.category}
+              onChange={(e) => setFilters({ ...filters, category: e.target.value })}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-800 font-bold focus:outline-none focus:border-indigo-500 focus:bg-white"
+            >
+              <option value="">All Categories ({options.categoryCounts?.ALL || options.stats?.totalDevices || 0})</option>
+              <option value="TG MINING">🏷️ TG MINING ({options.categoryCounts?.['TG MINING'] || 0})</option>
+              <option value="AP MINING">🏷️ AP MINING ({options.categoryCounts?.['AP MINING'] || 0})</option>
+              <option value="VLTD">🏷️ VLTD / AIS-140 ({options.categoryCounts?.['VLTD'] || 0})</option>
+              <option value="GENERAL">🏷️ GENERAL ({options.categoryCounts?.['GENERAL'] || 0})</option>
+            </select>
+          </div>
+
+          {/* 2. Upload List Name */}
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
+              <FileSpreadsheet className="w-3.5 h-3.5 text-blue-600" /> 2. Select List Name
             </label>
             <select
               value={filters.purchase_batch_id}
@@ -1623,10 +1660,10 @@ export default function ReportsPage() {
             </select>
           </div>
 
-          {/* 2. Installation / Vehicle Status Filter */}
+          {/* 3. Installation / Vehicle Status Filter */}
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
-              <Car className="w-3.5 h-3.5 text-emerald-600" /> 2. Installation Status
+              <Car className="w-3.5 h-3.5 text-emerald-600" /> 3. Installation Status
             </label>
             <select
               value={filters.installed_filter}
@@ -1639,10 +1676,10 @@ export default function ReportsPage() {
             </select>
           </div>
 
-          {/* 3. Stock Place / Location */}
+          {/* 4. Stock Place / Location */}
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
-              <MapPin className="w-3.5 h-3.5 text-indigo-600" /> 3. Stock Place / Location
+              <MapPin className="w-3.5 h-3.5 text-indigo-600" /> 4. Stock Place / Location
             </label>
             <select
               value={filters.stock_place}
@@ -1658,10 +1695,10 @@ export default function ReportsPage() {
             </select>
           </div>
 
-          {/* 4. Device Type */}
+          {/* 5. Device Type */}
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
-              <Boxes className="w-3.5 h-3.5 text-amber-600" /> Device Type
+              <Boxes className="w-3.5 h-3.5 text-amber-600" /> 5. Device Type
             </label>
             <select
               value={filters.device_type_id}
@@ -1677,10 +1714,10 @@ export default function ReportsPage() {
             </select>
           </div>
 
-          {/* 5. Month Filter */}
+          {/* 6. Month Filter */}
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
-              <Calendar className="w-3.5 h-3.5 text-emerald-600" /> Month (August, July, etc.)
+              <Calendar className="w-3.5 h-3.5 text-emerald-600" /> 6. Month Filter
             </label>
             <select
               value={filters.month}
@@ -1699,10 +1736,10 @@ export default function ReportsPage() {
             </select>
           </div>
 
-          {/* 6. Payment Status Filter */}
+          {/* 7. Payment Status Filter */}
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
-              <CreditCard className="w-3.5 h-3.5 text-blue-600" /> Payment Status
+              <CreditCard className="w-3.5 h-3.5 text-blue-600" /> 7. Payment Status
             </label>
             <select
               value={filters.payment_status}
@@ -1715,10 +1752,10 @@ export default function ReportsPage() {
             </select>
           </div>
 
-          {/* 7. Date From */}
+          {/* 8. Date From */}
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
-              <Calendar className="w-3.5 h-3.5 text-slate-500" /> From Date
+              <Calendar className="w-3.5 h-3.5 text-slate-500" /> 8. From Date
             </label>
             <input
               type="date"
@@ -1728,10 +1765,10 @@ export default function ReportsPage() {
             />
           </div>
 
-          {/* 8. Date To */}
+          {/* 9. Date To */}
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
-              <Calendar className="w-3.5 h-3.5 text-slate-500" /> To Date
+              <Calendar className="w-3.5 h-3.5 text-slate-500" /> 9. To Date
             </label>
             <input
               type="date"
