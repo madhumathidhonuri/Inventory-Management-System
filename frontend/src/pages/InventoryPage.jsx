@@ -102,6 +102,7 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
 
   // Advanced Filter Dropdowns State
   const [stockPlaceFilter, setStockPlaceFilter] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
   const [salesPersonFilter, setSalesPersonFilter] = useState('');
   const [rtoFilter, setRtoFilter] = useState('');
   const [paymentFilter, setPaymentFilter] = useState('');
@@ -796,9 +797,25 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
     let totalOfficeStock = 0;
     let totalActivated = 0;
     let totalNotActivated = 0;
+    let totalTgMining = 0;
+    let totalApMining = 0;
+    let totalVltd = 0;
+    let totalGeneral = 0;
 
     devices.forEach(dev => {
       const attrs = dev.additional_attributes || {};
+
+      // Category detection
+      const cat = (attrs['CATEGORY'] || attrs['DEVICE CATEGORY'] || dev.device_type_category || '').toString().toUpperCase().trim();
+      if (cat.includes('TG MINING') || (cat.includes('TG') && cat.includes('MINING'))) {
+        totalTgMining++;
+      } else if (cat.includes('AP MINING') || (cat.includes('AP') && cat.includes('MINING'))) {
+        totalApMining++;
+      } else if (cat.includes('VLTD')) {
+        totalVltd++;
+      } else if (cat.includes('GENERAL')) {
+        totalGeneral++;
+      }
 
       // Stock place
       const placeKey = Object.keys(attrs).find(k => /stock.*place|place|location/i.test(k));
@@ -877,7 +894,11 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
       totalPending,
       totalOfficeStock,
       totalActivated,
-      totalNotActivated
+      totalNotActivated,
+      totalTgMining,
+      totalApMining,
+      totalVltd,
+      totalGeneral
     };
   }, [devices]);
 
@@ -889,6 +910,12 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
       if (typeFilter && String(dev.device_type_id) !== String(typeFilter)) return false;
 
       const attrs = dev.additional_attributes || {};
+      const devCategory = (attrs['CATEGORY'] || attrs['DEVICE CATEGORY'] || dev.device_type_category || '').toString().toUpperCase().trim();
+
+      // Category filter
+      if (categoryFilter) {
+        if (!devCategory.includes(categoryFilter) && !categoryFilter.includes(devCategory)) return false;
+      }
 
       // Vehicle & Installed status
       const vehKey = Object.keys(attrs).find(k => /vehicle|veh_no|reg_no/i.test(k));
@@ -922,6 +949,10 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
       if (dealerFilter && placeVal !== dealerFilter) return false;
 
       // 2. Quick Preset Pills Filter
+      if (quickPreset === 'TG_MINING' && !devCategory.includes('TG MINING') && !devCategory.includes('TG_MINING')) return false;
+      if (quickPreset === 'AP_MINING' && !devCategory.includes('AP MINING') && !devCategory.includes('AP_MINING')) return false;
+      if (quickPreset === 'VLTD' && !devCategory.includes('VLTD')) return false;
+      if (quickPreset === 'GENERAL' && !devCategory.includes('GENERAL')) return false;
       if (quickPreset === 'OFFICE' && !/office/i.test(placeVal)) return false;
       if (quickPreset === 'INSTALLED' && !isInstalled) return false;
       if (quickPreset === 'READY_STOCK' && isInstalled) return false;
@@ -969,13 +1000,14 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
 
       return true;
     });
-  }, [devices, batchFilter, typeFilter, quickPreset, dealerFilter, stockPlaceFilter, paymentFilter, deploymentFilter, salesPersonFilter, rtoFilter, activationFilter, agingFilter, rmaFilter]);
+  }, [devices, batchFilter, typeFilter, quickPreset, dealerFilter, stockPlaceFilter, categoryFilter, paymentFilter, deploymentFilter, salesPersonFilter, rtoFilter, activationFilter, agingFilter, rmaFilter]);
 
   // Reset all active filters
   const handleResetAllFilters = () => {
     setSearch('');
     setQuickPreset('ALL');
     setStockPlaceFilter('');
+    setCategoryFilter('');
     setSalesPersonFilter('');
     setRtoFilter('');
     setPaymentFilter('');
@@ -992,6 +1024,7 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
     search ||
     quickPreset !== 'ALL' ||
     stockPlaceFilter ||
+    categoryFilter ||
     salesPersonFilter ||
     rtoFilter ||
     paymentFilter ||
@@ -1635,27 +1668,48 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
       <div className="flex flex-wrap items-center gap-2">
         {[
           { id: 'ALL', label: 'All Devices', count: devices.length },
+          { id: 'TG_MINING', label: '⛏️ TG Mining', count: filterOptions.totalTgMining, category: 'TG MINING' },
+          { id: 'AP_MINING', label: '⛰️ AP Mining', count: filterOptions.totalApMining, category: 'AP MINING' },
+          { id: 'VLTD', label: '📡 VLTD', count: filterOptions.totalVltd, category: 'VLTD' },
+          { id: 'GENERAL', label: '🏷️ General', count: filterOptions.totalGeneral, category: 'GENERAL' },
           { id: 'INSTALLED', label: '🚗 Installed in Vehicles', count: filterOptions.totalInstalled },
           { id: 'PENDING_PAYMENT', label: '⏳ Payment Pending', count: filterOptions.totalPending },
           { id: 'PAID', label: '✅ Payment Received', count: filterOptions.totalPaid }
-        ].map(chip => (
-          <button
-            key={chip.id}
-            onClick={() => setQuickPreset(quickPreset === chip.id ? 'ALL' : chip.id)}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 border ${
-              quickPreset === chip.id
-                ? 'bg-blue-600 text-white border-blue-600 shadow-xs ring-2 ring-blue-200'
-                : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50 hover:border-slate-300'
-            }`}
-          >
-            <span>{chip.label}</span>
-            <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-mono ${
-              quickPreset === chip.id ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-700'
-            }`}>
-              {chip.count}
-            </span>
-          </button>
-        ))}
+        ].map(chip => {
+          const isActive = chip.category 
+            ? categoryFilter === chip.category 
+            : quickPreset === chip.id && !categoryFilter;
+          return (
+            <button
+              key={chip.id}
+              onClick={() => {
+                if (chip.category) {
+                  if (categoryFilter === chip.category) {
+                    setCategoryFilter('');
+                  } else {
+                    setCategoryFilter(chip.category);
+                    setQuickPreset('ALL');
+                  }
+                } else {
+                  setCategoryFilter('');
+                  setQuickPreset(quickPreset === chip.id ? 'ALL' : chip.id);
+                }
+              }}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 border ${
+                isActive
+                  ? 'bg-blue-600 text-white border-blue-600 shadow-xs ring-2 ring-blue-200'
+                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50 hover:border-slate-300'
+              }`}
+            >
+              <span>{chip.label}</span>
+              <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-mono ${
+                isActive ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-700'
+              }`}>
+                {chip.count}
+              </span>
+            </button>
+          );
+        })}
 
         {isAnyFilterActive && (
           <button
@@ -1716,7 +1770,7 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
               className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl border border-emerald-600 flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
               title="Download currently filtered stock records in formatted Excel sheet (.xlsx) with all IMEIs, VLTD SNo, SIMs & Customer intact"
             >
-              <Download className="w-3.5 h-3.5 text-white" /> Export Excel (.xlsx)
+              <Download className="w-3.5 h-3.5 text-white" /> Export Excel ({filteredDevices.length})
             </button>
 
             <button
@@ -1730,9 +1784,27 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
         </div>
 
         {/* Dropdowns Multi-Filter Bar */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-2 pt-2 border-t border-slate-100">
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 pt-2 border-t border-slate-100">
           
-          {/* 1. Stock Place Filter */}
+          {/* 1. Project Category Filter */}
+          <div className="space-y-1">
+            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Category</label>
+            <select
+              value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value)}
+              className={`w-full bg-slate-50 border rounded-xl px-2.5 py-1.5 text-xs focus:outline-none focus:border-blue-500 font-medium transition-colors ${
+                categoryFilter ? 'border-amber-400 bg-amber-50/50 text-amber-900 font-bold' : 'border-slate-200 text-slate-700'
+              }`}
+            >
+              <option value="">All Categories</option>
+              <option value="TG MINING">TG Mining ({filterOptions.totalTgMining})</option>
+              <option value="AP MINING">AP Mining ({filterOptions.totalApMining})</option>
+              <option value="VLTD">VLTD ({filterOptions.totalVltd})</option>
+              <option value="GENERAL">General ({filterOptions.totalGeneral})</option>
+            </select>
+          </div>
+
+          {/* 2. Stock Place Filter */}
           <div className="space-y-1">
             <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Stock Place</label>
             <select
@@ -1749,7 +1821,7 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
             </select>
           </div>
 
-          {/* 2. Payment Status Filter */}
+          {/* 3. Payment Status Filter */}
           <div className="space-y-1">
             <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Payment Status</label>
             <select
@@ -1765,7 +1837,7 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
             </select>
           </div>
 
-          {/* 3. Deployment / Installation Filter */}
+          {/* 4. Deployment / Installation Filter */}
           <div className="space-y-1">
             <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Deployment</label>
             <select
@@ -1781,7 +1853,7 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
             </select>
           </div>
 
-          {/* 4. Sales Person Filter */}
+          {/* 5. Sales Person Filter */}
           <div className="space-y-1">
             <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Sales Person</label>
             <select
@@ -1798,7 +1870,7 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
             </select>
           </div>
 
-          {/* 5. RTO Location Filter */}
+          {/* 6. RTO Location Filter */}
           <div className="space-y-1">
             <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">RTO Location</label>
             <select
@@ -1815,7 +1887,7 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
             </select>
           </div>
 
-          {/* 6. Device Type Filter */}
+          {/* 7. Device Type Filter */}
           <div className="space-y-1">
             <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Device Type</label>
             <select
@@ -1832,7 +1904,7 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
             </select>
           </div>
 
-          {/* 7. Upload Batch / List */}
+          {/* 8. Upload Batch / List */}
           <div className="space-y-1">
             <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Upload List</label>
             <div className="flex items-center gap-1">
