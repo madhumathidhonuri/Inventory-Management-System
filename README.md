@@ -116,6 +116,25 @@ An enterprise-grade, full-stack **Inventory Management & Telematics Operations S
 
 ---
 
+### 12. 👷 Staff & Field Performance Hub (Sales Team & Technicians)
+- **Super Admin Performance Suite**: Dedicated live monitoring hub for field and commercial operations with zero target configuration required.
+- **Technicians & Fitters Live Tracking**:
+  - Exact counts of completed vehicle fitments per technician.
+  - Vehicle type distribution tags (*Trucks, Cars, Buses, Heavy Equipment*).
+  - Territory/RTO coverage and active date ranges.
+- **Sales Executives & Managers Portfolio**:
+  - Units sold and total commercial revenue generated per sales rep.
+  - Sales Manager team rollups and aggregated regional sales volume.
+  - Customer onboarding counts and unique client rosters.
+- **Itemized Drill-Down Job Sheets & CSV Export**:
+  - 1-click modal to inspect every vehicle fitted or sold by any specific staff member (Date, Vehicle No, Type, IMEI with trace link, Customer, Location, Price).
+  - Instant CSV export of individual staff activity sheets.
+- **Streamlined Inventory Filtering & Category-Scoped Excel Exports**:
+  - Modernized 6-column inventory filter bar (*Category, Stock Place, Payment Status, Deployment, Device Type, Upload List*).
+  - Precise category-scoped Excel (`.xlsx`) and CSV exports for `TG MINING`, `AP MINING`, and `VLTD` projects without data leakage.
+
+---
+
 ## 🛠️ Architecture & Tech Stack
 
 | Layer | Technology |

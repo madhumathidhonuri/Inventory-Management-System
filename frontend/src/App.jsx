@@ -16,6 +16,7 @@ import DeviceTypesPage from './pages/DeviceTypesPage';
 import ReportsPage from './pages/ReportsPage';
 import UserManagementPage from './pages/UserManagementPage';
 import ExpensesPage from './pages/ExpensesPage';
+import StaffPerformancePage from './pages/StaffPerformancePage';
 import MobileAppView from './pages/MobileAppView';
 
 function MainLayout() {
@@ -92,6 +93,8 @@ function MainLayout() {
         return <DeviceTypesPage />;
       case 'reports':
         return <ReportsPage />;
+      case 'staff-performance':
+        return <StaffPerformancePage onOpenTraceDrawer={openTraceDrawer} />;
       case 'users':
         return <UserManagementPage />;
       default:

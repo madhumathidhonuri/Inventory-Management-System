@@ -674,6 +674,38 @@ export async function fetchPnLSummary(params = {}) {
   return res.json();
 }
 
+// ==========================================
+// 👷 STAFF & FIELD PERFORMANCE (SALES & TECHNICIANS)
+// ==========================================
+export async function fetchStaffPerformanceSummary(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  const res = await fetch(`${API_BASE}/staff-performance/summary?${query}`);
+  if (!res.ok) throw new Error('Failed to fetch staff performance summary');
+  return res.json();
+}
+
+export async function fetchTechnicianPerformance(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  const res = await fetch(`${API_BASE}/staff-performance/technicians?${query}`);
+  if (!res.ok) throw new Error('Failed to fetch technician performance');
+  return res.json();
+}
+
+export async function fetchSalesPerformance(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  const res = await fetch(`${API_BASE}/staff-performance/sales?${query}`);
+  if (!res.ok) throw new Error('Failed to fetch sales performance');
+  return res.json();
+}
+
+export async function fetchStaffDrilldown(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  const res = await fetch(`${API_BASE}/staff-performance/drilldown?${query}`);
+  if (!res.ok) throw new Error('Failed to fetch staff drilldown details');
+  return res.json();
+}
+
+
 
 
 

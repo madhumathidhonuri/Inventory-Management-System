@@ -805,15 +805,24 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
     devices.forEach(dev => {
       const attrs = dev.additional_attributes || {};
 
-      // Category detection
-      const cat = (attrs['CATEGORY'] || attrs['DEVICE CATEGORY'] || dev.device_type_category || '').toString().toUpperCase().trim();
-      if (cat.includes('TG MINING') || (cat.includes('TG') && cat.includes('MINING'))) {
+      // Robust Category detection (checks Category, Stock Place, Site Name, Project, TG Mining Date)
+      const catVal = (attrs['CATEGORY'] || attrs['DEVICE CATEGORY'] || attrs['PROJECT'] || attrs['PROJECT CATEGORY'] || attrs['SERVICE CATEGORY'] || dev.device_type_category || '').toString().toUpperCase().trim();
+      const stockPlace = (attrs['STOCK PLACE'] || attrs['Stock Place'] || attrs['LOCATION'] || dev.current_holder_name || '').toString().toUpperCase().trim();
+      const remarks = (attrs['REMARKS'] || attrs['Remarks'] || attrs['SITE NAME'] || '').toString().toUpperCase().trim();
+      
+      let resolvedCategory = 'GENERAL';
+      if (catVal.includes('TG MINING') || (catVal.includes('TG') && catVal.includes('MINING')) || 
+          stockPlace.includes('TG MINING') || (stockPlace.includes('TG') && stockPlace.includes('MINING')) ||
+          remarks.includes('TG MINING') || attrs['TG MINING DATE'] || attrs['TG_MINING_DATE']) {
+        resolvedCategory = 'TG MINING';
         totalTgMining++;
-      } else if (cat.includes('AP MINING') || (cat.includes('AP') && cat.includes('MINING'))) {
+      } else if (catVal.includes('AP MINING') || (catVal.includes('AP') && catVal.includes('MINING')) || stockPlace.includes('AP MINING')) {
+        resolvedCategory = 'AP MINING';
         totalApMining++;
-      } else if (cat.includes('VLTD')) {
+      } else if (catVal.includes('VLTD') || stockPlace.includes('VLTD') || attrs['CERTIFICATE ISSUED DATE']) {
+        resolvedCategory = 'VLTD';
         totalVltd++;
-      } else if (cat.includes('GENERAL')) {
+      } else {
         totalGeneral++;
       }
 
@@ -850,16 +859,35 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
         totalReadyStock++;
       }
 
-      // Payment status
-      const payKey = Object.keys(attrs).find(k => /amount.*rec|payment|received/i.test(k));
-      const payVal = payKey ? String(attrs[payKey] || '').toUpperCase().trim() : '';
-      if (hasVeh) {
-        const isPaid = (payVal.includes('REC') || payVal.includes('PAID')) && !payVal.includes('NOT') && !payVal.includes('UNPAID');
-        if (isPaid) {
-          totalPaid++;
-        } else {
-          totalPending++;
+      // Robust Payment Status Detection (Prioritizes explicit AMOUNT RECEIVED / Payment Status keys)
+      const payStatusKey = Object.keys(attrs).find(k => 
+        /^(amount\s*received|payment\s*status|pay\s*status|payment)$/i.test(k.trim()) ||
+        (/^amount.*rec/i.test(k.trim()) && !/by|date/i.test(k.trim()))
+      );
+      const rawPayVal = payStatusKey && attrs[payStatusKey] ? String(attrs[payStatusKey]).toUpperCase().trim() : '';
+
+      let isPaid = false;
+      let isPending = false;
+
+      if (rawPayVal) {
+        if (rawPayVal.includes('NOT') || rawPayVal.includes('UNPAID') || rawPayVal.includes('PEND') || rawPayVal.includes('DUE') || rawPayVal.includes('NO')) {
+          isPending = true;
+        } else if (rawPayVal.includes('REC') || rawPayVal.includes('PAID') || rawPayVal.includes('DONE') || rawPayVal.includes('YES') || rawPayVal.includes('CLEAR')) {
+          isPaid = true;
         }
+      } else {
+        const payBy = Object.keys(attrs).find(k => /amount.*rec.*by|received\s*by/i.test(k));
+        if (payBy && attrs[payBy] && String(attrs[payBy]).trim()) {
+          isPaid = true;
+        } else if (hasVeh) {
+          isPending = true;
+        }
+      }
+
+      if (isPaid) {
+        totalPaid++;
+      } else if (isPending) {
+        totalPending++;
       }
 
       // Activation status
@@ -910,11 +938,26 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
       if (typeFilter && String(dev.device_type_id) !== String(typeFilter)) return false;
 
       const attrs = dev.additional_attributes || {};
-      const devCategory = (attrs['CATEGORY'] || attrs['DEVICE CATEGORY'] || dev.device_type_category || '').toString().toUpperCase().trim();
 
-      // Category filter
+      // 1. Unified Category Resolution
+      const catVal = (attrs['CATEGORY'] || attrs['DEVICE CATEGORY'] || attrs['PROJECT'] || attrs['PROJECT CATEGORY'] || attrs['SERVICE CATEGORY'] || dev.device_type_category || '').toString().toUpperCase().trim();
+      const stockPlace = (attrs['STOCK PLACE'] || attrs['Stock Place'] || attrs['LOCATION'] || dev.current_holder_name || '').toString().toUpperCase().trim();
+      const remarks = (attrs['REMARKS'] || attrs['Remarks'] || attrs['SITE NAME'] || '').toString().toUpperCase().trim();
+      
+      let devCategory = 'GENERAL';
+      if (catVal.includes('TG MINING') || (catVal.includes('TG') && catVal.includes('MINING')) || 
+          stockPlace.includes('TG MINING') || (stockPlace.includes('TG') && stockPlace.includes('MINING')) ||
+          remarks.includes('TG MINING') || attrs['TG MINING DATE'] || attrs['TG_MINING_DATE']) {
+        devCategory = 'TG MINING';
+      } else if (catVal.includes('AP MINING') || (catVal.includes('AP') && catVal.includes('MINING')) || stockPlace.includes('AP MINING')) {
+        devCategory = 'AP MINING';
+      } else if (catVal.includes('VLTD') || stockPlace.includes('VLTD') || attrs['CERTIFICATE ISSUED DATE']) {
+        devCategory = 'VLTD';
+      }
+
+      // Category filter check
       if (categoryFilter) {
-        if (!devCategory.includes(categoryFilter) && !categoryFilter.includes(devCategory)) return false;
+        if (devCategory !== categoryFilter && !devCategory.includes(categoryFilter)) return false;
       }
 
       // Vehicle & Installed status
@@ -922,11 +965,30 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
       const vehNo = vehKey && attrs[vehKey] ? String(attrs[vehKey]).trim() : '';
       const isInstalled = Boolean(vehNo) || dev.current_status === 'INSTALLED';
 
-      // Payment status
-      const payKey = Object.keys(attrs).find(k => /amount.*rec|payment|received/i.test(k));
-      const payVal = payKey ? String(attrs[payKey] || '').toUpperCase().trim() : '';
-      const isPaid = (payVal.includes('REC') || payVal.includes('PAID')) && !payVal.includes('NOT') && !payVal.includes('UNPAID');
-      const isPending = isInstalled && !isPaid;
+      // 2. Unified Payment Status Resolution
+      const payStatusKey = Object.keys(attrs).find(k => 
+        /^(amount\s*received|payment\s*status|pay\s*status|payment)$/i.test(k.trim()) ||
+        (/^amount.*rec/i.test(k.trim()) && !/by|date/i.test(k.trim()))
+      );
+      const rawPayVal = payStatusKey && attrs[payStatusKey] ? String(attrs[payStatusKey]).toUpperCase().trim() : '';
+
+      let isPaid = false;
+      let isPending = false;
+
+      if (rawPayVal) {
+        if (rawPayVal.includes('NOT') || rawPayVal.includes('UNPAID') || rawPayVal.includes('PEND') || rawPayVal.includes('DUE') || rawPayVal.includes('NO')) {
+          isPending = true;
+        } else if (rawPayVal.includes('REC') || rawPayVal.includes('PAID') || rawPayVal.includes('DONE') || rawPayVal.includes('YES') || rawPayVal.includes('CLEAR')) {
+          isPaid = true;
+        }
+      } else {
+        const payBy = Object.keys(attrs).find(k => /amount.*rec.*by|received\s*by/i.test(k));
+        if (payBy && attrs[payBy] && String(attrs[payBy]).trim()) {
+          isPaid = true;
+        } else if (isInstalled) {
+          isPending = true;
+        }
+      }
 
       // Stock place
       const placeKey = Object.keys(attrs).find(k => /stock.*place|place|location/i.test(k));
@@ -945,14 +1007,14 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
       const actVal = actKey ? String(attrs[actKey] || '').toUpperCase().trim() : '';
       const isActivated = actVal.includes('YES') || actVal.includes('TRUE') || actVal.includes('ACTIVE');
 
-      // 1. Dealer Allocations Bar Selection
+      // Dealer Allocations Bar Selection
       if (dealerFilter && placeVal !== dealerFilter) return false;
 
-      // 2. Quick Preset Pills Filter
-      if (quickPreset === 'TG_MINING' && !devCategory.includes('TG MINING') && !devCategory.includes('TG_MINING')) return false;
-      if (quickPreset === 'AP_MINING' && !devCategory.includes('AP MINING') && !devCategory.includes('AP_MINING')) return false;
-      if (quickPreset === 'VLTD' && !devCategory.includes('VLTD')) return false;
-      if (quickPreset === 'GENERAL' && !devCategory.includes('GENERAL')) return false;
+      // Quick Preset Pills Filter
+      if (quickPreset === 'TG_MINING' && devCategory !== 'TG MINING') return false;
+      if (quickPreset === 'AP_MINING' && devCategory !== 'AP MINING') return false;
+      if (quickPreset === 'VLTD' && devCategory !== 'VLTD') return false;
+      if (quickPreset === 'GENERAL' && devCategory !== 'GENERAL') return false;
       if (quickPreset === 'OFFICE' && !/office/i.test(placeVal)) return false;
       if (quickPreset === 'INSTALLED' && !isInstalled) return false;
       if (quickPreset === 'READY_STOCK' && isInstalled) return false;
@@ -960,7 +1022,7 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
       if (quickPreset === 'PAID' && !isPaid) return false;
       if (quickPreset === 'ACTIVATED' && !isActivated) return false;
 
-      // 3. Dropdown Specific Multi-Filters
+      // Dropdown Specific Multi-Filters
       if (stockPlaceFilter) {
         if (stockPlaceFilter === '__OFFICE__') {
           if (!/office/i.test(placeVal)) return false;
@@ -1189,11 +1251,27 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
       csvRows.push(row.join(','));
     });
 
+    const activeDt = typeFilter ? deviceTypes.find(dt => dt.id.toString() === typeFilter.toString()) : null;
+    let baseTypeName = activeDt ? activeDt.name : (batchFilter ? 'Batch_Stock' : 'Inventory_Stock');
+    let categorySuffix = '';
+    if (categoryFilter) {
+      categorySuffix = `_${categoryFilter.replace(/\s+/g, '_')}`;
+    } else if (quickPreset === 'TG_MINING') {
+      categorySuffix = '_TG_MINING';
+    } else if (quickPreset === 'AP_MINING') {
+      categorySuffix = '_AP_MINING';
+    } else if (quickPreset === 'VLTD') {
+      categorySuffix = '_VLTD';
+    } else if (quickPreset === 'GENERAL') {
+      categorySuffix = '_GENERAL';
+    }
+    const activeTypeName = `${baseTypeName}${categorySuffix}`;
+
     const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.setAttribute('href', url);
-    link.setAttribute('download', `Inventory_Export_${new Date().toISOString().slice(0, 10)}.csv`);
+    link.setAttribute('download', `${activeTypeName}_Export_${new Date().toISOString().slice(0, 10)}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -1207,8 +1285,24 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
     }
     const today = new Date().toISOString().slice(0, 10);
     const activeDt = typeFilter ? deviceTypes.find(dt => dt.id.toString() === typeFilter.toString()) : null;
-    const activeTypeName = activeDt ? activeDt.name : (batchFilter ? 'Batch_Stock' : 'Inventory_Stock');
-    const fileName = `${activeTypeName.replace(/\s+/g, '_')}_List_${today}.xlsx`;
+    let baseTypeName = activeDt ? activeDt.name : (batchFilter ? 'Batch_Stock' : 'Inventory_Stock');
+
+    // Include Category / Preset in filename and sheet header
+    let categorySuffix = '';
+    if (categoryFilter) {
+      categorySuffix = `_${categoryFilter.replace(/\s+/g, '_')}`;
+    } else if (quickPreset === 'TG_MINING') {
+      categorySuffix = '_TG_MINING';
+    } else if (quickPreset === 'AP_MINING') {
+      categorySuffix = '_AP_MINING';
+    } else if (quickPreset === 'VLTD') {
+      categorySuffix = '_VLTD';
+    } else if (quickPreset === 'GENERAL') {
+      categorySuffix = '_GENERAL';
+    }
+
+    const activeTypeName = `${baseTypeName}${categorySuffix}`;
+    const fileName = `${activeTypeName}_List_${today}.xlsx`;
 
     // Determine final ordered columns
     const isSingleTypeView = Boolean(typeFilter || batchFilter || (filteredDevices.length > 0 && new Set(filteredDevices.map(d => d.device_type_id)).size === 1));
@@ -1221,33 +1315,17 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
       exportColumns = ['Device IMEI', 'Device Type', ...displayedColumns];
     }
 
-    // Determine Master Stock (Sheet 1) and New Devices (Sheet 2)
+    // Master Stock MUST strictly be the filtered devices matching user criteria (e.g. TG MINING category)
     let masterStock = filteredDevices;
     let newDevices = [];
 
-    if (batchFilter) {
-      // If user filtered by a specific upload list / batch, find all devices belonging to that device type for Sheet 1
-      const selectedBatch = batches.find(b => b.id.toString() === batchFilter.toString());
-      if (selectedBatch && selectedBatch.device_type_id) {
-        const allTypeDevices = devices.filter(d => String(d.device_type_id) === String(selectedBatch.device_type_id));
-        if (allTypeDevices.length > filteredDevices.length) {
-          masterStock = allTypeDevices;
-          newDevices = filteredDevices;
-        } else {
-          newDevices = filteredDevices;
-        }
-      } else {
-        newDevices = filteredDevices;
-      }
-    } else {
-      // Discover devices from the latest / newest upload batch
-      const batchIds = filteredDevices.map(d => d.purchase_batch_id).filter(Boolean);
-      if (batchIds.length > 0) {
-        const maxBatchId = Math.max(...batchIds);
-        const latestBatchItems = filteredDevices.filter(d => d.purchase_batch_id === maxBatchId);
-        if (latestBatchItems.length > 0) {
-          newDevices = latestBatchItems;
-        }
+    // Discover latest batch items strictly within the filtered devices
+    const batchIds = filteredDevices.map(d => d.purchase_batch_id).filter(Boolean);
+    if (batchIds.length > 0) {
+      const maxBatchId = Math.max(...batchIds);
+      const latestBatchItems = filteredDevices.filter(d => d.purchase_batch_id === maxBatchId);
+      if (latestBatchItems.length > 0 && latestBatchItems.length < filteredDevices.length) {
+        newDevices = latestBatchItems;
       }
     }
 
@@ -1259,7 +1337,7 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
       '1E3A8A', // Royal Navy Blue Header
       {
         newDevices: newDevices.length > 0 ? newDevices : null,
-        sheet1Name: `${activeTypeName.slice(0, 16)} - All Stock`,
+        sheet1Name: `${activeTypeName.slice(0, 20)} - Stock`,
         sheet2Name: `${activeTypeName.slice(0, 16)} - New Devices`
       }
     );
@@ -1784,7 +1862,7 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
         </div>
 
         {/* Dropdowns Multi-Filter Bar */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 pt-2 border-t border-slate-100">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 pt-2 border-t border-slate-100">
           
           {/* 1. Project Category Filter */}
           <div className="space-y-1">
@@ -1853,41 +1931,7 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
             </select>
           </div>
 
-          {/* 5. Sales Person Filter */}
-          <div className="space-y-1">
-            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Sales Person</label>
-            <select
-              value={salesPersonFilter}
-              onChange={(e) => setSalesPersonFilter(e.target.value)}
-              className={`w-full bg-slate-50 border rounded-xl px-2.5 py-1.5 text-xs focus:outline-none focus:border-blue-500 font-medium transition-colors ${
-                salesPersonFilter ? 'border-purple-400 bg-purple-50/50 text-purple-900 font-bold' : 'border-slate-200 text-slate-700'
-              }`}
-            >
-              <option value="">All Sales Persons</option>
-              {filterOptions.salesPersonsList.map((sp, idx) => (
-                <option key={idx} value={sp.name}>{sp.name} ({sp.count})</option>
-              ))}
-            </select>
-          </div>
-
-          {/* 6. RTO Location Filter */}
-          <div className="space-y-1">
-            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">RTO Location</label>
-            <select
-              value={rtoFilter}
-              onChange={(e) => setRtoFilter(e.target.value)}
-              className={`w-full bg-slate-50 border rounded-xl px-2.5 py-1.5 text-xs focus:outline-none focus:border-blue-500 font-medium transition-colors ${
-                rtoFilter ? 'border-amber-400 bg-amber-50/50 text-amber-900 font-bold' : 'border-slate-200 text-slate-700'
-              }`}
-            >
-              <option value="">All RTO Locations</option>
-              {filterOptions.rtoLocationsList.map((r, idx) => (
-                <option key={idx} value={r.name}>{r.name} ({r.count})</option>
-              ))}
-            </select>
-          </div>
-
-          {/* 7. Device Type Filter */}
+          {/* 5. Device Type Filter */}
           <div className="space-y-1">
             <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Device Type</label>
             <select
@@ -1904,7 +1948,7 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
             </select>
           </div>
 
-          {/* 8. Upload Batch / List */}
+          {/* 6. Upload Batch / List */}
           <div className="space-y-1">
             <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Upload List</label>
             <div className="flex items-center gap-1">

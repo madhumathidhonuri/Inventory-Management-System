@@ -16,6 +16,7 @@ export default function Sidebar({ activeTab, setActiveTab }) {
     { id: 'expenses', label: 'Expenses Hub', icon: Wallet, roles: ['SUPER_ADMIN', 'ADMIN_TEAM', 'WAREHOUSE_MANAGER', 'SALES_MANAGER', 'INSTALLER'] },
     { id: 'types', label: 'Device Catalog', icon: Settings, roles: ['SUPER_ADMIN', 'ADMIN_TEAM', 'WAREHOUSE_MANAGER'] },
     { id: 'reports', label: 'Reports & Exports', icon: FileText, roles: ['SUPER_ADMIN', 'ADMIN_TEAM', 'SALES_TEAM', 'WAREHOUSE_MANAGER', 'SALES_MANAGER'] },
+    { id: 'staff-performance', label: 'Staff Performance', icon: Users, roles: ['SUPER_ADMIN'] },
     { id: 'users', label: 'User Roles', icon: UserCheck, roles: ['SUPER_ADMIN'] },
     { id: 'mobile', label: 'Field Mobile Scanner', icon: Smartphone, roles: ['SUPER_ADMIN', 'ADMIN_TEAM', 'INSTALLER', 'WAREHOUSE_MANAGER', 'DEALER'] }
   ];
