@@ -529,3 +529,70 @@ Thank you for your business! For 24/7 technical support or renewal inquiries, fe
   return { message, url, targetPhone, formattedAmount };
 }
 
+/**
+ * 1-Click Multi-Vehicle Overdue Payment Reminder for Aging Ledger
+ */
+export function buildOverduePaymentReminderWhatsAppMessage({
+  phone = '',
+  customerName = 'Valued Customer',
+  amountDue = 0,
+  daysOverdue = 0,
+  vehicles = [],
+  upiId = 'fueltrackspvtltd@icici',
+  payeeName = 'FuelTracks Technologies Pvt. Ltd.'
+}) {
+  const cleanDigits = phone ? String(phone).replace(/[^0-9]/g, '') : '';
+  const targetPhone = cleanDigits.length === 10 ? `91${cleanDigits}` : cleanDigits;
+
+  const dueNum = Math.max(0, parseFloat(amountDue) || 0);
+  const formattedDue = formatINR(dueNum);
+  const upiLink = `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(payeeName)}&am=${dueNum.toFixed(2)}&cu=INR&tn=${encodeURIComponent(`Payment from ${customerName}`)}`;
+
+  const vehicleList = vehicles.length > 0
+    ? vehicles.map(v => `• ${v}`).join('\n')
+    : 'Registered GPS Telematics fleet';
+
+  const urgencyText = daysOverdue > 30
+    ? '⚠️ *URGENT REMINDER:* Your account balance is significantly overdue.'
+    : daysOverdue > 15
+    ? '🔔 *PAYMENT REMINDER:* Your subscription balance is due for settlement.'
+    : '📢 *COURTESY INVOICE:* Pending balance notice.';
+
+  const message = `*${urgencyText}*
+
+*Dear ${customerName || 'Customer'},*
+
+Greetings from *FuelTracks Technologies Pvt. Ltd.*
+
+This is a gentle reminder regarding the pending balance on your GPS Tracking & Telematics devices.
+
+━━━━━━━━━━━━━━━━━━━━━━
+📋 *ACCOUNT STATEMENT:*
+━━━━━━━━━━━━━━━━━━━━━━
+💰 *Total Pending Balance:* *${formattedDue}*
+⏳ *Aging / Overdue:* *${daysOverdue} Days*
+🚗 *Vehicles Covered (${vehicles.length}):*
+${vehicleList}
+━━━━━━━━━━━━━━━━━━━━━━
+
+📲 *1-TAP UPI PAYMENT LINK:*
+👉 ${upiLink}
+*(Tap link on your mobile to pay via PhonePe, Google Pay, Paytm or Cred)*
+
+🏢 *Official UPI ID:* \`${upiId}\`
+🏢 *Payee:* ${payeeName}
+
+Kindly clear the balance to ensure uninterrupted GPS tracking, alert broadcasts, and VAHAN compliance.
+
+If you have already made the payment, kindly ignore this message or reply with the payment screenshot.
+
+Thank you!
+*FuelTracks Support Team* | 📞 +91 998800234 | 🌐 www.fueltracks.in`;
+
+  const url = targetPhone
+    ? `https://api.whatsapp.com/send?phone=${targetPhone}&text=${encodeURIComponent(message)}`
+    : `https://api.whatsapp.com/send?text=${encodeURIComponent(message)}`;
+
+  return { message, url, targetPhone, formattedDue, upiLink };
+}
+

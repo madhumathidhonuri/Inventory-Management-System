@@ -17,7 +17,6 @@ import {
   Download,
   Database,
   Cloud,
-  CloudCheck,
   CheckCircle2,
   AlertCircle
 } from 'lucide-react';

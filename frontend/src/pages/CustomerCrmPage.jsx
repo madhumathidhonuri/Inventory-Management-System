@@ -18,14 +18,28 @@ import {
   DollarSign,
   ShieldCheck,
   X,
-  FileSpreadsheet
+  FileSpreadsheet,
+  AlertTriangle,
+  Send,
+  ExternalLink,
+  Layers
 } from 'lucide-react';
-import { fetchCustomers, fetchCustomerById, updateCustomer, deleteCustomer, getCustomerDirectoryExportUrl } from '../services/api';
+import {
+  fetchCustomers,
+  fetchCustomerById,
+  updateCustomer,
+  deleteCustomer,
+  getCustomerDirectoryExportUrl,
+  fetchCustomerAgingBalances
+} from '../services/api';
 import FitmentReceiptModal from '../components/FitmentReceiptModal';
 import ConsolidatedReminderModal from '../components/ConsolidatedReminderModal';
-import { buildPaymentDueReminderWhatsAppMessage } from '../utils/whatsapp';
+import { buildPaymentDueReminderWhatsAppMessage, buildOverduePaymentReminderWhatsAppMessage } from '../utils/whatsapp';
 
 export default function CustomerCrmPage({ onOpenTraceDrawer }) {
+  // Tab: 'directory' | 'aging'
+  const [crmTab, setCrmTab] = useState('directory');
+
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -34,6 +48,11 @@ export default function CustomerCrmPage({ onOpenTraceDrawer }) {
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [selectedReceiptDevice, setSelectedReceiptDevice] = useState(null);
   const [consolidatedModalData, setConsolidatedModalData] = useState(null);
+
+  // Aging Balances State
+  const [agingData, setAgingData] = useState(null);
+  const [agingLoading, setAgingLoading] = useState(false);
+  const [agingBucketFilter, setAgingBucketFilter] = useState('ALL'); // 'ALL' | '0_15' | '16_30' | '30_PLUS'
 
   // Edit Customer Modal State
   const [editingCustomer, setEditingCustomer] = useState(null);
@@ -51,7 +70,20 @@ export default function CustomerCrmPage({ onOpenTraceDrawer }) {
 
   useEffect(() => {
     loadData();
+    loadAgingData();
   }, [search]);
+
+  const loadAgingData = async () => {
+    setAgingLoading(true);
+    try {
+      const res = await fetchCustomerAgingBalances();
+      if (res.success) setAgingData(res);
+    } catch (err) {
+      console.error('Failed to load aging balances:', err);
+    } finally {
+      setAgingLoading(false);
+    }
+  };
 
   const loadData = async () => {
     setLoading(true);
@@ -177,80 +209,329 @@ export default function CustomerCrmPage({ onOpenTraceDrawer }) {
         </div>
       </div>
 
-      {/* Search Bar */}
-      <div className="glass-panel p-4 rounded-2xl">
-        <div className="relative w-full md:w-96">
-          <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
-          <input
-            type="text"
-            placeholder="Search by customer name, phone, address, software login..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-4 py-2 text-xs text-slate-900 focus:outline-none focus:border-indigo-500 font-medium"
-          />
-        </div>
+      {/* CRM Navigation Tabs */}
+      <div className="flex items-center space-x-2 border-b border-slate-200 pb-3">
+        <button
+          onClick={() => setCrmTab('directory')}
+          className={`flex items-center space-x-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+            crmTab === 'directory'
+              ? 'bg-indigo-600 text-white shadow-md shadow-indigo-100'
+              : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+          }`}
+        >
+          <Users className="w-4 h-4" />
+          <span>Customer Accounts & Fleets</span>
+          <span className={`px-2 py-0.5 text-[10px] rounded-full font-bold ${
+            crmTab === 'directory' ? 'bg-indigo-700 text-white' : 'bg-slate-100 text-slate-600'
+          }`}>
+            {customers.length}
+          </span>
+        </button>
+
+        <button
+          onClick={() => setCrmTab('aging')}
+          className={`flex items-center space-x-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+            crmTab === 'aging'
+              ? 'bg-rose-600 text-white shadow-md shadow-rose-100'
+              : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+          }`}
+        >
+          <AlertTriangle className="w-4 h-4" />
+          <span>Aging Balances & Overdue Ledger</span>
+          <span className={`px-2 py-0.5 text-[10px] rounded-full font-bold ${
+            crmTab === 'aging' ? 'bg-rose-700 text-white' : 'bg-slate-100 text-slate-600'
+          }`}>
+            {agingData?.debtors?.length || 0}
+          </span>
+        </button>
       </div>
 
-      {/* Main Grid: Directory vs Detail Pane */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* Customer Directory List */}
-        <div className="glass-panel rounded-2xl overflow-hidden divide-y divide-slate-100 flex flex-col h-[650px]">
-          <div className="p-3.5 bg-slate-50 font-bold text-xs text-slate-700 border-b border-slate-200 flex items-center justify-between">
-            <span>Customer Accounts</span>
-            <span className="text-[11px] font-normal text-slate-500">{customers.length} total</span>
-          </div>
-          
-          <div className="overflow-y-auto flex-1 divide-y divide-slate-100">
-            {loading ? (
-              <div className="p-8 text-center text-xs text-slate-400">Loading directory...</div>
-            ) : customers.length === 0 ? (
-              <div className="p-8 text-center text-xs text-slate-400">No customers found.</div>
-            ) : (
-              customers.map((c) => {
-                const isSelected = selectedCustomerId === c.id;
-                return (
-                  <div
-                    key={c.id}
-                    onClick={() => handleSelectCustomer(c.id)}
-                    className={`p-3.5 hover:bg-slate-50 cursor-pointer transition-colors flex items-center justify-between ${
-                      isSelected ? 'bg-indigo-50/90 border-l-4 border-indigo-600' : ''
-                    }`}
-                  >
-                    <div className="space-y-0.5">
-                      <h4 className="text-xs font-bold text-slate-900">{c.name}</h4>
-                      <div className="flex items-center gap-2 text-[11px] text-slate-500">
-                        <span className="font-mono text-indigo-700 font-bold">{c.phone_number}</span>
-                        <span>• {c.customer_type || 'Individual'}</span>
-                      </div>
-                      {c.software_user_id && (
-                        <div className="text-[10px] text-indigo-600 font-mono">
-                          ID: <strong>{c.software_user_id}</strong>
-                        </div>
-                      )}
-                    </div>
+      {crmTab === 'aging' ? (
+        /* ========================================= */
+        /* ⏳ AGING BALANCES & CREDIT RISK LEDGER    */
+        /* ========================================= */
+        <div className="space-y-5 animate-in fade-in-50">
+          {/* 3 Summary Aging Risk Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+            <div
+              onClick={() => setAgingBucketFilter('ALL')}
+              className={`p-4 rounded-2xl border transition-all cursor-pointer ${
+                agingBucketFilter === 'ALL'
+                  ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
+                  : 'bg-white text-slate-800 border-slate-200 hover:border-slate-300 shadow-2xs'
+              }`}
+            >
+              <div className="text-[11px] font-bold uppercase tracking-wider opacity-80">Total Outstanding</div>
+              <div className="text-2xl font-black mt-1 font-mono">
+                ₹{Number(agingData?.summary?.total_receivable || 0).toLocaleString('en-IN')}
+              </div>
+              <div className="text-[10px] opacity-75 mt-0.5">
+                Across {agingData?.summary?.debtor_count || 0} pending accounts
+              </div>
+            </div>
 
-                    <div className="flex items-center space-x-2">
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
-                        {c.vehicle_count || 0} Veh
-                      </span>
-                      <ChevronRight className="w-4 h-4 text-slate-400" />
-                    </div>
-                  </div>
-                );
-              })
-            )}
+            {/* 0-15 Days */}
+            <div
+              onClick={() => setAgingBucketFilter('0_15')}
+              className={`p-4 rounded-2xl border transition-all cursor-pointer ${
+                agingBucketFilter === '0_15'
+                  ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
+                  : 'bg-emerald-50/70 text-emerald-950 border-emerald-200 hover:border-emerald-300 shadow-2xs'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold uppercase tracking-wider">0 - 15 Days (Current)</span>
+                <span className="text-[10px] px-1.5 py-0.5 rounded font-bold bg-emerald-200 text-emerald-900">🟢 Normal</span>
+              </div>
+              <div className="text-2xl font-black mt-1 font-mono">
+                ₹{Number(agingData?.summary?.bucket_0_15 || 0).toLocaleString('en-IN')}
+              </div>
+              <div className="text-[10px] opacity-80 mt-0.5">Recent fitments & current invoices</div>
+            </div>
+
+            {/* 16-30 Days */}
+            <div
+              onClick={() => setAgingBucketFilter('16_30')}
+              className={`p-4 rounded-2xl border transition-all cursor-pointer ${
+                agingBucketFilter === '16_30'
+                  ? 'bg-amber-600 text-white border-amber-600 shadow-sm'
+                  : 'bg-amber-50/70 text-amber-950 border-amber-200 hover:border-amber-300 shadow-2xs'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold uppercase tracking-wider">16 - 30 Days (Due Soon)</span>
+                <span className="text-[10px] px-1.5 py-0.5 rounded font-bold bg-amber-200 text-amber-900">🟡 Due</span>
+              </div>
+              <div className="text-2xl font-black mt-1 font-mono">
+                ₹{Number(agingData?.summary?.bucket_16_30 || 0).toLocaleString('en-IN')}
+              </div>
+              <div className="text-[10px] opacity-80 mt-0.5">Follow-up reminder recommended</div>
+            </div>
+
+            {/* 30+ Days */}
+            <div
+              onClick={() => setAgingBucketFilter('30_PLUS')}
+              className={`p-4 rounded-2xl border transition-all cursor-pointer ${
+                agingBucketFilter === '30_PLUS'
+                  ? 'bg-rose-600 text-white border-rose-600 shadow-sm'
+                  : 'bg-rose-50/70 text-rose-950 border-rose-200 hover:border-rose-300 shadow-2xs'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold uppercase tracking-wider">30+ Days (Overdue)</span>
+                <span className="text-[10px] px-1.5 py-0.5 rounded font-bold bg-rose-200 text-rose-900">🔴 Critical</span>
+              </div>
+              <div className="text-2xl font-black mt-1 font-mono">
+                ₹{Number(agingData?.summary?.bucket_30_plus || 0).toLocaleString('en-IN')}
+              </div>
+              <div className="text-[10px] opacity-80 mt-0.5">Immediate collection / WhatsApp alert</div>
+            </div>
+          </div>
+
+          {/* Aging Debtors Table */}
+          <div className="glass-panel rounded-2xl overflow-hidden">
+            <div className="p-4 bg-slate-50/80 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">Customer Outstanding Accounts Ledger</h3>
+                <p className="text-[11px] text-slate-500">
+                  Showing {agingBucketFilter === 'ALL' ? 'all' : agingBucketFilter} debtors • Click 💬 WhatsApp to send custom UPI payment link
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={loadAgingData}
+                  className="p-2 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 text-slate-600 text-xs font-bold flex items-center gap-1.5"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${agingLoading ? 'animate-spin' : ''}`} />
+                  <span>Refresh Ledger</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs whitespace-nowrap">
+                <thead className="bg-slate-50 text-slate-700 font-bold uppercase tracking-wider text-[10px] border-b border-slate-200">
+                  <tr>
+                    <th className="p-3.5">#</th>
+                    <th className="p-3.5">Customer Name & Phone</th>
+                    <th className="p-3.5">Aging Category</th>
+                    <th className="p-3.5 text-center">Overdue Days</th>
+                    <th className="p-3.5 text-center">Vehicles Count</th>
+                    <th className="p-3.5">Vehicle Numbers</th>
+                    <th className="p-3.5 text-right font-mono">Total Due (INR)</th>
+                    <th className="p-3.5 text-right">Instant Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {agingLoading ? (
+                    <tr>
+                      <td colSpan="8" className="p-12 text-center text-slate-400">
+                        <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-indigo-600" />
+                        Analyzing customer account balances...
+                      </td>
+                    </tr>
+                  ) : !agingData?.debtors?.length ? (
+                    <tr>
+                      <td colSpan="8" className="p-12 text-center text-slate-400">
+                        🎉 Zero outstanding balances! All customer accounts are fully paid.
+                      </td>
+                    </tr>
+                  ) : (
+                    agingData.debtors
+                      .filter(d => agingBucketFilter === 'ALL' || d.aging_bucket === agingBucketFilter)
+                      .map((debtor, idx) => {
+                        const isOverdue30 = debtor.aging_bucket === '30_PLUS';
+                        const isDue16_30 = debtor.aging_bucket === '16_30';
+                        const badgeColor = isOverdue30
+                          ? 'bg-rose-100 text-rose-800 border-rose-300'
+                          : isDue16_30
+                          ? 'bg-amber-100 text-amber-800 border-amber-300'
+                          : 'bg-emerald-100 text-emerald-800 border-emerald-300';
+
+                        const waPayload = buildOverduePaymentReminderWhatsAppMessage({
+                          phone: debtor.phone,
+                          customerName: debtor.customer_name,
+                          amountDue: debtor.total_pending_amount,
+                          daysOverdue: debtor.oldest_due_days,
+                          vehicles: debtor.vehicles
+                        });
+
+                        return (
+                          <tr key={idx} className="hover:bg-slate-50 transition-colors">
+                            <td className="p-3.5 text-slate-400">{idx + 1}</td>
+                            <td className="p-3.5 font-bold text-slate-900">
+                              <div>{debtor.customer_name}</div>
+                              <div className="text-[11px] font-mono text-slate-500 font-normal">{debtor.phone || 'No Phone'}</div>
+                            </td>
+                            <td className="p-3.5">
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${badgeColor}`}>
+                                {isOverdue30 ? '🔴 30+ Days Overdue' : isDue16_30 ? '🟡 16-30 Days Due' : '🟢 0-15 Days'}
+                              </span>
+                            </td>
+                            <td className="p-3.5 text-center font-mono font-bold text-slate-700">
+                              {debtor.oldest_due_days} days
+                            </td>
+                            <td className="p-3.5 text-center">
+                              <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                {debtor.items_count} units
+                              </span>
+                            </td>
+                            <td className="p-3.5 max-w-xs truncate">
+                              <div className="flex flex-wrap gap-1">
+                                {debtor.vehicles.slice(0, 3).map((v, i) => (
+                                  <span key={i} className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-slate-100 text-slate-700">
+                                    {v}
+                                  </span>
+                                ))}
+                                {debtor.vehicles.length > 3 && (
+                                  <span className="text-[10px] text-slate-400">+{debtor.vehicles.length - 3} more</span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="p-3.5 text-right font-mono font-bold text-sm text-rose-700">
+                              ₹{Number(debtor.total_pending_amount).toLocaleString('en-IN')}
+                            </td>
+                            <td className="p-3.5 text-right">
+                              <a
+                                href={waPayload.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-2xs transition cursor-pointer"
+                                title="Open WhatsApp with 1-Tap UPI Payment Link"
+                              >
+                                <Send className="w-3.5 h-3.5" />
+                                <span>WhatsApp Reminder</span>
+                              </a>
+                            </td>
+                          </tr>
+                        );
+                      })
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
-
-        {/* Customer Detail & Fleet View */}
-        <div className="lg:col-span-2 space-y-4">
-          {loadingDetail ? (
-            <div className="glass-panel p-16 rounded-2xl text-center text-xs text-slate-400 flex items-center justify-center gap-2">
-              <RefreshCw className="w-4 h-4 animate-spin text-indigo-600" /> Loading customer profile...
+      ) : (
+        /* ========================================= */
+        /* 📇 DEFAULT CUSTOMER DIRECTORY VIEW       */
+        /* ========================================= */
+        <div className="space-y-6">
+          {/* Search Bar */}
+          <div className="glass-panel p-4 rounded-2xl">
+            <div className="relative w-full md:w-96">
+              <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Search by customer name, phone, address, software login..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-4 py-2 text-xs text-slate-900 focus:outline-none focus:border-indigo-500 font-medium"
+              />
             </div>
-          ) : selectedCustomerData ? (
-            <div className="glass-panel p-6 rounded-2xl space-y-6">
+          </div>
+
+          {/* Main Grid: Directory vs Detail Pane */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            {/* Customer Directory List */}
+            <div className="glass-panel rounded-2xl overflow-hidden divide-y divide-slate-100 flex flex-col h-[650px]">
+              <div className="p-3.5 bg-slate-50 font-bold text-xs text-slate-700 border-b border-slate-200 flex items-center justify-between">
+                <span>Customer Accounts</span>
+                <span className="text-[11px] font-normal text-slate-500">{customers.length} total</span>
+              </div>
+              
+              <div className="overflow-y-auto flex-1 divide-y divide-slate-100">
+                {loading ? (
+                  <div className="p-8 text-center text-xs text-slate-400">Loading directory...</div>
+                ) : customers.length === 0 ? (
+                  <div className="p-8 text-center text-xs text-slate-400">No customers found.</div>
+                ) : (
+                  customers.map((c) => {
+                    const isSelected = selectedCustomerId === c.id;
+                    return (
+                      <div
+                        key={c.id}
+                        onClick={() => handleSelectCustomer(c.id)}
+                        className={`p-3.5 hover:bg-slate-50 cursor-pointer transition-colors flex items-center justify-between ${
+                          isSelected ? 'bg-indigo-50/90 border-l-4 border-indigo-600' : ''
+                        }`}
+                      >
+                        <div className="space-y-0.5">
+                          <h4 className="text-xs font-bold text-slate-900">{c.name}</h4>
+                          <div className="flex items-center gap-2 text-[11px] text-slate-500">
+                            <span className="font-mono text-indigo-700 font-bold">{c.phone_number}</span>
+                            <span>• {c.customer_type || 'Individual'}</span>
+                          </div>
+                          {c.software_user_id && (
+                            <div className="text-[10px] text-indigo-600 font-mono">
+                              ID: <strong>{c.software_user_id}</strong>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex items-center space-x-2">
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                            {c.vehicle_count || 0} Veh
+                          </span>
+                          <ChevronRight className="w-4 h-4 text-slate-400" />
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            {/* Customer Detail & Fleet View */}
+            <div className="lg:col-span-2 space-y-4">
+              {loadingDetail ? (
+                <div className="glass-panel p-16 rounded-2xl text-center text-xs text-slate-400 flex items-center justify-center gap-2">
+                  <RefreshCw className="w-4 h-4 animate-spin text-indigo-600" /> Loading customer profile...
+                </div>
+              ) : selectedCustomerData ? (
+                <div className="glass-panel p-6 rounded-2xl space-y-6">
               
               {/* Customer Info Header */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-5">
@@ -527,6 +808,8 @@ export default function CustomerCrmPage({ onOpenTraceDrawer }) {
         </div>
 
       </div>
+    </div>
+  )}
 
       {/* Edit Customer Profile & Software Login Modal */}
       {editingCustomer && (

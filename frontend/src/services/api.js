@@ -714,6 +714,15 @@ export async function fetchStaffDrilldown(params = {}) {
   return res.json();
 }
 
+// ==========================================
+// 💳 CUSTOMER AGING & CREDIT BALANCES
+// ==========================================
+export async function fetchCustomerAgingBalances() {
+  const res = await fetch(`${API_BASE}/customers/aging-balances`);
+  if (!res.ok) throw new Error('Failed to fetch customer aging balances');
+  return res.json();
+}
+
 
 
 

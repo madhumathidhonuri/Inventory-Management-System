@@ -207,7 +207,9 @@ router.get('/summary', (req, res) => {
 // GET /api/staff-performance/technicians
 router.get('/technicians', (req, res) => {
   try {
-    const { startDate, endDate, search } = req.query;
+    const { startDate, endDate, search, payoutRate = 300 } = req.query;
+    const defaultRate = Math.max(0, parseFloat(payoutRate) || 300);
+
     let records = getUnifiedStaffRecords(startDate, endDate);
 
     // Only include records that have technician info
@@ -219,6 +221,29 @@ router.get('/technicians', (req, res) => {
         r.installed_by.toLowerCase().includes(q) ||
         r.installation_location.toLowerCase().includes(q)
       );
+    }
+
+    // Fetch all technician expenses for reconciliation
+    let techExpenses = [];
+    try {
+      techExpenses = db.prepare(`
+        SELECT * FROM expenses 
+        WHERE category IN ('TECHNICIAN_TRAVEL', 'TECHNICIAN_PAYOUT')
+      `).all();
+    } catch (e) {
+      techExpenses = [];
+    }
+
+    // Fetch all active devices to compute floating stock in technician possession
+    let floatingDevices = [];
+    try {
+      floatingDevices = db.prepare(`
+        SELECT id, imei_number, current_status, current_holder_name, additional_attributes, updated_at
+        FROM devices
+        WHERE current_status IN ('WITH_DEALER', 'IN_WAREHOUSE')
+      `).all();
+    } catch (e) {
+      floatingDevices = [];
     }
 
     const techMap = {};
@@ -233,7 +258,10 @@ router.get('/technicians', (req, res) => {
           last_install_date: r.installation_date,
           total_volume_amount: 0,
           vehicle_types_map: {},
-          locations_map: {}
+          locations_map: {},
+          travel_expenses: 0,
+          payouts_settled: 0,
+          floating_stock_count: 0
         };
       }
       const t = techMap[name];
@@ -253,9 +281,42 @@ router.get('/technicians', (req, res) => {
       t.locations_map[loc] = (t.locations_map[loc] || 0) + 1;
     });
 
+    // Attribute expenses and floating stock to technicians
+    Object.keys(techMap).forEach(techName => {
+      const clean = techName.toLowerCase().trim();
+      const t = techMap[techName];
+
+      // Expenses attribution
+      techExpenses.forEach(exp => {
+        const inc = (exp.incurred_by || '').toLowerCase().trim();
+        const paid = (exp.paid_to || '').toLowerCase().trim();
+        if (inc === clean || paid === clean || inc.includes(clean) || paid.includes(clean)) {
+          if (exp.category === 'TECHNICIAN_TRAVEL') {
+            t.travel_expenses += (parseFloat(exp.amount) || 0);
+          } else if (exp.category === 'TECHNICIAN_PAYOUT') {
+            t.payouts_settled += (parseFloat(exp.amount) || 0);
+          }
+        }
+      });
+
+      // Floating stock attribution
+      floatingDevices.forEach(dev => {
+        const holder = (dev.current_holder_name || '').toLowerCase().trim();
+        let attrs = {};
+        try { attrs = JSON.parse(dev.additional_attributes || '{}'); } catch {}
+        const fitter = (attrs['FITTER'] || attrs['Fitter'] || attrs['TECHNICIAN'] || attrs['Technician'] || '').toLowerCase().trim();
+
+        if (holder === clean || fitter === clean || holder.includes(clean) || fitter.includes(clean)) {
+          t.floating_stock_count += 1;
+        }
+      });
+    });
+
     const results = Object.values(techMap).map(t => {
       const vehicle_types = Object.entries(t.vehicle_types_map).map(([type, count]) => ({ type, count })).sort((a, b) => b.count - a.count);
       const topLocEntry = Object.entries(t.locations_map).sort((a, b) => b[1] - a[1])[0];
+      const fitment_payout = t.total_installations * defaultRate;
+      const net_payout_due = (fitment_payout + t.travel_expenses) - t.payouts_settled;
 
       return {
         technician_name: t.technician_name,
@@ -265,12 +326,19 @@ router.get('/technicians', (req, res) => {
         last_install_date: t.last_install_date || '',
         total_volume_amount: t.total_volume_amount,
         vehicle_types,
-        primary_location: topLocEntry ? topLocEntry[0] : 'Field'
+        primary_location: topLocEntry ? topLocEntry[0] : 'Field',
+        fitment_rate: defaultRate,
+        fitment_payout,
+        travel_expenses: t.travel_expenses,
+        payouts_settled: t.payouts_settled,
+        net_payout_due,
+        floating_stock_count: t.floating_stock_count
       };
     }).sort((a, b) => b.total_installations - a.total_installations);
 
     res.json({
       success: true,
+      default_fitment_rate: defaultRate,
       technicians: results
     });
   } catch (error) {
@@ -369,7 +437,7 @@ router.get('/sales', (req, res) => {
 // GET /api/staff-performance/drilldown
 router.get('/drilldown', (req, res) => {
   try {
-    const { type, name, startDate, endDate, limit = 500 } = req.query;
+    const { type, name, startDate, endDate, limit = 500, payoutRate = 300 } = req.query;
 
     if (!name) {
       return res.status(400).json({ success: false, error: 'Staff name is required for drilldown' });
@@ -379,11 +447,11 @@ router.get('/drilldown', (req, res) => {
     const cleanName = String(name).trim().toLowerCase();
 
     if (type === 'technician') {
-      records = records.filter(r => r.installed_by && r.installed_by.toLowerCase() === cleanName);
+      records = records.filter(r => r.installed_by && (r.installed_by.toLowerCase().trim() === cleanName || r.installed_by.toLowerCase().includes(cleanName)));
     } else if (type === 'sales_manager') {
-      records = records.filter(r => r.sales_manager && r.sales_manager.toLowerCase() === cleanName);
+      records = records.filter(r => r.sales_manager && (r.sales_manager.toLowerCase().trim() === cleanName || r.sales_manager.toLowerCase().includes(cleanName)));
     } else {
-      records = records.filter(r => r.sales_person && r.sales_person.toLowerCase() === cleanName);
+      records = records.filter(r => r.sales_person && (r.sales_person.toLowerCase().trim() === cleanName || r.sales_person.toLowerCase().includes(cleanName)));
     }
 
     // Sort by date descending
@@ -393,12 +461,58 @@ router.get('/drilldown', (req, res) => {
       return db.localeCompare(da);
     });
 
+    let expenses = [];
+    let floatingStock = [];
+    let payoutSummary = null;
+
+    if (type === 'technician') {
+      const rate = Math.max(0, parseFloat(payoutRate) || 300);
+      try {
+        const allExp = db.prepare(`SELECT * FROM expenses WHERE category IN ('TECHNICIAN_TRAVEL', 'TECHNICIAN_PAYOUT') ORDER BY expense_date DESC`).all();
+        expenses = allExp.filter(e => {
+          const inc = (e.incurred_by || '').toLowerCase().trim();
+          const paid = (e.paid_to || '').toLowerCase().trim();
+          return inc === cleanName || paid === cleanName || inc.includes(cleanName) || paid.includes(cleanName);
+        });
+      } catch (e) {}
+
+      try {
+        const devs = db.prepare(`SELECT id, imei_number, sim_number, current_status, current_holder_name, additional_attributes, updated_at FROM devices WHERE current_status IN ('WITH_DEALER', 'IN_WAREHOUSE')`).all();
+        floatingStock = devs.filter(d => {
+          const holder = (d.current_holder_name || '').toLowerCase().trim();
+          let attrs = {};
+          try { attrs = JSON.parse(d.additional_attributes || '{}'); } catch {}
+          const fitter = (attrs['FITTER'] || attrs['Fitter'] || attrs['TECHNICIAN'] || attrs['Technician'] || '').toLowerCase().trim();
+          return holder === cleanName || fitter === cleanName || holder.includes(cleanName) || fitter.includes(cleanName);
+        });
+      } catch (e) {}
+
+      const totalInstalls = records.length;
+      const fitmentPayout = totalInstalls * rate;
+      const travelExp = expenses.filter(e => e.category === 'TECHNICIAN_TRAVEL').reduce((sum, e) => sum + (parseFloat(e.amount) || 0), 0);
+      const settled = expenses.filter(e => e.category === 'TECHNICIAN_PAYOUT').reduce((sum, e) => sum + (parseFloat(e.amount) || 0), 0);
+      const netDue = (fitmentPayout + travelExp) - settled;
+
+      payoutSummary = {
+        total_installations: totalInstalls,
+        fitment_rate: rate,
+        fitment_payout: fitmentPayout,
+        travel_expenses: travelExp,
+        payouts_settled: settled,
+        net_payout_due: netDue,
+        floating_stock_count: floatingStock.length
+      };
+    }
+
     res.json({
       success: true,
       staff_name: String(name).trim(),
       staff_type: type || 'sales_person',
       total_records: records.length,
-      installations: records.slice(0, Number(limit))
+      installations: records.slice(0, Number(limit)),
+      expenses,
+      floating_stock: floatingStock,
+      payout_summary: payoutSummary
     });
   } catch (error) {
     console.error('Error fetching staff drilldown:', error);

@@ -36,6 +36,9 @@ export default function StaffPerformancePage({ onOpenTraceDrawer }) {
   // Active Tab: 'technicians' | 'sales' | 'managers'
   const [activeTab, setActiveTab] = useState('technicians');
 
+  // Technician Payout Configuration Rate (INR per fitment)
+  const [payoutRate, setPayoutRate] = useState(300);
+
   // Date Filter State
   const [datePreset, setDatePreset] = useState('this_month');
   const [startDate, setStartDate] = useState('');
@@ -54,6 +57,7 @@ export default function StaffPerformancePage({ onOpenTraceDrawer }) {
   const [drilldownData, setDrilldownData] = useState(null);
   const [drilldownLoading, setDrilldownLoading] = useState(false);
   const [drilldownSearch, setDrilldownSearch] = useState('');
+  const [activeDrilldownTab, setActiveDrilldownTab] = useState('installs'); // 'installs' | 'stock' | 'expenses'
 
   // Handle Date Presets
   const applyPreset = (preset) => {
@@ -97,13 +101,14 @@ export default function StaffPerformancePage({ onOpenTraceDrawer }) {
     applyPreset('this_month');
   }, []);
 
-  // Fetch performance data whenever dates change
+  // Fetch performance data whenever dates or payoutRate changes
   const loadData = async () => {
     setLoading(true);
     try {
       const params = {};
       if (startDate) params.startDate = startDate;
       if (endDate) params.endDate = endDate;
+      params.payoutRate = payoutRate;
 
       const [sumRes, techRes, salesRes] = await Promise.all([
         fetchStaffPerformanceSummary(params),
@@ -124,15 +129,16 @@ export default function StaffPerformancePage({ onOpenTraceDrawer }) {
 
   useEffect(() => {
     loadData();
-  }, [startDate, endDate]);
+  }, [startDate, endDate, payoutRate]);
 
   // Open Drilldown Modal
   const handleOpenDrilldown = async (type, name) => {
     setDrilldownLoading(true);
     setDrilldownModalOpen(true);
     setDrilldownSearch('');
+    setActiveDrilldownTab('installs');
     try {
-      const params = { type, name };
+      const params = { type, name, payoutRate };
       if (startDate) params.startDate = startDate;
       if (endDate) params.endDate = endDate;
       const res = await fetchStaffDrilldown(params);
@@ -451,98 +457,141 @@ export default function StaffPerformancePage({ onOpenTraceDrawer }) {
 
         {/* Tab 1: Technicians Table */}
         {activeTab === 'technicians' && (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs text-slate-600">
-              <thead className="bg-slate-50/80 text-slate-500 font-bold uppercase tracking-wider text-[11px] border-b border-slate-200">
-                <tr>
-                  <th className="py-3.5 px-4 w-12 text-center">#</th>
-                  <th className="py-3.5 px-4">Technician / Fitter</th>
-                  <th className="py-3.5 px-4 text-center">Fitments Done</th>
-                  <th className="py-3.5 px-4">Vehicle Types Breakdown</th>
-                  <th className="py-3.5 px-4">Primary Location</th>
-                  <th className="py-3.5 px-4">Active Date Range</th>
-                  <th className="py-3.5 px-4 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {filteredTechnicians.length === 0 ? (
+          <div>
+            {/* Technician Payout Incentive Controls Bar */}
+            <div className="p-3.5 bg-indigo-50/60 border-b border-indigo-100 flex flex-wrap items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-3">
+                <span className="font-bold text-indigo-950 flex items-center gap-1.5">
+                  <DollarSign className="w-4 h-4 text-indigo-600" />
+                  Fitment Incentive Rate:
+                </span>
+                <div className="flex items-center gap-1.5 bg-white px-2.5 py-1 rounded-xl border border-indigo-200 shadow-2xs">
+                  <span className="text-slate-400 font-bold">₹</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="50"
+                    value={payoutRate}
+                    onChange={(e) => setPayoutRate(Math.max(0, parseInt(e.target.value) || 0))}
+                    className="w-16 font-bold text-indigo-900 focus:outline-none"
+                  />
+                  <span className="text-[10px] text-slate-400 font-medium">/ install</span>
+                </div>
+                <span className="text-[11px] text-indigo-700 hidden sm:inline">
+                  (Auto-calculates gross fitment earnings across all completed jobs)
+                </span>
+              </div>
+
+              <div className="flex items-center gap-4">
+                <div className="text-[11px] text-slate-600">
+                  Total Technicians: <strong className="text-slate-900">{filteredTechnicians.length}</strong>
+                </div>
+                <div className="text-[11px] text-indigo-900 font-bold bg-indigo-100/80 px-2.5 py-1 rounded-lg">
+                  Total Net Payable: ₹{filteredTechnicians.reduce((sum, t) => sum + (t.net_payout_due || 0), 0).toLocaleString('en-IN')}
+                </div>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs text-slate-600">
+                <thead className="bg-slate-50/80 text-slate-500 font-bold uppercase tracking-wider text-[11px] border-b border-slate-200">
                   <tr>
-                    <td colSpan="7" className="py-12 text-center text-slate-400">
-                      <Wrench className="w-10 h-10 mx-auto text-slate-300 mb-2" />
-                      No technician installations found for this period.
-                    </td>
+                    <th className="py-3.5 px-4 w-12 text-center">#</th>
+                    <th className="py-3.5 px-4">Technician / Fitter</th>
+                    <th className="py-3.5 px-4 text-center">Fitments Done</th>
+                    <th className="py-3.5 px-4 text-right">Fitment Payout</th>
+                    <th className="py-3.5 px-4 text-right">Travel / Fuel</th>
+                    <th className="py-3.5 px-4 text-right">Net Due</th>
+                    <th className="py-3.5 px-4 text-center">Stock In-Hand</th>
+                    <th className="py-3.5 px-4">Primary Location</th>
+                    <th className="py-3.5 px-4 text-right">Actions</th>
                   </tr>
-                ) : (
-                  filteredTechnicians.map((tech, idx) => (
-                    <tr key={tech.technician_name} className="hover:bg-slate-50/80 transition-colors">
-                      <td className="py-3.5 px-4 text-center font-bold text-slate-400">
-                        {idx === 0 ? (
-                          <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-amber-100 text-amber-700 font-bold text-xs">
-                            🥇
-                          </span>
-                        ) : idx === 1 ? (
-                          <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-slate-200 text-slate-700 font-bold text-xs">
-                            🥈
-                          </span>
-                        ) : idx === 2 ? (
-                          <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-amber-50 text-amber-800 font-bold text-xs">
-                            🥉
-                          </span>
-                        ) : (
-                          idx + 1
-                        )}
-                      </td>
-                      <td className="py-3.5 px-4 font-bold text-slate-900">
-                        <div className="flex items-center space-x-2.5">
-                          <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 font-bold text-xs flex items-center justify-center">
-                            {tech.technician_name.charAt(0).toUpperCase()}
-                          </div>
-                          <div>
-                            <p className="font-semibold text-slate-900">{tech.technician_name}</p>
-                            <p className="text-[10px] text-slate-400 font-normal">Field Installation Technician</p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="py-3.5 px-4 text-center">
-                        <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
-                          {tech.total_installations} fitments
-                        </span>
-                      </td>
-                      <td className="py-3.5 px-4">
-                        <div className="flex flex-wrap gap-1.5 max-w-xs">
-                          {tech.vehicle_types && tech.vehicle_types.map(vt => (
-                            <span
-                              key={vt.type}
-                              className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-slate-100 text-slate-700 border border-slate-200"
-                            >
-                              {vt.count} {vt.type}
-                            </span>
-                          ))}
-                        </div>
-                      </td>
-                      <td className="py-3.5 px-4">
-                        <span className="inline-flex items-center gap-1 text-slate-600">
-                          <MapPin className="w-3.5 h-3.5 text-slate-400" />
-                          {tech.primary_location}
-                        </span>
-                      </td>
-                      <td className="py-3.5 px-4 text-slate-500 text-[11px]">
-                        {tech.first_install_date ? `${tech.first_install_date} to ${tech.last_install_date}` : '—'}
-                      </td>
-                      <td className="py-3.5 px-4 text-right">
-                        <button
-                          onClick={() => handleOpenDrilldown('technician', tech.technician_name)}
-                          className="inline-flex items-center space-x-1 px-3 py-1.5 rounded-xl bg-indigo-50 text-indigo-700 hover:bg-indigo-100 font-semibold text-xs transition"
-                        >
-                          <Eye className="w-3.5 h-3.5" />
-                          <span>View Jobs</span>
-                        </button>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filteredTechnicians.length === 0 ? (
+                    <tr>
+                      <td colSpan="9" className="py-12 text-center text-slate-400">
+                        <Wrench className="w-10 h-10 mx-auto text-slate-300 mb-2" />
+                        No technician installations found for this period.
                       </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                  ) : (
+                    filteredTechnicians.map((tech, idx) => (
+                      <tr key={tech.technician_name} className="hover:bg-slate-50/80 transition-colors">
+                        <td className="py-3.5 px-4 text-center font-bold text-slate-400">
+                          {idx === 0 ? (
+                            <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-amber-100 text-amber-700 font-bold text-xs">
+                              🥇
+                            </span>
+                          ) : idx === 1 ? (
+                            <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-slate-200 text-slate-700 font-bold text-xs">
+                              🥈
+                            </span>
+                          ) : idx === 2 ? (
+                            <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-amber-50 text-amber-800 font-bold text-xs">
+                              🥉
+                            </span>
+                          ) : (
+                            idx + 1
+                          )}
+                        </td>
+                        <td className="py-3.5 px-4 font-bold text-slate-900">
+                          <div className="flex items-center space-x-2.5">
+                            <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 font-bold text-xs flex items-center justify-center">
+                              {tech.technician_name.charAt(0).toUpperCase()}
+                            </div>
+                            <div>
+                              <p className="font-semibold text-slate-900">{tech.technician_name}</p>
+                              <p className="text-[10px] text-slate-400 font-normal">
+                                {tech.unique_customers || 1} clients • {tech.first_install_date ? `${tech.first_install_date} to ${tech.last_install_date}` : 'Active'}
+                              </p>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="py-3.5 px-4 text-center">
+                          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                            {tech.total_installations} fitments
+                          </span>
+                        </td>
+                        <td className="py-3.5 px-4 text-right font-bold text-slate-800">
+                          ₹{Number(tech.fitment_payout || (tech.total_installations * payoutRate)).toLocaleString('en-IN')}
+                        </td>
+                        <td className="py-3.5 px-4 text-right text-slate-600">
+                          {tech.travel_expenses ? `₹${Number(tech.travel_expenses).toLocaleString('en-IN')}` : '₹0'}
+                        </td>
+                        <td className="py-3.5 px-4 text-right">
+                          <span className="inline-flex items-center px-2.5 py-1 rounded-lg font-mono font-bold text-xs bg-emerald-50 text-emerald-700 border border-emerald-200">
+                            ₹{Number(tech.net_payout_due !== undefined ? tech.net_payout_due : (tech.total_installations * payoutRate)).toLocaleString('en-IN')}
+                          </span>
+                        </td>
+                        <td className="py-3.5 px-4 text-center">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold ${
+                            tech.floating_stock_count > 0 ? 'bg-amber-100 text-amber-800 border border-amber-300' : 'bg-slate-100 text-slate-500'
+                          }`}>
+                            {tech.floating_stock_count || 0} in-hand
+                          </span>
+                        </td>
+                        <td className="py-3.5 px-4">
+                          <span className="inline-flex items-center gap-1 text-slate-600">
+                            <MapPin className="w-3.5 h-3.5 text-slate-400" />
+                            {tech.primary_location}
+                          </span>
+                        </td>
+                        <td className="py-3.5 px-4 text-right">
+                          <button
+                            onClick={() => handleOpenDrilldown('technician', tech.technician_name)}
+                            className="inline-flex items-center space-x-1 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs transition cursor-pointer shadow-2xs"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                            <span>Drilldown & Payout</span>
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
 
@@ -738,23 +787,85 @@ export default function StaffPerformancePage({ onOpenTraceDrawer }) {
               </div>
             </div>
 
-            {/* Modal Subheader & Search */}
-            <div className="px-6 py-3 border-b border-slate-100 bg-white flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-              <div className="flex items-center gap-4 text-xs">
-                <span className="font-semibold text-slate-700">
-                  Total Records: <strong className="text-indigo-600">{filteredDrilldownInstallations.length}</strong>
-                </span>
-              </div>
+            {/* Modal Subheader & Sub-tabs */}
+            <div className="px-6 py-3 border-b border-slate-100 bg-white flex flex-col gap-3">
+              {drilldownData?.staff_type === 'technician' && drilldownData?.payout_summary && (
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 p-3 rounded-xl bg-indigo-50/70 border border-indigo-100 text-xs">
+                  <div>
+                    <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Fitments Completed</span>
+                    <span className="text-base font-black text-indigo-900">{drilldownData.payout_summary.total_installations}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Gross Fitment Payout</span>
+                    <span className="text-base font-bold text-slate-900">₹{Number(drilldownData.payout_summary.fitment_payout).toLocaleString('en-IN')}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Travel / Fuel Claimed</span>
+                    <span className="text-base font-bold text-slate-900">₹{Number(drilldownData.payout_summary.travel_expenses).toLocaleString('en-IN')}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Settled Advances</span>
+                    <span className="text-base font-bold text-rose-600">₹{Number(drilldownData.payout_summary.payouts_settled).toLocaleString('en-IN')}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-emerald-700 font-bold uppercase tracking-wider block">Net Balance Payable</span>
+                    <span className="text-base font-black text-emerald-700">₹{Number(drilldownData.payout_summary.net_payout_due).toLocaleString('en-IN')}</span>
+                  </div>
+                </div>
+              )}
 
-              <div className="relative w-full sm:w-72">
-                <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" />
-                <input
-                  type="text"
-                  placeholder="Filter by vehicle, customer, or IMEI..."
-                  value={drilldownSearch}
-                  onChange={(e) => setDrilldownSearch(e.target.value)}
-                  className="w-full text-xs pl-9 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                />
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                {drilldownData?.staff_type === 'technician' ? (
+                  <div className="flex items-center space-x-2">
+                    <button
+                      onClick={() => setActiveDrilldownTab('installs')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                        activeDrilldownTab === 'installs'
+                          ? 'bg-indigo-600 text-white'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      🚗 Completed Fitments ({drilldownData?.installations?.length || 0})
+                    </button>
+                    <button
+                      onClick={() => setActiveDrilldownTab('stock')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                        activeDrilldownTab === 'stock'
+                          ? 'bg-amber-600 text-white'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      📦 In-Hand Stock ({drilldownData?.floating_stock?.length || 0})
+                    </button>
+                    <button
+                      onClick={() => setActiveDrilldownTab('expenses')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                        activeDrilldownTab === 'expenses'
+                          ? 'bg-purple-600 text-white'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      💸 Expenses & Advances ({drilldownData?.expenses?.length || 0})
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-4 text-xs">
+                    <span className="font-semibold text-slate-700">
+                      Total Records: <strong className="text-indigo-600">{filteredDrilldownInstallations.length}</strong>
+                    </span>
+                  </div>
+                )}
+
+                <div className="relative w-full sm:w-72">
+                  <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="Filter by vehicle, customer, or IMEI..."
+                    value={drilldownSearch}
+                    onChange={(e) => setDrilldownSearch(e.target.value)}
+                    className="w-full text-xs pl-9 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  />
+                </div>
               </div>
             </div>
 
@@ -763,8 +874,97 @@ export default function StaffPerformancePage({ onOpenTraceDrawer }) {
               {drilldownLoading ? (
                 <div className="py-16 text-center text-slate-400 flex flex-col items-center">
                   <RefreshCw className="w-8 h-8 animate-spin text-indigo-600 mb-2" />
-                  <p className="text-xs">Loading detailed installations...</p>
+                  <p className="text-xs">Loading detailed records...</p>
                 </div>
+              ) : activeDrilldownTab === 'stock' ? (
+                /* Tab: Stock In-Hand */
+                !drilldownData?.floating_stock?.length ? (
+                  <div className="py-16 text-center text-slate-400">
+                    <p className="text-xs">No devices currently in-hand with technician.</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto rounded-xl border border-slate-200">
+                    <table className="w-full text-left text-xs text-slate-600">
+                      <thead className="bg-amber-50/80 text-amber-900 font-bold uppercase tracking-wider text-[10px] border-b border-amber-200">
+                        <tr>
+                          <th className="py-2.5 px-3">#</th>
+                          <th className="py-2.5 px-3">IMEI Number</th>
+                          <th className="py-2.5 px-3">SIM Number</th>
+                          <th className="py-2.5 px-3">Current Status</th>
+                          <th className="py-2.5 px-3">Holder / Custody</th>
+                          <th className="py-2.5 px-3">Last Updated</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {drilldownData.floating_stock.map((d, i) => (
+                          <tr key={d.id || i} className="hover:bg-slate-50/80">
+                            <td className="py-2.5 px-3 text-slate-400">{i + 1}</td>
+                            <td className="py-2.5 px-3 font-mono font-bold text-blue-600">
+                              <button
+                                onClick={() => { if (onOpenTraceDrawer) onOpenTraceDrawer(d.imei_number); }}
+                                className="hover:underline"
+                              >
+                                {d.imei_number}
+                              </button>
+                            </td>
+                            <td className="py-2.5 px-3 font-mono">{d.sim_number || '—'}</td>
+                            <td className="py-2.5 px-3">
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
+                                {d.current_status}
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-3 font-medium text-slate-800">{d.current_holder_name || drilldownData.staff_name}</td>
+                            <td className="py-2.5 px-3 text-slate-400">{d.updated_at ? String(d.updated_at).split(' ')[0] : '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )
+              ) : activeDrilldownTab === 'expenses' ? (
+                /* Tab: Expenses & Advances */
+                !drilldownData?.expenses?.length ? (
+                  <div className="py-16 text-center text-slate-400">
+                    <p className="text-xs">No expense or advance claims logged for this technician.</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto rounded-xl border border-slate-200">
+                    <table className="w-full text-left text-xs text-slate-600">
+                      <thead className="bg-purple-50/80 text-purple-900 font-bold uppercase tracking-wider text-[10px] border-b border-purple-200">
+                        <tr>
+                          <th className="py-2.5 px-3">Date</th>
+                          <th className="py-2.5 px-3">Category</th>
+                          <th className="py-2.5 px-3 text-right">Amount</th>
+                          <th className="py-2.5 px-3">Payment Mode</th>
+                          <th className="py-2.5 px-3">Paid To / Incurred By</th>
+                          <th className="py-2.5 px-3">UTR / Ref</th>
+                          <th className="py-2.5 px-3">Remarks</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {drilldownData.expenses.map((e) => (
+                          <tr key={e.id} className="hover:bg-slate-50/80">
+                            <td className="py-2.5 px-3 font-mono text-slate-500">{e.expense_date}</td>
+                            <td className="py-2.5 px-3">
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                e.category === 'TECHNICIAN_TRAVEL' ? 'bg-blue-100 text-blue-800' : 'bg-emerald-100 text-emerald-800'
+                              }`}>
+                                {e.category}
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-3 text-right font-bold text-slate-900">
+                              ₹{Number(e.amount || 0).toLocaleString('en-IN')}
+                            </td>
+                            <td className="py-2.5 px-3 font-semibold">{e.payment_mode}</td>
+                            <td className="py-2.5 px-3 text-slate-700">{e.incurred_by || e.paid_to}</td>
+                            <td className="py-2.5 px-3 font-mono text-[11px] text-slate-400">{e.utr_number || '—'}</td>
+                            <td className="py-2.5 px-3 text-slate-500">{e.remarks || '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )
               ) : filteredDrilldownInstallations.length === 0 ? (
                 <div className="py-16 text-center text-slate-400">
                   <p className="text-xs">No installation logs found matching criteria.</p>

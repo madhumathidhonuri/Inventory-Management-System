@@ -151,4 +151,171 @@ router.get('/lookup/phone/:phone', (req, res) => {
   }
 });
 
+// GET /api/customers/aging-balances - Customer Credit & Overdue Aging Ledger
+router.get('/aging-balances', (req, res) => {
+  try {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const parseDate = (rawDate) => {
+      if (!rawDate) return null;
+      const str = String(rawDate).trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return new Date(str);
+      if (/^\d{2}-\d{2}-\d{4}$/.test(str)) {
+        const [dd, mm, yyyy] = str.split('-');
+        return new Date(`${yyyy}-${mm}-${dd}`);
+      }
+      if (/^\d{2}\/\d{2}\/\d{4}$/.test(str)) {
+        const [dd, mm, yyyy] = str.split('/');
+        return new Date(`${yyyy}-${mm}-${dd}`);
+      }
+      const d = new Date(str);
+      return isNaN(d.getTime()) ? null : d;
+    };
+
+    // 1. Fetch pending installations from installations table
+    const instRows = db.prepare(`
+      SELECT 
+        i.id, i.imei_number, i.installation_date, i.sale_price, i.vehicle_number,
+        i.customer_name, i.customer_contact, i.remarks, i.installation_location,
+        d.additional_attributes
+      FROM installations i
+      LEFT JOIN devices d ON i.device_id = d.id
+    `).all();
+
+    const instImeis = new Set();
+    const pendingMap = {};
+
+    instRows.forEach(inst => {
+      instImeis.add(inst.imei_number);
+      let attrs = {};
+      try { attrs = JSON.parse(inst.additional_attributes || '{}'); } catch {}
+
+      const amtRec = (attrs['AMOUNT RECEIVED'] || '').trim().toUpperCase();
+      const isPaid = amtRec === 'RECEIVED' || amtRec === 'PAID';
+      if (isPaid) return; // Skip settled
+
+      const price = parseFloat(inst.sale_price || attrs['TOTAL COST'] || attrs['COST'] || 0) || 0;
+      if (price <= 0) return;
+
+      const custName = (inst.customer_name || attrs['CUSTOMER NAME'] || 'Valued Customer').trim();
+      const custPhone = (inst.customer_contact || attrs['CUSTOMER PHONE NUMBER'] || '').trim();
+      const key = custPhone || custName;
+
+      const dateObj = parseDate(inst.installation_date || attrs['CERTIFICATE ISSUED DATE']);
+      const days = dateObj ? Math.max(0, Math.floor((today - dateObj) / (1000 * 60 * 60 * 24))) : 0;
+
+      if (!pendingMap[key]) {
+        pendingMap[key] = {
+          customer_name: custName,
+          phone: custPhone,
+          vehicles: [],
+          total_pending_amount: 0,
+          oldest_due_days: 0,
+          latest_install_date: inst.installation_date,
+          imeis: [],
+          items_count: 0
+        };
+      }
+
+      const p = pendingMap[key];
+      p.total_pending_amount += price;
+      p.items_count += 1;
+      if (inst.vehicle_number && !p.vehicles.includes(inst.vehicle_number)) {
+        p.vehicles.push(inst.vehicle_number);
+      }
+      if (inst.imei_number) p.imeis.push(inst.imei_number);
+      if (days > p.oldest_due_days) p.oldest_due_days = days;
+    });
+
+    // 2. Fetch pending from devices table (uploaded master sheets not in installations table)
+    const devRows = db.prepare(`SELECT id, imei_number, purchase_date, purchase_price, additional_attributes FROM devices`).all();
+    devRows.forEach(d => {
+      if (instImeis.has(d.imei_number)) return;
+      let attrs = {};
+      try { attrs = JSON.parse(d.additional_attributes || '{}'); } catch {}
+
+      const amtRec = (attrs['AMOUNT RECEIVED'] || '').trim().toUpperCase();
+      const hasCustomer = attrs['CUSTOMER NAME'] || attrs['CERTIFICATE ISSUED TO'] || attrs['VEHICLE NUMBER'];
+      if (!hasCustomer) return;
+
+      const isPaid = amtRec === 'RECEIVED' || amtRec === 'PAID';
+      if (isPaid) return; // Skip settled
+
+      const price = parseFloat(attrs['TOTAL COST'] || attrs['Total Cost'] || attrs['COST'] || attrs['Cost'] || 0) || 0;
+      if (price <= 0) return;
+
+      const custName = (attrs['CUSTOMER NAME'] || attrs['Customer Name'] || attrs['CERTIFICATE ISSUED TO'] || 'Valued Customer').trim();
+      const custPhone = (attrs['CUSTOMER PHONE NUMBER'] || attrs['Customer Contact'] || '').trim();
+      const key = custPhone || custName;
+
+      const dateObj = parseDate(attrs['CERTIFICATE ISSUED DATE'] || attrs['STOCK PLACE DATE'] || d.purchase_date);
+      const days = dateObj ? Math.max(0, Math.floor((today - dateObj) / (1000 * 60 * 60 * 24))) : 0;
+      const vNum = attrs['VEHICLE NUMBER'] || attrs['Vehicle Number'] || '—';
+
+      if (!pendingMap[key]) {
+        pendingMap[key] = {
+          customer_name: custName,
+          phone: custPhone,
+          vehicles: [],
+          total_pending_amount: 0,
+          oldest_due_days: 0,
+          latest_install_date: attrs['CERTIFICATE ISSUED DATE'] || d.purchase_date,
+          imeis: [],
+          items_count: 0
+        };
+      }
+
+      const p = pendingMap[key];
+      p.total_pending_amount += price;
+      p.items_count += 1;
+      if (vNum && vNum !== '—' && !p.vehicles.includes(vNum)) {
+        p.vehicles.push(vNum);
+      }
+      if (d.imei_number) p.imeis.push(d.imei_number);
+      if (days > p.oldest_due_days) p.oldest_due_days = days;
+    });
+
+    let totalReceivable = 0;
+    let totalBucket0_15 = 0;
+    let totalBucket16_30 = 0;
+    let totalBucket30Plus = 0;
+
+    const debtors = Object.values(pendingMap).map(d => {
+      totalReceivable += d.total_pending_amount;
+
+      let bucket = '0_15';
+      if (d.oldest_due_days > 30) {
+        bucket = '30_PLUS';
+        totalBucket30Plus += d.total_pending_amount;
+      } else if (d.oldest_due_days >= 16) {
+        bucket = '16_30';
+        totalBucket16_30 += d.total_pending_amount;
+      } else {
+        totalBucket0_15 += d.total_pending_amount;
+      }
+
+      return {
+        ...d,
+        aging_bucket: bucket
+      };
+    }).sort((a, b) => b.total_pending_amount - a.total_pending_amount);
+
+    res.json({
+      success: true,
+      summary: {
+        total_receivable: totalReceivable,
+        debtor_count: debtors.length,
+        bucket_0_15: totalBucket0_15,
+        bucket_16_30: totalBucket16_30,
+        bucket_30_plus: totalBucket30Plus
+      },
+      debtors
+    });
+  } catch (err) {
+    console.error('Error fetching aging balances:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;
