@@ -100,11 +100,28 @@ async function runTests() {
       }
     });
 
-    // 3. Device Types API
-    await assertTest('Device Types Catalog API', async () => {
+    // 3. Device Types API & Deletion
+    await assertTest('Device Types Catalog & Deletion API', async () => {
       const res = await makeRequest(testPort, '/api/device-types');
       if (res.status !== 200 || !res.body.success || !Array.isArray(res.body.data)) {
         throw new Error('Invalid device types response');
+      }
+
+      // Create test device type
+      const createRes = await makeRequest(testPort, '/api/device-types', 'POST', {
+        name: 'TEST_BASIC_DEVICE',
+        category: 'GPS Tracker',
+        template_columns: ['IMEI Number', 'SIM Number', 'Price', 'Vendor']
+      });
+      if (createRes.status !== 200 || !createRes.body.success) {
+        throw new Error('Failed to create test device type');
+      }
+      const testTypeId = createRes.body.data.id;
+
+      // Delete test device type
+      const delRes = await makeRequest(testPort, `/api/device-types/${testTypeId}?delete_devices=true`, 'DELETE');
+      if (delRes.status !== 200 || !delRes.body.success) {
+        throw new Error('Failed to delete test device type');
       }
     });
 

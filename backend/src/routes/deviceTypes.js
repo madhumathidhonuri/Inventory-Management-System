@@ -29,12 +29,24 @@ function parseTemplateColumns(raw, category = '', name = '') {
   }
 }
 
-// GET all device types
+// GET all device types with live inventory stock counts
 router.get('/', (req, res) => {
   try {
-    const types = db.prepare('SELECT * FROM device_types ORDER BY id ASC').all();
+    const types = db.prepare(`
+      SELECT dt.*, 
+             COUNT(d.id) as device_count,
+             SUM(CASE WHEN d.current_status IN ('IN_WAREHOUSE', 'IN_STOCK', 'AVAILABLE') THEN 1 ELSE 0 END) as in_stock_count,
+             SUM(CASE WHEN d.current_status = 'INSTALLED' THEN 1 ELSE 0 END) as installed_count
+      FROM device_types dt
+      LEFT JOIN devices d ON d.device_type_id = dt.id
+      GROUP BY dt.id
+      ORDER BY dt.id ASC
+    `).all();
     const formatted = types.map(t => ({
       ...t,
+      device_count: Number(t.device_count || 0),
+      in_stock_count: Number(t.in_stock_count || 0),
+      installed_count: Number(t.installed_count || 0),
       custom_fields: JSON.parse(t.custom_fields || '{}'),
       template_columns: parseTemplateColumns(t.template_columns, t.category, t.name)
     }));
@@ -278,16 +290,59 @@ router.post('/columns/delete', (req, res) => {
   }
 });
 
-// DELETE device type
+// DELETE device type (with optional complete purge of associated stock & batches)
 router.delete('/:id', (req, res) => {
   const { id } = req.params;
+  const deleteDevices = req.query.delete_devices === 'true' || req.query.force === 'true';
+
   try {
-    const attachedDevices = db.prepare('SELECT count(*) as count FROM devices WHERE device_type_id = ?').get(id);
-    if (attachedDevices && attachedDevices.count > 0) {
-      return res.status(400).json({ success: false, error: `Cannot delete device type with ${attachedDevices.count} active device records attached.` });
+    const dt = db.prepare('SELECT * FROM device_types WHERE id = ?').get(id);
+    if (!dt) {
+      return res.status(404).json({ success: false, error: 'Device type not found' });
     }
-    db.prepare('DELETE FROM device_types WHERE id = ?').run(id);
-    res.json({ success: true, message: 'Device type deleted successfully' });
+
+    const attachedDevices = db.prepare('SELECT count(*) as count FROM devices WHERE device_type_id = ?').get(id);
+    const count = attachedDevices ? attachedDevices.count : 0;
+    const attachedBatches = db.prepare('SELECT count(*) as count FROM purchase_batches WHERE device_type_id = ?').get(id);
+    const batchesCount = attachedBatches ? attachedBatches.count : 0;
+
+    if (count > 0 && !deleteDevices) {
+      return res.status(400).json({
+        success: false,
+        error: `Cannot delete device type "${dt.name}". It has ${count} device record(s) and ${batchesCount} purchase batch(es) attached. Use delete_devices=true to confirm permanent stock deletion.`,
+        attached_count: count,
+        batches_count: batchesCount,
+        requires_confirmation: true
+      });
+    }
+
+    db.transaction(() => {
+      if (count > 0) {
+        const typeDevs = db.prepare('SELECT id, imei_number FROM devices WHERE device_type_id = ?').all(id);
+        for (const dev of typeDevs) {
+          db.prepare('DELETE FROM device_history WHERE device_id = ? OR imei_number = ?').run(dev.id, dev.imei_number);
+          db.prepare('DELETE FROM dispatch_items WHERE device_id = ? OR imei_number = ?').run(dev.id, dev.imei_number);
+          db.prepare('DELETE FROM installations WHERE device_id = ? OR imei_number = ?').run(dev.id, dev.imei_number);
+          db.prepare('DELETE FROM reminders WHERE device_id = ? OR imei_number = ?').run(dev.id, dev.imei_number);
+        }
+        db.prepare('DELETE FROM devices WHERE device_type_id = ?').run(id);
+        db.prepare('DELETE FROM purchase_batches WHERE device_type_id = ?').run(id);
+      }
+      db.prepare('DELETE FROM device_pricing WHERE device_type_id = ?').run(id);
+      db.prepare('DELETE FROM device_types WHERE id = ?').run(id);
+    })();
+
+    // Auto debounced sync to cloud
+    try {
+      const cloudSync = require('../db/cloudSync');
+      cloudSync.triggerDebouncedSync(1000);
+    } catch (e) {}
+
+    res.json({
+      success: true,
+      message: `Device type "${dt.name}" ${count > 0 ? `and ${count} stock record(s)` : ''} deleted successfully.`,
+      deleted_devices_count: count
+    });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }

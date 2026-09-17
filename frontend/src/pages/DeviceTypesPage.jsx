@@ -1,17 +1,27 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Plus, CheckCircle, Code, Tag, RefreshCw, FileSpreadsheet, Download, Edit3, Trash2, Check, X, ShieldAlert, DollarSign } from 'lucide-react';
-import { fetchDeviceTypes, createDeviceType, updateDeviceType } from '../services/api';
+import { Settings, Plus, CheckCircle, Code, Tag, RefreshCw, FileSpreadsheet, Download, Edit3, Trash2, Check, X, ShieldAlert, DollarSign, AlertTriangle, Boxes, AlertCircle } from 'lucide-react';
+import { fetchDeviceTypes, createDeviceType, updateDeviceType, deleteDeviceType } from '../services/api';
 import { downloadStyledTemplate } from '../utils/excelExport';
 import DevicePricingModal from '../components/DevicePricingModal';
+import { useAuth } from '../context/AuthContext';
 import * as xlsx from 'xlsx';
 
 export default function DeviceTypesPage() {
+  const { user } = useAuth();
+  const isSuperAdmin = user?.role === 'SUPER_ADMIN';
+
   const [types, setTypes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [showPricingModal, setShowPricingModal] = useState(false);
   const [editingType, setEditingType] = useState(null);
   
+  // Delete Modal state
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [typeToDelete, setTypeToDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
+
   // Create Modal state
   const [name, setName] = useState('');
   const [category, setCategory] = useState('GPS Tracker');
@@ -91,6 +101,8 @@ export default function DeviceTypesPage() {
       if (res.success) {
         setShowModal(false);
         setName('');
+        setSaveSuccessMsg(`Device Model "${name}" created successfully.`);
+        setTimeout(() => setSaveSuccessMsg(''), 4000);
         loadData();
       }
     } catch (err) {
@@ -145,6 +157,33 @@ export default function DeviceTypesPage() {
     }
   };
 
+  // Open Delete Confirmation Modal
+  const openDeleteModal = (deviceType) => {
+    setTypeToDelete(deviceType);
+    setDeleteError('');
+    setShowDeleteModal(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!typeToDelete) return;
+    setDeleting(true);
+    setDeleteError('');
+    try {
+      const res = await deleteDeviceType(typeToDelete.id, true);
+      if (res.success) {
+        setSaveSuccessMsg(res.message || `Device Type "${typeToDelete.name}" deleted successfully.`);
+        setTimeout(() => setSaveSuccessMsg(''), 4000);
+        setShowDeleteModal(false);
+        setTypeToDelete(null);
+        loadData();
+      }
+    } catch (err) {
+      setDeleteError(err.message || 'Failed to delete device type');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const downloadPreviewTemplate = async (deviceType) => {
     const cols = deviceType.template_columns || ['IMEI Number', 'SIM Number', 'Price', 'Vendor'];
     await downloadStyledTemplate(
@@ -159,15 +198,15 @@ export default function DeviceTypesPage() {
     <div className="space-y-6 max-w-5xl mx-auto">
       
       {/* Header */}
-      <div className="flex items-center justify-between bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs">
         <div>
           <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
             <Settings className="w-5 h-5 text-blue-600" /> Device Types & Excel Upload Formats
           </h2>
-          <p className="text-xs text-slate-500">Super Admin catalog: Configure unique Excel sheet columns & schemas for each Device Model</p>
+          <p className="text-xs text-slate-500">Super Admin catalog: Configure unique Excel sheet columns, rates & schemas for each Device Model</p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={() => setShowPricingModal(true)}
             className="px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-colors shadow-2xs"
@@ -188,71 +227,191 @@ export default function DeviceTypesPage() {
 
       {saveSuccessMsg && (
         <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-xs font-semibold flex items-center gap-2">
-          <CheckCircle className="w-4 h-4 text-emerald-600" /> {saveSuccessMsg}
+          <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" /> {saveSuccessMsg}
         </div>
       )}
 
-      {/* Grid of Device Types */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-        {types.map((t) => (
-          <div key={t.id} className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs space-y-4 hover:border-slate-300 transition-all flex flex-col justify-between">
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                  <Tag className="w-4 h-4 text-blue-600" /> {t.name}
-                </h3>
-                <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">
-                  {t.category}
-                </span>
-              </div>
+      {loading ? (
+        <div className="p-12 text-center text-slate-400 text-xs flex flex-col items-center justify-center gap-2">
+          <RefreshCw className="w-6 h-6 animate-spin text-blue-600" />
+          <span>Loading device types catalog...</span>
+        </div>
+      ) : types.length === 0 ? (
+        <div className="p-12 bg-white rounded-2xl border border-slate-200 text-center space-y-3 shadow-2xs">
+          <Tag className="w-8 h-8 text-slate-300 mx-auto" />
+          <p className="text-sm font-semibold text-slate-700">No Device Types Configured</p>
+          <p className="text-xs text-slate-400">Click &quot;Add Device Type&quot; above to add a device model and configure its Excel upload format.</p>
+        </div>
+      ) : (
+        /* Grid of Device Types */
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          {types.map((t) => (
+            <div key={t.id} className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs space-y-4 hover:border-slate-300 transition-all flex flex-col justify-between group">
+              <div className="space-y-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                      <Tag className="w-4 h-4 text-blue-600" /> {t.name}
+                    </h3>
+                    {/* Live inventory badge */}
+                    <div className="flex items-center gap-1.5 mt-1">
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-slate-100 text-slate-600 border border-slate-200">
+                        <Boxes className="w-3 h-3 text-slate-500" />
+                        {t.device_count || 0} Total Units ({t.in_stock_count || 0} in Warehouse)
+                      </span>
+                    </div>
+                  </div>
 
-              {/* Excel Format Configuration Section */}
-              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-                    <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" /> Excel Sheet Upload Format ({t.template_columns?.length || 0} Columns)
-                  </span>
-                  <button
-                    onClick={() => openFormatModal(t)}
-                    className="text-[11px] font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1 hover:underline"
-                  >
-                    <Edit3 className="w-3 h-3" /> Edit Format
-                  </button>
+                  <div className="flex items-center gap-1.5">
+                    <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+                      {t.category}
+                    </span>
+                    {isSuperAdmin && (
+                      <button
+                        onClick={() => openDeleteModal(t)}
+                        className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg border border-transparent hover:border-red-200 transition-all"
+                        title={`Delete ${t.name} from catalog`}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
                 </div>
 
-                <div className="flex flex-wrap gap-1.5 pt-1">
-                  {(t.template_columns || []).map((col, idx) => (
-                    <span
-                      key={idx}
-                      className="px-2 py-0.5 bg-white border border-slate-200 text-slate-700 text-[11px] font-semibold rounded-md shadow-2xs flex items-center gap-1"
-                    >
-                      <span className="text-[10px] text-slate-400 font-mono">#{idx + 1}</span> {col}
+                {/* Excel Format Configuration Section */}
+                <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                      <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" /> Excel Sheet Upload Format ({t.template_columns?.length || 0} Columns)
                     </span>
-                  ))}
+                    <button
+                      onClick={() => openFormatModal(t)}
+                      className="text-[11px] font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1 hover:underline"
+                    >
+                      <Edit3 className="w-3 h-3" /> Edit Format
+                    </button>
+                  </div>
+
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {(t.template_columns || []).map((col, idx) => (
+                      <span
+                        key={idx}
+                        className="px-2 py-0.5 bg-white border border-slate-200 text-slate-700 text-[11px] font-semibold rounded-md shadow-2xs flex items-center gap-1"
+                      >
+                        <span className="text-[10px] text-slate-400 font-mono">#{idx + 1}</span> {col}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Bottom Actions */}
+              <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
+                <button
+                  onClick={() => downloadPreviewTemplate(t)}
+                  className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-colors"
+                  title="Download this device's sample Excel format"
+                >
+                  <Download className="w-3.5 h-3.5" /> Download Sample .xlsx
+                </button>
+
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => openFormatModal(t)}
+                    className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[11px] font-bold transition-colors"
+                  >
+                    Configure Columns
+                  </button>
+                  {isSuperAdmin && (
+                    <button
+                      onClick={() => openDeleteModal(t)}
+                      className="px-2.5 py-1.5 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-colors"
+                      title={`Delete ${t.name}`}
+                    >
+                      <Trash2 className="w-3.5 h-3.5 text-red-600" /> Delete
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
+          ))}
+        </div>
+      )}
 
-            {/* Bottom Actions */}
-            <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
+      {/* Modal: Confirm Delete Device Type & Stock */}
+      {showDeleteModal && typeToDelete && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-md p-6 space-y-4 shadow-2xl animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-start justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-red-100 text-red-600 flex items-center justify-center shrink-0">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Delete Device Type</h3>
+                  <p className="text-xs text-slate-500">Super Admin Catalog Action</p>
+                </div>
+              </div>
               <button
-                onClick={() => downloadPreviewTemplate(t)}
-                className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-colors"
-                title="Download this device's sample Excel format"
+                onClick={() => !deleting && setShowDeleteModal(false)}
+                disabled={deleting}
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg"
               >
-                <Download className="w-3.5 h-3.5" /> Download Sample .xlsx
+                <X className="w-5 h-5" />
               </button>
+            </div>
 
+            <div className="space-y-3 text-xs text-slate-600">
+              <p>
+                Are you sure you want to permanently delete <strong className="text-slate-900 font-bold">{typeToDelete.name}</strong> ({typeToDelete.category})?
+              </p>
+
+              {typeToDelete.device_count > 0 ? (
+                <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl space-y-2 text-amber-900">
+                  <div className="flex items-center gap-2 font-bold text-xs text-amber-800">
+                    <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                    <span>Active Stock Warning: {typeToDelete.device_count} Units Found</span>
+                  </div>
+                  <p className="text-[11px] leading-relaxed text-amber-800/90">
+                    Deleting this model will completely purge and remove all <strong className="font-bold">{typeToDelete.device_count} device records</strong> ({typeToDelete.in_stock_count || 0} in warehouse stock, {typeToDelete.installed_count || 0} installed), purchase batches, and rate configurations from the database.
+                  </p>
+                </div>
+              ) : (
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-600 text-[11px]">
+                  This device type has <span className="font-semibold text-slate-800">0 devices attached</span> in stock. It will be cleanly removed from the catalog.
+                </div>
+              )}
+
+              {deleteError && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-xs font-semibold flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+                  <span>{deleteError}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-2 justify-end pt-3 border-t border-slate-100">
               <button
-                onClick={() => openFormatModal(t)}
-                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[11px] font-bold transition-colors"
+                type="button"
+                onClick={() => setShowDeleteModal(false)}
+                disabled={deleting}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs rounded-xl font-medium transition-colors"
               >
-                Configure Columns
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDelete}
+                disabled={deleting}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-xl shadow-xs flex items-center gap-1.5 transition-colors disabled:opacity-50"
+              >
+                <Trash2 className="w-4 h-4" />
+                {deleting ? 'Deleting & Purging...' : typeToDelete.device_count > 0 ? 'Delete Type & Purge Stock' : 'Confirm Delete'}
               </button>
             </div>
           </div>
-        ))}
-      </div>
+        </div>
+      )}
 
       {/* Modal: Edit Excel Format for Existing Device Type */}
       {showFormatModal && editingType && (

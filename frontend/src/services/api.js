@@ -116,6 +116,15 @@ export async function updateDeviceType(id, payload) {
   return data;
 }
 
+export async function deleteDeviceType(id, deleteDevices = true) {
+  const res = await fetch(`${API_BASE}/device-types/${id}?delete_devices=${deleteDevices}`, {
+    method: 'DELETE'
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) throw new Error(data.error || 'Failed to delete device type');
+  return data;
+}
+
 export async function addDeviceColumn(deviceTypeId, columnName) {
   const res = await fetch(`${API_BASE}/device-types/columns/add`, {
     method: 'POST',

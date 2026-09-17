@@ -1046,11 +1046,29 @@ router.post('/bulk-assign-dealer', (req, res) => {
     const missingImeis = [];
 
     // Resolve intelligent default device type
-    let defaultTypeId = device_type_id ? parseInt(device_type_id) : null;
+    let defaultTypeId = null;
+    if (device_type_id) {
+      if (typeof device_type_id === 'number' || /^\d+$/.test(String(device_type_id))) {
+        defaultTypeId = parseInt(device_type_id);
+      } else {
+        const customName = String(device_type_id).replace(/^NEW_/, '').trim();
+        const found = db.prepare('SELECT id FROM device_types WHERE LOWER(name) = LOWER(?)').get(customName);
+        if (found) {
+          defaultTypeId = found.id;
+        } else if (customName) {
+          try {
+            const ins = db.prepare("INSERT INTO device_types (name, category, custom_fields, template_columns) VALUES (?, 'GPS Tracker', '{}', '[]')").run(customName);
+            defaultTypeId = ins.lastInsertRowid;
+          } catch (e) {
+            const fallback = db.prepare('SELECT id FROM device_types LIMIT 1').get();
+            defaultTypeId = fallback ? fallback.id : 1;
+          }
+        }
+      }
+    }
     if (!defaultTypeId) {
       const preferredType = db.prepare(`
         SELECT id FROM device_types 
-        WHERE name NOT IN ('BSTPL')
         ORDER BY (CASE WHEN name LIKE '%VOLTY%' THEN 1 WHEN name LIKE '%TRACK%' THEN 2 WHEN name LIKE '%VAMO%' THEN 3 ELSE 4 END), id DESC 
         LIMIT 1
       `).get();
