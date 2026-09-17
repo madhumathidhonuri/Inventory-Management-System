@@ -132,17 +132,33 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
   // Filtered Installations List
   const filteredInstallations = useMemo(() => {
     return installations.filter(inst => {
-      if (categoryFilter === 'ALL') return true;
-      let devAttrs = {};
-      try {
-        devAttrs = typeof inst.device_additional_attributes === 'string'
-          ? JSON.parse(inst.device_additional_attributes || '{}')
-          : (inst.device_additional_attributes || {});
-      } catch {}
-      const cat = (devAttrs['CATEGORY'] || devAttrs['DEVICE CATEGORY'] || inst.vehicle_type || '').toUpperCase();
-      return cat.includes(categoryFilter);
+      if (categoryFilter !== 'ALL') {
+        let devAttrs = {};
+        try {
+          devAttrs = typeof inst.device_additional_attributes === 'string'
+            ? JSON.parse(inst.device_additional_attributes || '{}')
+            : (inst.device_additional_attributes || {});
+        } catch {}
+        const cat = (devAttrs['CATEGORY'] || devAttrs['DEVICE CATEGORY'] || inst.vehicle_type || '').toUpperCase();
+        if (!cat.includes(categoryFilter)) return false;
+      }
+
+      if (search && search.trim()) {
+        const q = search.trim().toLowerCase();
+        const vNum = (inst.vehicle_number || '').toLowerCase();
+        const cName = (inst.customer_name || '').toLowerCase();
+        const cPhone = (inst.customer_phone || inst.customer_contact || '').toLowerCase();
+        const imei = (inst.imei_number || '').toLowerCase();
+        const tech = (inst.installed_by || '').toLowerCase();
+        const loc = (inst.installation_location || '').toLowerCase();
+        const chasis = (inst.chasis_number || '').toLowerCase();
+        
+        return vNum.includes(q) || cName.includes(q) || cPhone.includes(q) || imei.includes(q) || tech.includes(q) || loc.includes(q) || chasis.includes(q);
+      }
+
+      return true;
     });
-  }, [installations, categoryFilter]);
+  }, [installations, categoryFilter, search]);
 
   // Category Excel Export Handler
   const handleExportCategoryExcel = async () => {
@@ -1188,6 +1204,29 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
                   <div className="font-bold text-slate-700 mb-1">Format per line (Comma or Tab separated):</div>
                   <code>IMEI, VehicleNumber, CustomerName, Phone, [SoftwareLogin], [Password], [Price]</code>
                   <div className="mt-1 text-slate-400">Example: 864920050019101, AP21TZ8829, Ramesh Trans, 9876543210, ramesh_gps, pass123, 6500</div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Technician / Installer Name</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Pradeep (Technician)"
+                      value={installedBy}
+                      onChange={(e) => setInstalledBy(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs text-slate-900 focus:outline-none focus:border-indigo-500 focus:bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Default Unit Price (INR)</label>
+                    <input
+                      type="number"
+                      placeholder="e.g. 5000"
+                      value={salePrice}
+                      onChange={(e) => setSalePrice(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs text-slate-900 font-mono focus:outline-none focus:border-indigo-500 focus:bg-white"
+                    />
+                  </div>
                 </div>
 
                 <div>
