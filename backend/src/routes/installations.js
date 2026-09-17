@@ -677,8 +677,15 @@ router.get('/export', async (req, res) => {
       });
     });
 
+    const today = new Date();
+    const day = String(today.getDate()).padStart(2, '0');
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const year = today.getFullYear();
+    const formattedDate = `${day}-${month}-${year}`;
+    const cleanCat = safeCategory.toUpperCase().replace(/[_\s]+/g, '');
+
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename="${safeCategory.replace(/\s+/g, '_')}_Installations_${new Date().toISOString().split('T')[0]}.xlsx"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${cleanCat}_${formattedDate}.xlsx"`);
     await workbook.xlsx.write(res);
     res.end();
   } catch (err) {

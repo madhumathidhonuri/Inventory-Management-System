@@ -411,8 +411,14 @@ router.get('/export', async (req, res) => {
       column.width = maxLen;
     });
 
+    const today = new Date();
+    const day = String(today.getDate()).padStart(2, '0');
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const year = today.getFullYear();
+    const formattedDate = `${day}-${month}-${year}`;
+
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename="Expenses_Statement_${new Date().toISOString().split('T')[0]}.xlsx"`);
+    res.setHeader('Content-Disposition', `attachment; filename="EXPENSES_STATEMENT_${formattedDate}.xlsx"`);
 
     await workbook.xlsx.write(res);
     res.end();

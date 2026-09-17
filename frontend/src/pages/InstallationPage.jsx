@@ -164,8 +164,20 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
   const handleExportCategoryExcel = async () => {
     try {
       setExportingExcel(true);
-      const safeCat = categoryFilter === 'ALL' ? 'All_Projects' : categoryFilter.replace(/\s+/g, '_');
-      const filename = `${safeCat}_Installations_${new Date().toISOString().split('T')[0]}`;
+      const getFormattedDateDDMMYYYY = (date = new Date()) => {
+        const d = new Date(date);
+        const day = String(d.getDate()).padStart(2, '0');
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const year = d.getFullYear();
+        return `${day}-${month}-${year}`;
+      };
+
+      const today = getFormattedDateDDMMYYYY();
+      let catName = 'ALL_INSTALLATIONS';
+      if (categoryFilter && categoryFilter !== 'ALL') {
+        catName = categoryFilter.toUpperCase().replace(/[_\s]+/g, '');
+      }
+      const filename = `${catName}_${today}`;
       const sheetName = categoryFilter === 'ALL' ? 'All Installations' : `${categoryFilter} Installs`;
       await exportInstallationsToExcel(filename, sheetName, filteredInstallations, categoryFilter);
     } catch (err) {

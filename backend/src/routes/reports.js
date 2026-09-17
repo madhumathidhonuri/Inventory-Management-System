@@ -9,6 +9,22 @@ const MONTH_NAMES = [
   'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER'
 ];
 
+// Helper: Format date into clean DD-MM-YYYY string for download filenames
+function formatDateDDMMYYYY(date = new Date()) {
+  const d = (date instanceof Date && !isNaN(date.getTime())) ? date : new Date(date);
+  if (isNaN(d.getTime())) {
+    const today = new Date();
+    const day = String(today.getDate()).padStart(2, '0');
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const year = today.getFullYear();
+    return `${day}-${month}-${year}`;
+  }
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const year = d.getFullYear();
+  return `${day}-${month}-${year}`;
+}
+
 // Helper: Parse exact Month name from date string, month string, or Excel serial
 function parseMonthFromValue(val) {
   if (!val) return null;
@@ -635,9 +651,8 @@ router.get('/export', (req, res) => {
       }
 
       const devices = queryFilteredDevices(queryParams);
-      const catSuffix = (category && category !== 'ALL') ? `_${category.replace(/[^a-zA-Z0-9_-]/g, '_')}` : '';
-
-      filename = `manager_vehicle_billing_statement${catSuffix}_${new Date().toISOString().split('T')[0]}`;
+      const catPrefix = (category && category !== 'ALL') ? `${category.toUpperCase().replace(/[_\s]+/g, '')}_` : '';
+      filename = `${catPrefix}MANAGER_STATEMENT_${formatDateDDMMYYYY()}`;
       sheetName = (category && category !== 'ALL') ? `${category.substring(0, 20)} Statement` : 'ManagerStatement';
 
       data = devices.map((dev, idx) => {
@@ -678,19 +693,49 @@ router.get('/export', (req, res) => {
 
       const devices = queryFilteredDevices(queryParams);
 
-      // Name filename accurately based on filters
-      let nameParts = ['report'];
-      if (purchase_batch_id) {
-        const batch = db.prepare('SELECT source_file, notes FROM purchase_batches WHERE id = ?').get(purchase_batch_id);
-        if (batch) {
-          const rawName = (batch.source_file || batch.notes || '').replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9_-]/g, '_');
-          nameParts.push(rawName);
+      // Name filename accurately based on filters (e.g. VAMOOSYS_17-09-2026, VOLTY_17-09-2026, TGMINING_17-09-2026)
+      let nameParts = [];
+      if (device_type_id) {
+        const dt = db.prepare('SELECT name FROM device_types WHERE id = ?').get(device_type_id);
+        if (dt) {
+          let dtName = dt.name.toUpperCase().replace(/\s+/g, '');
+          if (dtName === 'VAMOSYS' || dtName === 'VAMO') dtName = 'VAMOOSYS';
+          nameParts.push(dtName);
         }
       }
-      if (stock_place) nameParts.push(stock_place.replace(/[^a-zA-Z0-9_-]/g, '_'));
-      if (installed_filter === 'installed' || type === 'installed') nameParts.push('installed');
-      if (installed_filter === 'uninstalled' || type === 'uninstalled' || type === 'instock') nameParts.push('instock');
-      nameParts.push(new Date().toISOString().split('T')[0]);
+      if (category && category !== 'ALL') {
+        const catClean = category.toUpperCase().replace(/[_\s]+/g, '');
+        if (!nameParts.includes(catClean)) nameParts.push(catClean);
+      }
+      if (purchase_batch_id) {
+        const batch = db.prepare('SELECT source_file, notes, device_type_id FROM purchase_batches WHERE id = ?').get(purchase_batch_id);
+        if (batch) {
+          if (!nameParts.length && batch.device_type_id) {
+            const dt = db.prepare('SELECT name FROM device_types WHERE id = ?').get(batch.device_type_id);
+            if (dt) {
+              let dtName = dt.name.toUpperCase().replace(/\s+/g, '');
+              if (dtName === 'VAMOSYS' || dtName === 'VAMO') dtName = 'VAMOOSYS';
+              nameParts.push(dtName);
+            }
+          }
+          const rawName = (batch.source_file || batch.notes || '').replace(/\.[^/.]+$/, '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+          if (rawName && !nameParts.includes(rawName)) nameParts.push(rawName);
+        }
+      }
+      if (stock_place) {
+        const cleanSp = stock_place.toUpperCase().replace(/[_\s]+/g, '');
+        if (!nameParts.includes(cleanSp)) nameParts.push(cleanSp);
+      }
+      if (installed_filter === 'installed' || type === 'installed') {
+        if (!nameParts.includes('INSTALLED')) nameParts.push('INSTALLED');
+      }
+      if (installed_filter === 'uninstalled' || type === 'uninstalled' || type === 'instock') {
+        if (!nameParts.includes('INSTOCK')) nameParts.push('INSTOCK');
+      }
+      if (nameParts.length === 0) {
+        nameParts.push('INVENTORY_STOCK');
+      }
+      nameParts.push(formatDateDDMMYYYY());
 
       filename = nameParts.join('_');
       sheetName = (stock_place || 'StockReport').substring(0, 30);
@@ -1682,7 +1727,7 @@ router.get('/export-daily-distribution', async (req, res) => {
       { width: 22 }   // Location
     ];
 
-    const filename = `Daily_Master_Report_${targetDate}`;
+    const filename = `DAILY_REPORT_${formatDateDDMMYYYY(targetDate)}`;
     const buffer = await wb.xlsx.writeBuffer();
 
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -2140,7 +2185,7 @@ router.get('/customer-directory/export', async (req, res) => {
       { width: 20 }  // Installation Date
     ];
 
-    const filename = `FuelTracks_Customer_KYC_Directory_${new Date().toISOString().split('T')[0]}`;
+    const filename = `CUSTOMER_KYC_DIRECTORY_${formatDateDDMMYYYY()}`;
     const buffer = await wb.xlsx.writeBuffer();
 
 
@@ -2508,7 +2553,7 @@ router.get('/payments-excel', async (req, res) => {
       { width: 22 }  // Received By / Mode
     ];
 
-    const filename = `FuelTracks_Payments_Statement_${activeStartDate}_to_${activeEndDate}`;
+    const filename = `PAYMENTS_STATEMENT_${formatDateDDMMYYYY(activeStartDate)}_TO_${formatDateDDMMYYYY(activeEndDate)}`;
     const buffer = await wb.xlsx.writeBuffer();
 
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');

@@ -1251,27 +1251,53 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
       csvRows.push(row.join(','));
     });
 
-    const activeDt = typeFilter ? deviceTypes.find(dt => dt.id.toString() === typeFilter.toString()) : null;
-    let baseTypeName = activeDt ? activeDt.name : (batchFilter ? 'Batch_Stock' : 'Inventory_Stock');
-    let categorySuffix = '';
-    if (categoryFilter) {
-      categorySuffix = `_${categoryFilter.replace(/\s+/g, '_')}`;
-    } else if (quickPreset === 'TG_MINING') {
-      categorySuffix = '_TG_MINING';
-    } else if (quickPreset === 'AP_MINING') {
-      categorySuffix = '_AP_MINING';
-    } else if (quickPreset === 'VLTD') {
-      categorySuffix = '_VLTD';
-    } else if (quickPreset === 'GENERAL') {
-      categorySuffix = '_GENERAL';
-    }
-    const activeTypeName = `${baseTypeName}${categorySuffix}`;
+    const getFormattedDateDDMMYYYY = (date = new Date()) => {
+      const d = new Date(date);
+      const day = String(d.getDate()).padStart(2, '0');
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const year = d.getFullYear();
+      return `${day}-${month}-${year}`;
+    };
+
+    const getCleanExportBaseName = () => {
+      const activeDt = typeFilter ? deviceTypes.find(dt => dt.id.toString() === typeFilter.toString()) : null;
+      let nameParts = [];
+
+      if (activeDt) {
+        let dtName = activeDt.name.toUpperCase().replace(/\s+/g, '');
+        if (dtName === 'VAMOSYS' || dtName === 'VAMO') {
+          dtName = 'VAMOOSYS';
+        }
+        nameParts.push(dtName);
+      }
+
+      if (categoryFilter) {
+        const catClean = categoryFilter.toUpperCase().replace(/\s+/g, '');
+        if (!nameParts.includes(catClean)) nameParts.push(catClean);
+      } else if (quickPreset && quickPreset !== 'ALL') {
+        const preClean = quickPreset.toUpperCase().replace(/[_\s]+/g, '');
+        if (!nameParts.includes(preClean)) nameParts.push(preClean);
+      }
+
+      if (nameParts.length === 0) {
+        if (batchFilter) {
+          nameParts.push('BATCH_STOCK');
+        } else {
+          nameParts.push('INVENTORY_STOCK');
+        }
+      }
+
+      return nameParts.join('_');
+    };
+
+    const baseName = getCleanExportBaseName();
+    const today = getFormattedDateDDMMYYYY();
 
     const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.setAttribute('href', url);
-    link.setAttribute('download', `${activeTypeName}_Export_${new Date().toISOString().slice(0, 10)}.csv`);
+    link.setAttribute('download', `${baseName}_${today}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -1283,26 +1309,49 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
       alert('No records available to export');
       return;
     }
-    const today = new Date().toISOString().slice(0, 10);
-    const activeDt = typeFilter ? deviceTypes.find(dt => dt.id.toString() === typeFilter.toString()) : null;
-    let baseTypeName = activeDt ? activeDt.name : (batchFilter ? 'Batch_Stock' : 'Inventory_Stock');
 
-    // Include Category / Preset in filename and sheet header
-    let categorySuffix = '';
-    if (categoryFilter) {
-      categorySuffix = `_${categoryFilter.replace(/\s+/g, '_')}`;
-    } else if (quickPreset === 'TG_MINING') {
-      categorySuffix = '_TG_MINING';
-    } else if (quickPreset === 'AP_MINING') {
-      categorySuffix = '_AP_MINING';
-    } else if (quickPreset === 'VLTD') {
-      categorySuffix = '_VLTD';
-    } else if (quickPreset === 'GENERAL') {
-      categorySuffix = '_GENERAL';
-    }
+    const getFormattedDateDDMMYYYY = (date = new Date()) => {
+      const d = new Date(date);
+      const day = String(d.getDate()).padStart(2, '0');
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const year = d.getFullYear();
+      return `${day}-${month}-${year}`;
+    };
 
-    const activeTypeName = `${baseTypeName}${categorySuffix}`;
-    const fileName = `${activeTypeName}_List_${today}.xlsx`;
+    const getCleanExportBaseName = () => {
+      const activeDt = typeFilter ? deviceTypes.find(dt => dt.id.toString() === typeFilter.toString()) : null;
+      let nameParts = [];
+
+      if (activeDt) {
+        let dtName = activeDt.name.toUpperCase().replace(/\s+/g, '');
+        if (dtName === 'VAMOSYS' || dtName === 'VAMO') {
+          dtName = 'VAMOOSYS';
+        }
+        nameParts.push(dtName);
+      }
+
+      if (categoryFilter) {
+        const catClean = categoryFilter.toUpperCase().replace(/\s+/g, '');
+        if (!nameParts.includes(catClean)) nameParts.push(catClean);
+      } else if (quickPreset && quickPreset !== 'ALL') {
+        const preClean = quickPreset.toUpperCase().replace(/[_\s]+/g, '');
+        if (!nameParts.includes(preClean)) nameParts.push(preClean);
+      }
+
+      if (nameParts.length === 0) {
+        if (batchFilter) {
+          nameParts.push('BATCH_STOCK');
+        } else {
+          nameParts.push('INVENTORY_STOCK');
+        }
+      }
+
+      return nameParts.join('_');
+    };
+
+    const baseName = getCleanExportBaseName();
+    const today = getFormattedDateDDMMYYYY();
+    const fileName = `${baseName}_${today}.xlsx`;
 
     // Determine final ordered columns
     const isSingleTypeView = Boolean(typeFilter || batchFilter || (filteredDevices.length > 0 && new Set(filteredDevices.map(d => d.device_type_id)).size === 1));
@@ -1331,14 +1380,14 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
 
     await exportDevicesToExcel(
       fileName,
-      activeTypeName,
+      baseName,
       masterStock,
       exportColumns,
       '1E3A8A', // Royal Navy Blue Header
       {
         newDevices: newDevices.length > 0 ? newDevices : null,
-        sheet1Name: `${activeTypeName.slice(0, 20)} - Stock`,
-        sheet2Name: `${activeTypeName.slice(0, 16)} - New Devices`
+        sheet1Name: `${baseName.slice(0, 20)} - Stock`,
+        sheet2Name: `${baseName.slice(0, 16)} - New Devices`
       }
     );
   };
