@@ -3,12 +3,28 @@ const router = express.Router();
 const db = require('../db/database');
 const ExcelJS = require('exceljs');
 
+const CATEGORY_META = {
+  FUEL_TRAVEL: { label: 'Fuel & Travel', group: 'FIELD_OPS' },
+  FOOD_ALLOWANCE: { label: 'Food & Daily Allowance (DA)', group: 'FIELD_OPS' },
+  TECHNICIAN_PAYOUT: { label: 'Technician Payout / Incentive', group: 'FIELD_OPS' },
+  TECHNICIAN_TRAVEL: { label: 'Technician Travel / Fuel', group: 'FIELD_OPS' },
+  OFFICE_RENT: { label: 'Office Rent & Maintenance', group: 'FIXED_OVERHEADS' },
+  ELECTRICITY_BILL: { label: 'Electricity & Utility Bills', group: 'FIXED_OVERHEADS' },
+  SALARIES: { label: 'Staff Salaries & Advances', group: 'PAYROLL' },
+  STOCK_PURCHASE: { label: 'Stock & Hardware Purchases (COGS)', group: 'INVENTORY_STOCK' },
+  COURIER_FREIGHT: { label: 'Courier & Logistics', group: 'LOGISTICS' },
+  INTERNET_CLOUD: { label: 'Internet, Software & Servers', group: 'FIXED_OVERHEADS' },
+  OFFICE_MISC: { label: 'Office Tea/Snacks & Misc', group: 'GENERAL_ADMIN' },
+  OTHER: { label: 'Other Expenses', group: 'GENERAL_ADMIN' }
+};
+
 // GET /api/expenses - List expenses with filters
 router.get('/', (req, res) => {
   try {
     const {
       search = '',
       category = '',
+      category_group = '',
       payment_mode = '',
       startDate = '',
       endDate = '',
@@ -40,9 +56,9 @@ router.get('/', (req, res) => {
     }
 
     if (search) {
-      query += ' AND (incurred_by LIKE ? OR paid_to LIKE ? OR utr_number LIKE ? OR remarks LIKE ? OR linked_entity_id LIKE ?)';
+      query += ' AND (incurred_by LIKE ? OR paid_to LIKE ? OR utr_number LIKE ? OR bill_invoice_no LIKE ? OR sub_category LIKE ? OR remarks LIKE ? OR linked_entity_id LIKE ?)';
       const s = `%${search}%`;
-      params.push(s, s, s, s, s);
+      params.push(s, s, s, s, s, s, s);
     }
 
     // Count query
@@ -55,9 +71,18 @@ router.get('/', (req, res) => {
 
     const rows = db.prepare(query).all(...params);
 
+    // Filter by category_group in memory if requested
+    let resultRows = rows;
+    if (category_group && category_group !== 'ALL') {
+      resultRows = rows.filter(r => {
+        const meta = CATEGORY_META[r.category];
+        return meta && meta.group === category_group;
+      });
+    }
+
     res.json({
       success: true,
-      data: rows,
+      data: resultRows,
       total: totalCount,
       limit: Number(limit),
       offset: Number(offset)
@@ -68,7 +93,215 @@ router.get('/', (req, res) => {
   }
 });
 
-// GET /api/expenses/summary - Aggregated stats for metrics cards & charts
+// GET /api/expenses/financial-health - Comprehensive Cash Flow (Inflow vs Stock vs OPEX vs Savings)
+router.get('/financial-health', (req, res) => {
+  try {
+    const { startDate = '', endDate = '' } = req.query;
+
+    let dateCondInst = '';
+    let dateCondDev = '';
+    let dateCondExp = '';
+    const paramsInst = [];
+    const paramsDev = [];
+    const paramsExp = [];
+
+    if (startDate && endDate) {
+      dateCondInst = ' WHERE COALESCE(payment_date, installation_date) >= ? AND COALESCE(payment_date, installation_date) <= ?';
+      paramsInst.push(startDate, endDate);
+
+      dateCondDev = ' WHERE purchase_date >= ? AND purchase_date <= ?';
+      paramsDev.push(startDate, endDate);
+
+      dateCondExp = ' WHERE expense_date >= ? AND expense_date <= ?';
+      paramsExp.push(startDate, endDate);
+    } else if (startDate) {
+      dateCondInst = ' WHERE COALESCE(payment_date, installation_date) >= ?';
+      paramsInst.push(startDate);
+
+      dateCondDev = ' WHERE purchase_date >= ?';
+      paramsDev.push(startDate);
+
+      dateCondExp = ' WHERE expense_date >= ?';
+      paramsExp.push(startDate);
+    } else if (endDate) {
+      dateCondInst = ' WHERE COALESCE(payment_date, installation_date) <= ?';
+      paramsInst.push(endDate);
+
+      dateCondDev = ' WHERE purchase_date <= ?';
+      paramsDev.push(endDate);
+
+      dateCondExp = ' WHERE expense_date <= ?';
+      paramsExp.push(endDate);
+    }
+
+    // 1. Total Inflow (Amount Collected/Paid from installations)
+    const inflowRow = db.prepare(`
+      SELECT 
+        COALESCE(SUM(
+          CASE 
+            WHEN amount_paid IS NOT NULL AND amount_paid > 0 THEN amount_paid 
+            WHEN UPPER(COALESCE(payment_status, '')) IN ('RECEIVED', 'PAID') THEN COALESCE(sale_price, 0)
+            WHEN UPPER(COALESCE(payment_status, '')) NOT IN ('PENDING', 'NOT RECEIVED', 'UNPAID') AND sale_price > 0 THEN COALESCE(sale_price, 0)
+            ELSE 0 
+          END
+        ), 0) as total_inflow,
+        COUNT(*) as total_installations
+      FROM installations
+      ${dateCondInst}
+    `).get(...paramsInst);
+
+    // 2. Hardware / Stock Purchases from Device Master
+    const stockDeviceRow = db.prepare(`
+      SELECT 
+        COALESCE(SUM(purchase_price), 0) as device_stock_cost,
+        COUNT(*) as total_devices_bought
+      FROM devices
+      ${dateCondDev}
+    `).get(...paramsDev);
+
+    // 3. Direct Stock Purchase Expenses recorded in expenses table
+    const directStockExpenseRow = db.prepare(`
+      SELECT COALESCE(SUM(amount), 0) as direct_stock_amount
+      FROM expenses
+      ${dateCondExp ? `${dateCondExp} AND category = 'STOCK_PURCHASE'` : "WHERE category = 'STOCK_PURCHASE'"}
+    `).get(...paramsExp);
+
+    // Total Stock Purchases (COGS)
+    const totalStockPurchases = (stockDeviceRow?.device_stock_cost || 0) + (directStockExpenseRow?.direct_stock_amount || 0);
+
+    // 4. Operating Expenses (OPEX - excluding direct stock purchases to prevent double counting)
+    const opexRow = db.prepare(`
+      SELECT 
+        COALESCE(SUM(amount), 0) as total_opex,
+        COUNT(*) as total_expense_count
+      FROM expenses
+      ${dateCondExp ? `${dateCondExp} AND category != 'STOCK_PURCHASE'` : "WHERE category != 'STOCK_PURCHASE'"}
+    `).get(...paramsExp);
+
+    const totalInflow = inflowRow?.total_inflow || 0;
+    const totalOpex = opexRow?.total_opex || 0;
+    const totalOutflow = totalStockPurchases + totalOpex;
+    const netSavings = totalInflow - totalOutflow;
+    const savingsRate = totalInflow > 0 ? ((netSavings / totalInflow) * 100) : 0;
+
+    // 5. Category Breakdown with Labels & Groups
+    const categoryRows = db.prepare(`
+      SELECT category, SUM(amount) as total_amount, COUNT(*) as count 
+      FROM expenses ${dateCondExp} 
+      GROUP BY category 
+      ORDER BY total_amount DESC
+    `).all(...paramsExp);
+
+    const categoryBreakdown = categoryRows.map(row => {
+      const meta = CATEGORY_META[row.category] || { label: row.category, group: 'OTHER' };
+      return {
+        category: row.category,
+        label: meta.label,
+        group: meta.group,
+        total_amount: row.total_amount,
+        count: row.count,
+        percentage: totalOutflow > 0 ? ((row.total_amount / totalOutflow) * 100).toFixed(1) : 0
+      };
+    });
+
+    // 6. Group Breakdown
+    const groupMap = {
+      FIELD_OPS: { name: 'Field & Travel (Fuel, Food, Payouts)', total: 0, count: 0 },
+      FIXED_OVERHEADS: { name: 'Office Overheads (Rent, EB, Internet)', total: 0, count: 0 },
+      PAYROLL: { name: 'Staff Salaries & Advances', total: 0, count: 0 },
+      INVENTORY_STOCK: { name: 'Stock & Hardware (COGS)', total: totalStockPurchases, count: stockDeviceRow?.total_devices_bought || 0 },
+      LOGISTICS: { name: 'Logistics & Courier', total: 0, count: 0 },
+      GENERAL_ADMIN: { name: 'Office Misc & Other', total: 0, count: 0 }
+    };
+
+    categoryBreakdown.forEach(item => {
+      if (item.category === 'STOCK_PURCHASE') return; // already counted in groupMap.INVENTORY_STOCK
+      const grp = item.group;
+      if (groupMap[grp]) {
+        groupMap[grp].total += item.total_amount;
+        groupMap[grp].count += item.count;
+      } else {
+        groupMap.GENERAL_ADMIN.total += item.total_amount;
+        groupMap.GENERAL_ADMIN.count += item.count;
+      }
+    });
+
+    // 7. Monthly Historical Trend (Last 6 Months)
+    const monthlyTrends = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date();
+      d.setMonth(d.getMonth() - i);
+      const yearMonth = d.toISOString().slice(0, 7); // e.g. "2026-09"
+      const monthLabel = d.toLocaleString('default', { month: 'short', year: '2-digit' });
+
+      const mInflow = db.prepare(`
+        SELECT COALESCE(SUM(
+          CASE 
+            WHEN amount_paid IS NOT NULL AND amount_paid > 0 THEN amount_paid 
+            WHEN UPPER(COALESCE(payment_status, '')) IN ('RECEIVED', 'PAID') THEN COALESCE(sale_price, 0)
+            WHEN UPPER(COALESCE(payment_status, '')) NOT IN ('PENDING', 'NOT RECEIVED', 'UNPAID') AND sale_price > 0 THEN COALESCE(sale_price, 0)
+            ELSE 0 
+          END
+        ), 0) as val 
+        FROM installations 
+        WHERE COALESCE(payment_date, installation_date) LIKE ?
+      `).get(`${yearMonth}%`)?.val || 0;
+
+      const mStock = db.prepare(`
+        SELECT COALESCE(SUM(purchase_price), 0) as val 
+        FROM devices 
+        WHERE purchase_date LIKE ?
+      `).get(`${yearMonth}%`)?.val || 0;
+
+      const mOpex = db.prepare(`
+        SELECT COALESCE(SUM(amount), 0) as val 
+        FROM expenses 
+        WHERE expense_date LIKE ? AND category != 'STOCK_PURCHASE'
+      `).get(`${yearMonth}%`)?.val || 0;
+
+      const mDirectStockExp = db.prepare(`
+        SELECT COALESCE(SUM(amount), 0) as val 
+        FROM expenses 
+        WHERE expense_date LIKE ? AND category = 'STOCK_PURCHASE'
+      `).get(`${yearMonth}%`)?.val || 0;
+
+      const mTotalStock = mStock + mDirectStockExp;
+      const mTotalOutflow = mTotalStock + mOpex;
+      const mSavings = mInflow - mTotalOutflow;
+
+      monthlyTrends.push({
+        month: monthLabel,
+        yearMonth,
+        inflow: mInflow,
+        stock: mTotalStock,
+        opex: mOpex,
+        totalOutflow: mTotalOutflow,
+        savings: mSavings
+      });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        totalInflow,
+        totalStockPurchases,
+        totalOpex,
+        totalOutflow,
+        netSavings,
+        savingsRate: parseFloat(savingsRate.toFixed(1)),
+        isProfitable: netSavings >= 0,
+        categoryBreakdown,
+        groupBreakdown: groupMap,
+        monthlyTrends
+      }
+    });
+  } catch (err) {
+    console.error('[Expenses] Financial Health Error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/expenses/summary - Quick statistics for metrics cards
 router.get('/summary', (req, res) => {
   try {
     const { startDate = '', endDate = '' } = req.query;
@@ -108,7 +341,7 @@ router.get('/summary', (req, res) => {
 
     // This month vs previous month
     const now = new Date();
-    const currentMonthPrefix = now.toISOString().slice(0, 7); // e.g. "2026-09"
+    const currentMonthPrefix = now.toISOString().slice(0, 7);
     const prevDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
     const prevMonthPrefix = prevDate.toISOString().slice(0, 7);
 
@@ -138,13 +371,17 @@ router.post('/', (req, res) => {
     const {
       expense_date,
       category,
+      sub_category = '',
       amount,
       payment_mode = 'UPI',
       incurred_by,
       paid_to = '',
       utr_number = '',
+      bill_invoice_no = '',
+      receipt_url = '',
       linked_entity_type = 'GENERAL',
       linked_entity_id = '',
+      is_recurring = 0,
       remarks = ''
     } = req.body;
 
@@ -165,22 +402,26 @@ router.post('/', (req, res) => {
 
     const stmt = db.prepare(`
       INSERT INTO expenses (
-        expense_date, category, amount, payment_mode,
-        incurred_by, paid_to, utr_number, linked_entity_type,
-        linked_entity_id, remarks
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        expense_date, category, sub_category, amount, payment_mode,
+        incurred_by, paid_to, utr_number, bill_invoice_no, receipt_url,
+        linked_entity_type, linked_entity_id, is_recurring, remarks
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const info = stmt.run(
       expense_date,
       category,
+      sub_category ? sub_category.trim() : '',
       numAmount,
       payment_mode,
       incurred_by.trim(),
       paid_to ? paid_to.trim() : '',
       utr_number ? utr_number.trim() : '',
+      bill_invoice_no ? bill_invoice_no.trim() : '',
+      receipt_url ? receipt_url.trim() : '',
       linked_entity_type || 'GENERAL',
       linked_entity_id ? linked_entity_id.trim() : '',
+      is_recurring ? 1 : 0,
       remarks ? remarks.trim() : ''
     );
 
@@ -206,13 +447,17 @@ router.put('/:id', (req, res) => {
     const {
       expense_date,
       category,
+      sub_category,
       amount,
       payment_mode,
       incurred_by,
       paid_to,
       utr_number,
+      bill_invoice_no,
+      receipt_url,
       linked_entity_type,
       linked_entity_id,
+      is_recurring,
       remarks
     } = req.body;
 
@@ -230,13 +475,17 @@ router.put('/:id', (req, res) => {
       UPDATE expenses SET
         expense_date = ?,
         category = ?,
+        sub_category = ?,
         amount = ?,
         payment_mode = ?,
         incurred_by = ?,
         paid_to = ?,
         utr_number = ?,
+        bill_invoice_no = ?,
+        receipt_url = ?,
         linked_entity_type = ?,
         linked_entity_id = ?,
+        is_recurring = ?,
         remarks = ?
       WHERE id = ?
     `);
@@ -244,13 +493,17 @@ router.put('/:id', (req, res) => {
     stmt.run(
       expense_date || existing.expense_date,
       category || existing.category,
+      sub_category !== undefined ? (sub_category ? sub_category.trim() : '') : (existing.sub_category || ''),
       numAmount,
       payment_mode || existing.payment_mode,
       incurred_by ? incurred_by.trim() : existing.incurred_by,
       paid_to !== undefined ? (paid_to ? paid_to.trim() : '') : existing.paid_to,
       utr_number !== undefined ? (utr_number ? utr_number.trim() : '') : existing.utr_number,
+      bill_invoice_no !== undefined ? (bill_invoice_no ? bill_invoice_no.trim() : '') : (existing.bill_invoice_no || ''),
+      receipt_url !== undefined ? (receipt_url ? receipt_url.trim() : '') : (existing.receipt_url || ''),
       linked_entity_type || existing.linked_entity_type,
       linked_entity_id !== undefined ? (linked_entity_id ? linked_entity_id.trim() : '') : existing.linked_entity_id,
+      is_recurring !== undefined ? (is_recurring ? 1 : 0) : (existing.is_recurring || 0),
       remarks !== undefined ? (remarks ? remarks.trim() : '') : existing.remarks,
       id
     );
@@ -293,7 +546,7 @@ router.delete('/:id', (req, res) => {
   }
 });
 
-// GET /api/expenses/export - Excel export
+// GET /api/expenses/export - Excel export with modern formatting & all categories
 router.get('/export', async (req, res) => {
   try {
     const { category, payment_mode, startDate, endDate, search } = req.query;
@@ -318,9 +571,9 @@ router.get('/export', async (req, res) => {
       params.push(endDate);
     }
     if (search) {
-      query += ' AND (incurred_by LIKE ? OR paid_to LIKE ? OR utr_number LIKE ? OR remarks LIKE ?)';
+      query += ' AND (incurred_by LIKE ? OR paid_to LIKE ? OR utr_number LIKE ? OR bill_invoice_no LIKE ? OR remarks LIKE ?)';
       const s = `%${search}%`;
-      params.push(s, s, s, s);
+      params.push(s, s, s, s, s);
     }
 
     query += ' ORDER BY expense_date DESC, id DESC';
@@ -330,13 +583,13 @@ router.get('/export', async (req, res) => {
     const worksheet = workbook.addWorksheet('Expenses Statement');
 
     // Title Row
-    worksheet.mergeCells('A1:H1');
+    worksheet.mergeCells('A1:J1');
     const titleCell = worksheet.getCell('A1');
-    titleCell.value = 'FuelTracks Technologies — Operational Expenses Statement';
+    titleCell.value = 'FuelTracks Technologies — Operational Expenses & Cash Flow Statement';
     titleCell.font = { name: 'Arial', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
-    titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
+    titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F172A' } };
     titleCell.alignment = { vertical: 'middle', horizontal: 'center' };
-    worksheet.getRow(1).height = 30;
+    worksheet.getRow(1).height = 32;
 
     // Header Row
     const headerRow = worksheet.getRow(2);
@@ -344,38 +597,33 @@ router.get('/export', async (req, res) => {
       '#',
       'Date',
       'Category',
+      'Sub-Category / Type',
       'Amount (₹)',
       'Payment Mode',
       'Incurred By / Staff',
-      'Paid To',
-      'UTR / Reference No.',
-      'Remarks'
+      'Paid To / Payee',
+      'Bill / UTR Ref',
+      'Remarks / Linked Entity'
     ];
     headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
     headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2563EB' } };
-    headerRow.height = 24;
-
-    const categoryLabels = {
-      'TECHNICIAN_TRAVEL': 'Technician Travel / Fuel',
-      'COURIER_FREIGHT': 'Courier & Freight',
-      'TECHNICIAN_PAYOUT': 'Technician Payout / Incentive',
-      'OFFICE_MISC': 'Office & Operations',
-      'OTHER': 'Other'
-    };
+    headerRow.height = 25;
 
     let totalAmount = 0;
     rows.forEach((r, idx) => {
       totalAmount += r.amount || 0;
+      const meta = CATEGORY_META[r.category] || { label: r.category };
       const row = worksheet.addRow([
         idx + 1,
         r.expense_date,
-        categoryLabels[r.category] || r.category,
+        meta.label,
+        r.sub_category || '-',
         r.amount,
         r.payment_mode,
         r.incurred_by,
         r.paid_to || '-',
-        r.utr_number || '-',
-        r.remarks || '-'
+        r.bill_invoice_no ? `${r.bill_invoice_no} (${r.utr_number || 'No UTR'})` : (r.utr_number || '-'),
+        r.linked_entity_id ? `[${r.linked_entity_type}: ${r.linked_entity_id}] ${r.remarks || ''}` : (r.remarks || '-')
       ]);
 
       if (idx % 2 === 1) {
@@ -386,6 +634,7 @@ router.get('/export', async (req, res) => {
     // Total Row
     const summaryRow = worksheet.addRow([
       'TOTAL',
+      '',
       '',
       '',
       totalAmount,
@@ -399,14 +648,14 @@ router.get('/export', async (req, res) => {
     summaryRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
 
     // Format Amount columns as Currency
-    worksheet.getColumn(4).numFmt = '₹#,##0.00';
+    worksheet.getColumn(5).numFmt = '₹#,##0.00';
 
     // Auto-fit column widths
-    worksheet.columns.forEach((column, i) => {
-      let maxLen = 12;
+    worksheet.columns.forEach((column) => {
+      let maxLen = 14;
       column.eachCell({ includeEmpty: true }, (cell) => {
         const val = cell.value ? cell.value.toString() : '';
-        if (val.length > maxLen) maxLen = Math.min(val.length + 3, 35);
+        if (val.length > maxLen) maxLen = Math.min(val.length + 3, 40);
       });
       column.width = maxLen;
     });

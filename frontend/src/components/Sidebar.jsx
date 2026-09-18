@@ -13,15 +13,15 @@ export default function Sidebar({ activeTab, setActiveTab }) {
     { id: 'dispatches', label: isDealer ? 'My Dispatches / Receipts' : 'Stock Dispatches & Assign', icon: Truck, roles: ['SUPER_ADMIN', 'ADMIN_TEAM', 'WAREHOUSE_MANAGER', 'DEALER'] },
     { id: 'upload', label: 'Excel Bulk Upload', icon: FileSpreadsheet, roles: ['SUPER_ADMIN', 'ADMIN_TEAM', 'WAREHOUSE_MANAGER'] },
     { id: 'installations', label: isDealer ? 'My Vehicle Installations' : 'Installations Hub', icon: Wrench, roles: ['SUPER_ADMIN', 'ADMIN_TEAM', 'SALES_TEAM', 'WAREHOUSE_MANAGER', 'SALES_MANAGER', 'INSTALLER', 'DEALER'] },
-    { id: 'expenses', label: 'Expenses Hub', icon: Wallet, roles: ['SUPER_ADMIN', 'ADMIN_TEAM', 'WAREHOUSE_MANAGER', 'SALES_MANAGER', 'INSTALLER'] },
+    { id: 'expenses', label: 'Expenses Hub', icon: Wallet, roles: ['SUPER_ADMIN'] },
     { id: 'types', label: 'Device Catalog', icon: Settings, roles: ['SUPER_ADMIN', 'ADMIN_TEAM', 'WAREHOUSE_MANAGER'] },
-    { id: 'reports', label: 'Reports & Exports', icon: FileText, roles: ['SUPER_ADMIN', 'ADMIN_TEAM', 'SALES_TEAM', 'WAREHOUSE_MANAGER', 'SALES_MANAGER'] },
+    { id: 'reports', label: 'Reports & Exports', icon: FileText, roles: ['SUPER_ADMIN'] },
     { id: 'staff-performance', label: 'Staff Performance', icon: Users, roles: ['SUPER_ADMIN'] },
     { id: 'users', label: 'User Roles', icon: UserCheck, roles: ['SUPER_ADMIN'] },
     { id: 'mobile', label: 'Field Mobile Scanner', icon: Smartphone, roles: ['SUPER_ADMIN', 'ADMIN_TEAM', 'INSTALLER', 'WAREHOUSE_MANAGER', 'DEALER'] }
   ];
 
-  const visibleItems = NAV_ITEMS.filter(item => item.roles.includes(user?.role) || user?.role === 'SUPER_ADMIN');
+  const visibleItems = NAV_ITEMS.filter(item => item.roles.includes(user?.role));
 
   return (
     <aside className="w-64 bg-white border-r border-slate-200 flex flex-col justify-between hidden md:flex min-h-[calc(100vh-57px)]">

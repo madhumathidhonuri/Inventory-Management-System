@@ -20,7 +20,8 @@ import StaffPerformancePage from './pages/StaffPerformancePage';
 import MobileAppView from './pages/MobileAppView';
 
 function MainLayout() {
-  const { isMobileMode } = useAuth();
+  const { user, isMobileMode } = useAuth();
+  const isSuperAdmin = user?.role === 'SUPER_ADMIN';
   const [activeTab, setActiveTab] = useState('dashboard');
 
   // Drawer & Scanner States
@@ -88,15 +89,15 @@ function MainLayout() {
       case 'installations':
         return <InstallationPage onOpenScannerWithCallback={openScannerWithCallback} onOpenTraceDrawer={openTraceDrawer} />;
       case 'expenses':
-        return <ExpensesPage />;
+        return isSuperAdmin ? <ExpensesPage /> : <DashboardPage onOpenTraceDrawer={openTraceDrawer} onNavigateTab={setActiveTab} />;
       case 'types':
         return <DeviceTypesPage />;
       case 'reports':
-        return <ReportsPage />;
+        return isSuperAdmin ? <ReportsPage /> : <DashboardPage onOpenTraceDrawer={openTraceDrawer} onNavigateTab={setActiveTab} />;
       case 'staff-performance':
-        return <StaffPerformancePage onOpenTraceDrawer={openTraceDrawer} />;
+        return isSuperAdmin ? <StaffPerformancePage onOpenTraceDrawer={openTraceDrawer} /> : <DashboardPage onOpenTraceDrawer={openTraceDrawer} />;
       case 'users':
-        return <UserManagementPage />;
+        return isSuperAdmin ? <UserManagementPage /> : <DashboardPage onOpenTraceDrawer={openTraceDrawer} />;
       default:
         return <DashboardPage onOpenTraceDrawer={openTraceDrawer} onNavigateTab={setActiveTab} />;
     }

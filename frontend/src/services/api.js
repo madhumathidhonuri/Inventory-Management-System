@@ -601,6 +601,13 @@ export async function fetchExpenseSummary(params = {}) {
   return res.json();
 }
 
+export async function fetchExpenseFinancialHealth(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  const res = await fetch(`${API_BASE}/expenses/financial-health?${query}`);
+  if (!res.ok) throw new Error('Failed to fetch financial health and savings metrics');
+  return res.json();
+}
+
 export async function createExpense(payload) {
   const res = await fetch(`${API_BASE}/expenses`, {
     method: 'POST',

@@ -19,11 +19,29 @@ import {
   ArrowUpDown,
   RefreshCw,
   Copy,
-  Check
+  Check,
+  Zap,
+  Users,
+  Layers,
+  Globe,
+  Coffee,
+  Receipt,
+  TrendingUp,
+  TrendingDown,
+  Percent,
+  ArrowUpRight,
+  ArrowDownRight,
+  ShieldCheck,
+  Repeat,
+  SlidersHorizontal,
+  FileText,
+  Tag,
+  PenLine
 } from 'lucide-react';
 import {
   fetchExpenses,
   fetchExpenseSummary,
+  fetchExpenseFinancialHealth,
   createExpense,
   updateExpense,
   deleteExpense,
@@ -31,48 +49,134 @@ import {
 } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 
-const CATEGORY_CONFIG = {
-  TECHNICIAN_TRAVEL: {
-    label: 'Technician Travel / Fuel',
+const PREDEFINED_CATEGORIES = {
+  FUEL_TRAVEL: {
+    label: 'Fuel & Travel',
+    group: 'FIELD_OPS',
     icon: Car,
     bg: 'bg-amber-50',
     text: 'text-amber-700',
     border: 'border-amber-200'
   },
-  COURIER_FREIGHT: {
-    label: 'Courier & Freight',
-    icon: Truck,
-    bg: 'bg-blue-50',
-    text: 'text-blue-700',
-    border: 'border-blue-200'
+  FOOD_ALLOWANCE: {
+    label: 'Food & Daily Allowance',
+    group: 'FIELD_OPS',
+    icon: Coffee,
+    bg: 'bg-orange-50',
+    text: 'text-orange-700',
+    border: 'border-orange-200'
   },
   TECHNICIAN_PAYOUT: {
     label: 'Technician Payout',
+    group: 'FIELD_OPS',
     icon: DollarSign,
     bg: 'bg-emerald-50',
     text: 'text-emerald-700',
     border: 'border-emerald-200'
   },
-  OFFICE_MISC: {
-    label: 'Office & Operations',
+  ELECTRICITY_BILL: {
+    label: 'Electricity & Utility',
+    group: 'FIXED_OVERHEADS',
+    icon: Zap,
+    bg: 'bg-yellow-50',
+    text: 'text-yellow-800',
+    border: 'border-yellow-200'
+  },
+  OFFICE_RENT: {
+    label: 'Office Rent & Facilities',
+    group: 'FIXED_OVERHEADS',
     icon: Building2,
+    bg: 'bg-indigo-50',
+    text: 'text-indigo-700',
+    border: 'border-indigo-200'
+  },
+  SALARIES: {
+    label: 'Staff Salaries & Advances',
+    group: 'PAYROLL',
+    icon: Users,
     bg: 'bg-purple-50',
     text: 'text-purple-700',
     border: 'border-purple-200'
   },
+  STOCK_PURCHASE: {
+    label: 'Stock & Devices (COGS)',
+    group: 'INVENTORY_STOCK',
+    icon: Layers,
+    bg: 'bg-cyan-50',
+    text: 'text-cyan-700',
+    border: 'border-cyan-200'
+  },
+  COURIER_FREIGHT: {
+    label: 'Courier & Logistics',
+    group: 'LOGISTICS',
+    icon: Truck,
+    bg: 'bg-blue-50',
+    text: 'text-blue-700',
+    border: 'border-blue-200'
+  },
+  INTERNET_CLOUD: {
+    label: 'Internet & Cloud Servers',
+    group: 'FIXED_OVERHEADS',
+    icon: Globe,
+    bg: 'bg-sky-50',
+    text: 'text-sky-700',
+    border: 'border-sky-200'
+  },
+  OFFICE_MISC: {
+    label: 'Office & Operations Misc',
+    group: 'GENERAL_ADMIN',
+    icon: Receipt,
+    bg: 'bg-slate-50',
+    text: 'text-slate-700',
+    border: 'border-slate-200'
+  },
   OTHER: {
-    label: 'Other',
+    label: 'Other Expenses',
+    group: 'GENERAL_ADMIN',
     icon: Wallet,
     bg: 'bg-slate-50',
     text: 'text-slate-700',
     border: 'border-slate-200'
+  },
+  TECHNICIAN_TRAVEL: {
+    label: 'Technician Travel / Fuel',
+    group: 'FIELD_OPS',
+    icon: Car,
+    bg: 'bg-amber-50',
+    text: 'text-amber-700',
+    border: 'border-amber-200'
   }
 };
+
+function getCategoryConfig(catKey) {
+  if (!catKey) return PREDEFINED_CATEGORIES.OTHER;
+  if (PREDEFINED_CATEGORIES[catKey]) return PREDEFINED_CATEGORIES[catKey];
+  // Custom user-typed category
+  return {
+    label: catKey.replace(/_/g, ' '),
+    group: 'GENERAL_ADMIN',
+    icon: Tag,
+    bg: 'bg-violet-50',
+    text: 'text-violet-700',
+    border: 'border-violet-200'
+  };
+}
+
+const GROUP_TABS = [
+  { id: 'ALL', label: 'All Expenses' },
+  { id: 'FIELD_OPS', label: 'Field & Travel' },
+  { id: 'FIXED_OVERHEADS', label: 'Rent & Electricity' },
+  { id: 'PAYROLL', label: 'Salaries' },
+  { id: 'INVENTORY_STOCK', label: 'Stock (COGS)' },
+  { id: 'LOGISTICS', label: 'Courier' },
+  { id: 'GENERAL_ADMIN', label: 'Misc' }
+];
 
 export default function ExpensesPage() {
   const { user } = useAuth();
   const [expenses, setExpenses] = useState([]);
   const [summary, setSummary] = useState(null);
+  const [financialHealth, setFinancialHealth] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
@@ -81,6 +185,7 @@ export default function ExpensesPage() {
   // Filters
   const [search, setSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
+  const [selectedGroup, setSelectedGroup] = useState('ALL');
   const [selectedPaymentMode, setSelectedPaymentMode] = useState('');
   
   // Date Presets
@@ -91,14 +196,21 @@ export default function ExpensesPage() {
   // Modal State
   const [modalOpen, setModalOpen] = useState(false);
   const [editingExpense, setEditingExpense] = useState(null);
+  const [isCustomCategory, setIsCustomCategory] = useState(false);
+  const [customCategoryName, setCustomCategoryName] = useState('');
   const [formData, setFormData] = useState({
     expense_date: new Date().toISOString().split('T')[0],
-    category: 'TECHNICIAN_TRAVEL',
+    category: 'FUEL_TRAVEL',
+    sub_category: '',
     amount: '',
     payment_mode: 'UPI',
     incurred_by: user?.name || '',
     paid_to: '',
     utr_number: '',
+    bill_invoice_no: '',
+    linked_entity_type: 'GENERAL',
+    linked_entity_id: '',
+    is_recurring: 0,
     remarks: ''
   });
   const [formSubmitting, setFormSubmitting] = useState(false);
@@ -138,18 +250,21 @@ export default function ExpensesPage() {
       const params = {
         search,
         category: selectedCategory,
+        category_group: selectedGroup,
         payment_mode: selectedPaymentMode,
         startDate,
         endDate
       };
 
-      const [listRes, sumRes] = await Promise.all([
+      const [listRes, sumRes, healthRes] = await Promise.all([
         fetchExpenses(params),
-        fetchExpenseSummary({ startDate, endDate })
+        fetchExpenseSummary({ startDate, endDate }),
+        fetchExpenseFinancialHealth({ startDate, endDate })
       ]);
 
       setExpenses(listRes.data || []);
       setSummary(sumRes.summary || null);
+      setFinancialHealth(healthRes.data || null);
     } catch (err) {
       setError(err.message || 'Failed to load expenses data');
     } finally {
@@ -160,18 +275,36 @@ export default function ExpensesPage() {
 
   useEffect(() => {
     loadData();
-  }, [search, selectedCategory, selectedPaymentMode, startDate, endDate]);
+  }, [search, selectedCategory, selectedGroup, selectedPaymentMode, startDate, endDate]);
+
+  // Extract unique custom categories dynamically from expense records
+  const dynamicCustomCategories = useMemo(() => {
+    const customSet = new Set();
+    expenses.forEach((item) => {
+      if (item.category && !PREDEFINED_CATEGORIES[item.category]) {
+        customSet.add(item.category);
+      }
+    });
+    return Array.from(customSet);
+  }, [expenses]);
 
   const handleOpenAddModal = () => {
     setEditingExpense(null);
+    setIsCustomCategory(false);
+    setCustomCategoryName('');
     setFormData({
       expense_date: new Date().toISOString().split('T')[0],
-      category: 'TECHNICIAN_TRAVEL',
+      category: 'FUEL_TRAVEL',
+      sub_category: '',
       amount: '',
       payment_mode: 'UPI',
       incurred_by: user?.name || '',
       paid_to: '',
       utr_number: '',
+      bill_invoice_no: '',
+      linked_entity_type: 'GENERAL',
+      linked_entity_id: '',
+      is_recurring: 0,
       remarks: ''
     });
     setFormError('');
@@ -180,18 +313,37 @@ export default function ExpensesPage() {
 
   const handleOpenEditModal = (item) => {
     setEditingExpense(item);
+    const isPredefined = Boolean(PREDEFINED_CATEGORIES[item.category]);
+    setIsCustomCategory(!isPredefined);
+    setCustomCategoryName(!isPredefined ? item.category : '');
     setFormData({
       expense_date: item.expense_date,
-      category: item.category,
+      category: isPredefined ? item.category : '__CUSTOM__',
+      sub_category: item.sub_category || '',
       amount: item.amount,
       payment_mode: item.payment_mode,
       incurred_by: item.incurred_by,
       paid_to: item.paid_to || '',
       utr_number: item.utr_number || '',
+      bill_invoice_no: item.bill_invoice_no || '',
+      linked_entity_type: item.linked_entity_type || 'GENERAL',
+      linked_entity_id: item.linked_entity_id || '',
+      is_recurring: item.is_recurring ? 1 : 0,
       remarks: item.remarks || ''
     });
     setFormError('');
     setModalOpen(true);
+  };
+
+  const handleCategorySelectChange = (e) => {
+    const val = e.target.value;
+    if (val === '__CUSTOM__') {
+      setIsCustomCategory(true);
+      setFormData({ ...formData, category: '__CUSTOM__' });
+    } else {
+      setIsCustomCategory(false);
+      setFormData({ ...formData, category: val });
+    }
   };
 
   const handleSubmitForm = async (e) => {
@@ -207,13 +359,27 @@ export default function ExpensesPage() {
       return;
     }
 
+    let finalCategory = formData.category;
+    if (isCustomCategory || formData.category === '__CUSTOM__') {
+      if (!customCategoryName.trim()) {
+        setFormError('Please type your custom category name');
+        return;
+      }
+      finalCategory = customCategoryName.trim();
+    }
+
+    const payload = {
+      ...formData,
+      category: finalCategory
+    };
+
     try {
       setFormSubmitting(true);
       if (editingExpense) {
-        await updateExpense(editingExpense.id, formData);
-        setSuccessMsg('Expense updated successfully');
+        await updateExpense(editingExpense.id, payload);
+        setSuccessMsg('Expense record updated successfully');
       } else {
-        await createExpense(formData);
+        await createExpense(payload);
         setSuccessMsg('New expense recorded successfully');
       }
       setModalOpen(false);
@@ -253,42 +419,26 @@ export default function ExpensesPage() {
     search
   });
 
-  // Calculate categorized cards for summary
-  const travelTotal = useMemo(() => {
-    const cat = summary?.categories?.find(c => c.category === 'TECHNICIAN_TRAVEL');
-    return cat ? cat.total_amount : 0;
-  }, [summary]);
-
-  const courierTotal = useMemo(() => {
-    const cat = summary?.categories?.find(c => c.category === 'COURIER_FREIGHT');
-    return cat ? cat.total_amount : 0;
-  }, [summary]);
-
-  const opsTotal = useMemo(() => {
-    const cat = summary?.categories?.find(c => c.category === 'OFFICE_MISC' || c.category === 'OTHER');
-    return cat ? cat.total_amount : 0;
-  }, [summary]);
-
   return (
-    <div className="p-4 md:p-6 space-y-6 max-w-7xl mx-auto pb-24">
-      {/* Top Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+    <div className="p-4 md:p-6 space-y-5 max-w-7xl mx-auto pb-24 text-slate-800">
+      {/* 🌟 Header Section */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-1 border-b border-slate-100">
         <div>
-          <div className="flex items-center gap-2">
-            <div className="p-2 bg-blue-600 text-white rounded-xl shadow-sm">
+          <h1 className="text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
+            <span className="p-1.5 bg-blue-600 text-white rounded-lg inline-flex">
               <Wallet className="w-5 h-5" />
-            </div>
-            <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Expenses Management</h1>
-          </div>
+            </span>
+            Expenses & Financial Health
+          </h1>
           <p className="text-xs text-slate-500 mt-1">
-            Track technician conveyance, fuel, courier shipments, and daily operational expenditures.
+            Real-time cash flow, operational overheads, stock investments, and business savings.
           </p>
         </div>
 
         <div className="flex items-center gap-2">
           <button
             onClick={() => { setRefreshing(true); loadData(); }}
-            className="p-2.5 bg-white border border-slate-200 text-slate-600 rounded-xl hover:bg-slate-50 hover:text-slate-900 transition-all shadow-2xs"
+            className="p-2 bg-white border border-slate-200 text-slate-600 rounded-xl hover:bg-slate-50 transition shadow-2xs"
             title="Refresh Data"
           >
             <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
@@ -297,15 +447,15 @@ export default function ExpensesPage() {
           <a
             href={exportUrl}
             download
-            className="flex items-center gap-2 px-3.5 py-2.5 bg-white border border-slate-200 text-slate-700 rounded-xl text-xs font-semibold hover:bg-slate-50 hover:text-blue-600 transition-all shadow-2xs"
+            className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 text-slate-700 rounded-xl text-xs font-semibold hover:bg-slate-50 hover:text-blue-600 transition shadow-2xs"
           >
-            <Download className="w-4 h-4 text-slate-500" />
-            <span>Export Excel</span>
+            <Download className="w-4 h-4 text-slate-400" />
+            <span>Export</span>
           </a>
 
           <button
             onClick={handleOpenAddModal}
-            className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-xl text-xs font-semibold hover:bg-blue-700 transition-all shadow-sm shadow-blue-500/20 active:scale-98"
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 text-white rounded-xl text-xs font-semibold hover:bg-blue-700 transition shadow-sm active:scale-98"
           >
             <Plus className="w-4 h-4" />
             <span>Record Expense</span>
@@ -313,9 +463,9 @@ export default function ExpensesPage() {
         </div>
       </div>
 
-      {/* Success / Error Alerts */}
+      {/* Notifications */}
       {successMsg && (
-        <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-xs flex items-center gap-2 animate-fadeIn">
+        <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-xs flex items-center gap-2">
           <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
           <span>{successMsg}</span>
         </div>
@@ -327,111 +477,167 @@ export default function ExpensesPage() {
         </div>
       )}
 
-      {/* 4 Metric Summary Cards */}
+      {/* 🌟 4 Clean Executive Metric Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Total Expense */}
-        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs flex flex-col justify-between">
+        {/* 1. Received Inflow */}
+        <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-2xs hover:border-slate-300 transition flex flex-col justify-between">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Total Expenses</span>
-            <div className="p-2 bg-rose-50 text-rose-600 rounded-xl">
-              <DollarSign className="w-4 h-4" />
-            </div>
+            <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Total Received (Inflow)</span>
+            <span className="p-1.5 bg-emerald-50 text-emerald-600 rounded-lg">
+              <ArrowDownRight className="w-3.5 h-3.5" />
+            </span>
           </div>
           <div className="mt-3">
             <div className="text-2xl font-bold text-slate-900">
-              ₹{(summary?.total_amount || 0).toLocaleString('en-IN')}
+              ₹{(financialHealth?.totalInflow || 0).toLocaleString('en-IN')}
             </div>
-            <div className="text-[11px] text-slate-400 mt-0.5">
-              {summary?.total_count || 0} transactions in selected period
+            <div className="text-[11px] text-emerald-600 font-medium mt-0.5">
+              Customer collections & installations
             </div>
           </div>
         </div>
 
-        {/* Technician Travel / Fuel */}
-        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs flex flex-col justify-between">
+        {/* 2. Stock Purchases */}
+        <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-2xs hover:border-slate-300 transition flex flex-col justify-between">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Technician Travel & Fuel</span>
-            <div className="p-2 bg-amber-50 text-amber-600 rounded-xl">
-              <Car className="w-4 h-4" />
-            </div>
+            <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Stock Purchases (COGS)</span>
+            <span className="p-1.5 bg-cyan-50 text-cyan-600 rounded-lg">
+              <Layers className="w-3.5 h-3.5" />
+            </span>
           </div>
           <div className="mt-3">
             <div className="text-2xl font-bold text-slate-900">
-              ₹{travelTotal.toLocaleString('en-IN')}
+              ₹{(financialHealth?.totalStockPurchases || 0).toLocaleString('en-IN')}
             </div>
-            <div className="text-[11px] text-amber-600 font-medium mt-0.5">
-              Field site visits & conveyance
+            <div className="text-[11px] text-cyan-700 font-medium mt-0.5">
+              Device hardware & batches
             </div>
           </div>
         </div>
 
-        {/* Courier & Freight */}
-        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs flex flex-col justify-between">
+        {/* 3. Operating Expenses */}
+        <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-2xs hover:border-slate-300 transition flex flex-col justify-between">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Courier & Logistics</span>
-            <div className="p-2 bg-blue-50 text-blue-600 rounded-xl">
-              <Truck className="w-4 h-4" />
-            </div>
+            <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Operating Expenses (OPEX)</span>
+            <span className="p-1.5 bg-rose-50 text-rose-600 rounded-lg">
+              <ArrowUpRight className="w-3.5 h-3.5" />
+            </span>
           </div>
           <div className="mt-3">
             <div className="text-2xl font-bold text-slate-900">
-              ₹{courierTotal.toLocaleString('en-IN')}
+              ₹{(financialHealth?.totalOpex || 0).toLocaleString('en-IN')}
             </div>
-            <div className="text-[11px] text-blue-600 font-medium mt-0.5">
-              Dealer dispatches & parcel freight
+            <div className="text-[11px] text-rose-600 font-medium mt-0.5">
+              Fuel, food, rent, salaries, EB
             </div>
           </div>
         </div>
 
-        {/* Office & Operations */}
-        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs flex flex-col justify-between">
+        {/* 4. Net Business Savings */}
+        <div className={`p-4 rounded-2xl border shadow-2xs flex flex-col justify-between transition ${
+          (financialHealth?.netSavings || 0) >= 0 
+            ? 'bg-slate-900 text-white border-slate-900' 
+            : 'bg-rose-950 text-white border-rose-950'
+        }`}>
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Office & Operations</span>
-            <div className="p-2 bg-purple-50 text-purple-600 rounded-xl">
-              <Building2 className="w-4 h-4" />
-            </div>
+            <span className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider">Net Business Savings</span>
+            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+              (financialHealth?.netSavings || 0) >= 0 ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+            }`}>
+              {financialHealth?.savingsRate || 0}% Savings Rate
+            </span>
           </div>
           <div className="mt-3">
-            <div className="text-2xl font-bold text-slate-900">
-              ₹{opsTotal.toLocaleString('en-IN')}
+            <div className="text-2xl font-bold text-white tracking-tight">
+              ₹{(financialHealth?.netSavings || 0).toLocaleString('en-IN')}
             </div>
-            <div className="text-[11px] text-purple-600 font-medium mt-0.5">
-              Rent, bills & petty cash
+            <div className="text-[11px] text-slate-400 font-medium mt-0.5">
+              {(financialHealth?.netSavings || 0) >= 0 ? 'Net Cash Surplus' : 'Net Operating Deficit'}
             </div>
           </div>
         </div>
       </div>
 
-      {/* Filter & Controls Bar */}
-      <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          {/* Search Box */}
-          <div className="relative flex-1 min-w-[240px]">
+      {/* 🌟 Unified Clean Controls & Filters */}
+      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-2xs p-4 space-y-3">
+        {/* Top filter row: Search + Category Selector + Payment Mode + Date Presets */}
+        <div className="flex flex-col md:flex-row items-stretch md:items-center gap-2.5">
+          {/* Search */}
+          <div className="relative flex-1 min-w-[220px]">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
-              placeholder="Search by staff, paid to, UTR number, or remarks..."
+              placeholder="Search staff, payee, bill no, UTR, custom category..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+              className="w-full pl-9 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition"
             />
             {search && (
               <button
                 onClick={() => setSearch('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
             )}
           </div>
 
-          {/* Date Range Quick Presets */}
-          <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-xl">
+          {/* Specific Category Dropdown */}
+          <select
+            value={selectedCategory}
+            onChange={(e) => setSelectedCategory(e.target.value)}
+            className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+          >
+            <option value="">All Categories</option>
+            <optgroup label="Field & Travel">
+              <option value="FUEL_TRAVEL">Fuel & Travel</option>
+              <option value="FOOD_ALLOWANCE">Food & Daily Allowance</option>
+              <option value="TECHNICIAN_PAYOUT">Technician Payout</option>
+            </optgroup>
+            <optgroup label="Fixed Overheads">
+              <option value="OFFICE_RENT">Office Rent</option>
+              <option value="ELECTRICITY_BILL">Electricity Bill</option>
+              <option value="INTERNET_CLOUD">Internet & Cloud Servers</option>
+            </optgroup>
+            <optgroup label="Payroll & Stock">
+              <option value="SALARIES">Staff Salaries</option>
+              <option value="STOCK_PURCHASE">Stock Purchases (COGS)</option>
+              <option value="COURIER_FREIGHT">Courier & Freight</option>
+            </optgroup>
+            <optgroup label="General">
+              <option value="OFFICE_MISC">Office Misc & Tea</option>
+              <option value="OTHER">Other Expenses</option>
+            </optgroup>
+            {dynamicCustomCategories.length > 0 && (
+              <optgroup label="Custom Typed Categories">
+                {dynamicCustomCategories.map((cat) => (
+                  <option key={cat} value={cat}>{cat}</option>
+                ))}
+              </optgroup>
+            )}
+          </select>
+
+          {/* Payment Mode */}
+          <select
+            value={selectedPaymentMode}
+            onChange={(e) => setSelectedPaymentMode(e.target.value)}
+            className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+          >
+            <option value="">All Payments</option>
+            <option value="UPI">UPI</option>
+            <option value="CASH">Cash</option>
+            <option value="BANK_TRANSFER">Bank Transfer</option>
+            <option value="CHEQUE">Cheque</option>
+            <option value="CARD">Card</option>
+          </select>
+
+          {/* Date Range Selector */}
+          <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-xl">
             <button
               onClick={() => applyDatePreset('THIS_MONTH')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              className={`px-2.5 py-1 rounded-lg text-xs font-medium transition ${
                 datePreset === 'THIS_MONTH'
-                  ? 'bg-white text-blue-700 shadow-2xs font-semibold'
+                  ? 'bg-white text-slate-900 shadow-2xs font-semibold'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
@@ -439,9 +645,9 @@ export default function ExpensesPage() {
             </button>
             <button
               onClick={() => applyDatePreset('LAST_MONTH')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              className={`px-2.5 py-1 rounded-lg text-xs font-medium transition ${
                 datePreset === 'LAST_MONTH'
-                  ? 'bg-white text-blue-700 shadow-2xs font-semibold'
+                  ? 'bg-white text-slate-900 shadow-2xs font-semibold'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
@@ -449,77 +655,53 @@ export default function ExpensesPage() {
             </button>
             <button
               onClick={() => applyDatePreset('ALL')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              className={`px-2.5 py-1 rounded-lg text-xs font-medium transition ${
                 datePreset === 'ALL'
-                  ? 'bg-white text-blue-700 shadow-2xs font-semibold'
+                  ? 'bg-white text-slate-900 shadow-2xs font-semibold'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               All Time
             </button>
           </div>
-
-          {/* Payment Mode Selector */}
-          <select
-            value={selectedPaymentMode}
-            onChange={(e) => setSelectedPaymentMode(e.target.value)}
-            className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-          >
-            <option value="">All Payment Modes</option>
-            <option value="UPI">UPI</option>
-            <option value="CASH">Cash</option>
-            <option value="BANK_TRANSFER">Bank Transfer</option>
-            <option value="CHEQUE">Cheque</option>
-            <option value="CARD">Card</option>
-          </select>
         </div>
 
-        {/* Category Pill Filters */}
-        <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100">
-          <span className="text-[11px] font-semibold text-slate-400 uppercase mr-1">Category:</span>
-          <button
-            onClick={() => setSelectedCategory('')}
-            className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${
-              selectedCategory === ''
-                ? 'bg-blue-600 text-white shadow-2xs'
-                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-            }`}
-          >
-            All Categories
-          </button>
-          {Object.entries(CATEGORY_CONFIG).map(([key, config]) => {
-            const Icon = config.icon;
-            const isSelected = selectedCategory === key;
+        {/* Clean Group Tabs */}
+        <div className="flex items-center gap-1.5 overflow-x-auto pt-2 border-t border-slate-100 scrollbar-none">
+          {GROUP_TABS.map((tab) => {
+            const isSelected = selectedGroup === tab.id;
             return (
               <button
-                key={key}
-                onClick={() => setSelectedCategory(isSelected ? '' : key)}
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-all border ${
+                key={tab.id}
+                onClick={() => {
+                  setSelectedGroup(tab.id);
+                  setSelectedCategory('');
+                }}
+                className={`px-3 py-1.5 rounded-lg text-xs whitespace-nowrap transition ${
                   isSelected
-                    ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
-                    : `${config.bg} ${config.text} ${config.border} hover:opacity-80`
+                    ? 'bg-slate-900 text-white font-semibold shadow-2xs'
+                    : 'bg-slate-50 text-slate-600 hover:bg-slate-100 hover:text-slate-900 font-medium'
                 }`}
               >
-                <Icon className="w-3 h-3" />
-                <span>{config.label}</span>
+                {tab.label}
               </button>
             );
           })}
         </div>
       </div>
 
-      {/* Expenses Table */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs overflow-hidden">
+      {/* 🌟 Clean Expenses Table */}
+      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-2xs overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="bg-slate-50/75 border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+              <tr className="bg-slate-50 border-b border-slate-200/80 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
                 <th className="py-3 px-4">Date</th>
                 <th className="py-3 px-4">Category</th>
                 <th className="py-3 px-4">Amount</th>
                 <th className="py-3 px-4">Incurred By</th>
                 <th className="py-3 px-4">Paid To</th>
-                <th className="py-3 px-4">Payment Details</th>
+                <th className="py-3 px-4">Payment & Ref</th>
                 <th className="py-3 px-4">Remarks</th>
                 <th className="py-3 px-4 text-right">Actions</th>
               </tr>
@@ -529,34 +711,46 @@ export default function ExpensesPage() {
                 <tr>
                   <td colSpan="8" className="py-12 text-center text-slate-400">
                     <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-blue-500" />
-                    <span>Loading expense records...</span>
+                    <span>Loading expenses...</span>
                   </td>
                 </tr>
               ) : expenses.length === 0 ? (
                 <tr>
                   <td colSpan="8" className="py-12 text-center text-slate-400">
                     <Wallet className="w-8 h-8 mx-auto mb-2 text-slate-300 stroke-1" />
-                    <p className="font-medium text-slate-600">No expense records found</p>
-                    <p className="text-[11px] text-slate-400 mt-1">Try adjusting your filters or record a new expense.</p>
+                    <p className="font-semibold text-slate-700">No expense records found</p>
+                    <p className="text-[11px] text-slate-400 mt-0.5">Try changing filters or record a new expense.</p>
                   </td>
                 </tr>
               ) : (
                 expenses.map((item) => {
-                  const cat = CATEGORY_CONFIG[item.category] || CATEGORY_CONFIG.OTHER;
+                  const cat = getCategoryConfig(item.category);
                   const Icon = cat.icon;
                   return (
-                    <tr key={item.id} className="hover:bg-slate-50/80 transition-colors">
+                    <tr key={item.id} className="hover:bg-slate-50/70 transition-colors">
                       {/* Date */}
                       <td className="py-3 px-4 whitespace-nowrap font-medium text-slate-900">
                         {item.expense_date}
+                        {item.is_recurring ? (
+                          <span className="ml-1.5 inline-flex items-center text-[10px] text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded font-medium" title="Recurring Bill">
+                            <Repeat className="w-2.5 h-2.5 mr-0.5" /> Recur
+                          </span>
+                        ) : null}
                       </td>
 
                       {/* Category */}
                       <td className="py-3 px-4 whitespace-nowrap">
-                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold border ${cat.bg} ${cat.text} ${cat.border}`}>
-                          <Icon className="w-3 h-3" />
-                          <span>{cat.label}</span>
-                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium border ${cat.bg} ${cat.text} ${cat.border}`}>
+                            <Icon className="w-3 h-3" />
+                            <span>{cat.label}</span>
+                          </span>
+                          {item.sub_category && (
+                            <span className="text-[11px] text-slate-400 font-normal">
+                              ({item.sub_category})
+                            </span>
+                          )}
+                        </div>
                       </td>
 
                       {/* Amount */}
@@ -568,7 +762,7 @@ export default function ExpensesPage() {
 
                       {/* Incurred By */}
                       <td className="py-3 px-4 whitespace-nowrap">
-                        <span className="font-semibold text-slate-800">{item.incurred_by}</span>
+                        <span className="font-medium text-slate-800">{item.incurred_by}</span>
                       </td>
 
                       {/* Paid To */}
@@ -576,33 +770,41 @@ export default function ExpensesPage() {
                         {item.paid_to || <span className="text-slate-300">-</span>}
                       </td>
 
-                      {/* Payment Details / UTR */}
+                      {/* Payment Mode & UTR / Bill */}
                       <td className="py-3 px-4 whitespace-nowrap">
                         <div className="flex items-center gap-1.5">
-                          <span className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded text-[10px] font-bold">
+                          <span className="px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded text-[10px] font-semibold">
                             {item.payment_mode}
                           </span>
                           {item.utr_number ? (
                             <button
                               onClick={() => handleCopyUtr(item.utr_number)}
-                              title="Click to copy UTR"
-                              className="group flex items-center gap-1 px-1.5 py-0.5 bg-blue-50 text-blue-700 hover:bg-blue-100 rounded text-[10px] font-mono transition-all"
+                              title="Copy UTR"
+                              className="group flex items-center gap-1 px-1.5 py-0.5 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded text-[10px] font-mono transition"
                             >
                               <span>{item.utr_number}</span>
                               {copiedUtr === item.utr_number ? (
-                                <Check className="w-3 h-3 text-emerald-600" />
+                                <Check className="w-2.5 h-2.5 text-emerald-600" />
                               ) : (
-                                <Copy className="w-3 h-3 text-blue-400 group-hover:text-blue-600" />
+                                <Copy className="w-2.5 h-2.5 text-slate-400 group-hover:text-slate-700" />
                               )}
                             </button>
-                          ) : (
-                            <span className="text-slate-300 text-[11px]">-</span>
+                          ) : null}
+                          {item.bill_invoice_no && (
+                            <span className="text-[10px] text-slate-400 font-mono">
+                              #{item.bill_invoice_no}
+                            </span>
                           )}
                         </div>
                       </td>
 
                       {/* Remarks */}
                       <td className="py-3 px-4 max-w-xs truncate text-slate-500" title={item.remarks}>
+                        {item.linked_entity_id && (
+                          <span className="inline-block mr-1 px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded text-[10px] font-medium">
+                            {item.linked_entity_id}
+                          </span>
+                        )}
                         {item.remarks || <span className="text-slate-300">-</span>}
                       </td>
 
@@ -611,14 +813,14 @@ export default function ExpensesPage() {
                         <div className="flex items-center justify-end gap-1">
                           <button
                             onClick={() => handleOpenEditModal(item)}
-                            className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
+                            className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-slate-100 rounded-lg transition"
                             title="Edit Record"
                           >
                             <Edit2 className="w-3.5 h-3.5" />
                           </button>
                           <button
                             onClick={() => handleDelete(item.id)}
-                            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all"
+                            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"
                             title="Delete Record"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -634,44 +836,44 @@ export default function ExpensesPage() {
         </div>
       </div>
 
-      {/* Record / Edit Expense Modal */}
+      {/* 🌟 Record / Edit Expense Modal */}
       {modalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-xl max-w-md w-full p-6 animate-scaleUp">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-xl max-w-md w-full p-5 animate-scaleUp max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <div className="flex items-center gap-2">
                 <div className="p-2 bg-blue-50 text-blue-600 rounded-xl">
-                  <Wallet className="w-5 h-5" />
+                  <Wallet className="w-4 h-4" />
                 </div>
                 <div>
-                  <h3 className="font-bold text-slate-900 text-base">
+                  <h3 className="font-bold text-slate-900 text-sm">
                     {editingExpense ? 'Edit Expense Record' : 'Record New Expense'}
                   </h3>
                   <p className="text-[11px] text-slate-400">
-                    Capture operational expenditures with instant UTR verification
+                    Log fuel, food, rent, electricity, salaries, or custom categories
                   </p>
                 </div>
               </div>
               <button
                 onClick={() => setModalOpen(false)}
-                className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-all"
+                className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
             {formError && (
-              <div className="mt-4 p-3 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl text-xs flex items-center gap-2">
+              <div className="mt-3 p-2.5 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl text-xs flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
                 <span>{formError}</span>
               </div>
             )}
 
-            <form onSubmit={handleSubmitForm} className="space-y-4 mt-4 text-xs">
-              {/* Date & Category */}
+            <form onSubmit={handleSubmitForm} className="space-y-3.5 mt-3 text-xs">
+              {/* Date & Category Selection */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-600 font-semibold mb-1">Expense Date *</label>
+                  <label className="block text-slate-600 font-semibold mb-1">Date *</label>
                   <input
                     type="date"
                     required
@@ -681,22 +883,68 @@ export default function ExpensesPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-600 font-semibold mb-1">Category *</label>
-                  <select
-                    value={formData.category}
-                    onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                  >
-                    <option value="TECHNICIAN_TRAVEL">Technician Travel / Fuel</option>
-                    <option value="COURIER_FREIGHT">Courier & Freight</option>
-                    <option value="TECHNICIAN_PAYOUT">Technician Payout</option>
-                    <option value="OFFICE_MISC">Office & Operations</option>
-                    <option value="OTHER">Other</option>
-                  </select>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-slate-600 font-semibold">Category *</label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsCustomCategory(!isCustomCategory);
+                        if (!isCustomCategory) {
+                          setFormData({ ...formData, category: '__CUSTOM__' });
+                        } else {
+                          setFormData({ ...formData, category: 'FUEL_TRAVEL' });
+                        }
+                      }}
+                      className="text-[10px] text-blue-600 hover:text-blue-800 font-semibold flex items-center gap-0.5"
+                    >
+                      <PenLine className="w-2.5 h-2.5" />
+                      {isCustomCategory ? 'Pick preset' : '+ Type new'}
+                    </button>
+                  </div>
+                  {!isCustomCategory ? (
+                    <select
+                      value={formData.category}
+                      onChange={handleCategorySelectChange}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-medium focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                    >
+                      <optgroup label="Field Operations">
+                        <option value="FUEL_TRAVEL">Fuel & Travel</option>
+                        <option value="FOOD_ALLOWANCE">Food & Allowance (DA)</option>
+                        <option value="TECHNICIAN_PAYOUT">Technician Payout</option>
+                      </optgroup>
+                      <optgroup label="Office & Utilities">
+                        <option value="OFFICE_RENT">Office Rent</option>
+                        <option value="ELECTRICITY_BILL">Electricity Bill</option>
+                        <option value="INTERNET_CLOUD">Internet & Cloud Servers</option>
+                      </optgroup>
+                      <optgroup label="Payroll & Stock">
+                        <option value="SALARIES">Staff Salaries</option>
+                        <option value="STOCK_PURCHASE">Stock Purchases (COGS)</option>
+                        <option value="COURIER_FREIGHT">Courier & Logistics</option>
+                      </optgroup>
+                      <optgroup label="General">
+                        <option value="OFFICE_MISC">Office Misc & Tea</option>
+                        <option value="OTHER">Other Expenses</option>
+                      </optgroup>
+                      <optgroup label="Custom Category">
+                        <option value="__CUSTOM__">✍️ + Type New / Custom Category...</option>
+                      </optgroup>
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      autoFocus
+                      required
+                      placeholder="Type custom category name..."
+                      value={customCategoryName}
+                      onChange={(e) => setCustomCategoryName(e.target.value)}
+                      className="w-full px-3 py-2 bg-purple-50/50 border border-purple-300 rounded-xl font-medium text-slate-900 focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500"
+                    />
+                  )}
                 </div>
               </div>
 
-              {/* Amount & Incurred By */}
+              {/* Amount & Sub-Category */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-slate-600 font-semibold mb-1">Amount (₹) *</label>
@@ -714,30 +962,44 @@ export default function ExpensesPage() {
                   </div>
                 </div>
                 <div>
-                  <label className="block text-slate-600 font-semibold mb-1">Incurred By / Staff *</label>
+                  <label className="block text-slate-600 font-semibold mb-1">Sub-Type / Specific Item</label>
                   <input
                     type="text"
-                    required
-                    placeholder="e.g. Ramesh (Technician)"
-                    value={formData.incurred_by}
-                    onChange={(e) => setFormData({ ...formData, incurred_by: e.target.value })}
+                    placeholder="e.g. Petrol, Snacks, AC Repair"
+                    value={formData.sub_category}
+                    onChange={(e) => setFormData({ ...formData, sub_category: e.target.value })}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
                   />
                 </div>
               </div>
 
-              {/* Paid To & Payment Mode */}
+              {/* Incurred By & Paid To */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-600 font-semibold mb-1">Paid To / Vendor</label>
+                  <label className="block text-slate-600 font-semibold mb-1">Incurred By / Staff *</label>
                   <input
                     type="text"
-                    placeholder="e.g. HP Petrol Pump / DTDC"
+                    required
+                    placeholder="Staff name"
+                    value={formData.incurred_by}
+                    onChange={(e) => setFormData({ ...formData, incurred_by: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-600 font-semibold mb-1">Paid To / Payee</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Petrol Pump / Vendor"
                     value={formData.paid_to}
                     onChange={(e) => setFormData({ ...formData, paid_to: e.target.value })}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
                   />
                 </div>
+              </div>
+
+              {/* Payment Mode & UTR / Bill No */}
+              <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-slate-600 font-semibold mb-1">Payment Mode</label>
                   <select
@@ -745,56 +1007,64 @@ export default function ExpensesPage() {
                     onChange={(e) => setFormData({ ...formData, payment_mode: e.target.value })}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
                   >
-                    <option value="UPI">UPI (GPay / PhonePe / Paytm)</option>
+                    <option value="UPI">UPI</option>
                     <option value="CASH">Cash</option>
-                    <option value="BANK_TRANSFER">Bank Transfer (IMPS/NEFT)</option>
+                    <option value="BANK_TRANSFER">Bank Transfer</option>
                     <option value="CHEQUE">Cheque</option>
                     <option value="CARD">Card</option>
                   </select>
                 </div>
+                <div>
+                  <label className="block text-slate-600 font-semibold mb-1">UTR / Bill No.</label>
+                  <input
+                    type="text"
+                    placeholder="Transaction ref / Bill #"
+                    value={formData.utr_number}
+                    onChange={(e) => setFormData({ ...formData, utr_number: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono text-slate-900 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                  />
+                </div>
               </div>
 
-              {/* UTR / Transaction Reference Number */}
-              <div>
-                <label className="block text-slate-600 font-semibold mb-1">
-                  UPI UTR / Transaction Reference No. <span className="text-slate-400 font-normal">(Optional)</span>
+              {/* Recurring & Remarks */}
+              <div className="flex items-center justify-between pt-1">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={formData.is_recurring === 1}
+                    onChange={(e) => setFormData({ ...formData, is_recurring: e.target.checked ? 1 : 0 })}
+                    className="w-3.5 h-3.5 text-blue-600 rounded border-slate-300 focus:ring-blue-500"
+                  />
+                  <span className="text-slate-700 font-medium">Monthly Recurring Bill</span>
                 </label>
+              </div>
+
+              <div>
+                <label className="block text-slate-600 font-semibold mb-1">Remarks</label>
                 <input
                   type="text"
-                  placeholder="e.g. 423987123456 or Bank Ref ID"
-                  value={formData.utr_number}
-                  onChange={(e) => setFormData({ ...formData, utr_number: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono text-slate-900 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                />
-              </div>
-
-              {/* Remarks */}
-              <div>
-                <label className="block text-slate-600 font-semibold mb-1">Purpose / Remarks</label>
-                <textarea
-                  rows="2"
-                  placeholder="e.g. Fuel for visiting 4 vehicle installation sites in Warangal..."
+                  placeholder="Optional notes or details..."
                   value={formData.remarks}
                   onChange={(e) => setFormData({ ...formData, remarks: e.target.value })}
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
                 />
               </div>
 
-              {/* Action Buttons */}
+              {/* Actions */}
               <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
                 <button
                   type="button"
                   onClick={() => setModalOpen(false)}
-                  className="px-4 py-2 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-xl font-semibold transition-all"
+                  className="px-3.5 py-1.5 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-xl font-semibold transition"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={formSubmitting}
-                  className="px-5 py-2 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 disabled:opacity-50 transition-all shadow-sm"
+                  className="px-4 py-1.5 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 disabled:opacity-50 transition shadow-sm"
                 >
-                  {formSubmitting ? 'Saving...' : editingExpense ? 'Update Expense' : 'Save Expense'}
+                  {formSubmitting ? 'Saving...' : editingExpense ? 'Update' : 'Save Expense'}
                 </button>
               </div>
             </form>

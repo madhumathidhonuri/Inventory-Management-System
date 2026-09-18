@@ -261,14 +261,18 @@ function initDatabase() {
     CREATE TABLE IF NOT EXISTS expenses (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       expense_date TEXT NOT NULL,
-      category TEXT NOT NULL CHECK(category IN ('TECHNICIAN_TRAVEL', 'COURIER_FREIGHT', 'TECHNICIAN_PAYOUT', 'OFFICE_MISC', 'OTHER')),
+      category TEXT NOT NULL,
+      sub_category TEXT,
       amount REAL NOT NULL,
       payment_mode TEXT DEFAULT 'UPI' CHECK(payment_mode IN ('UPI', 'CASH', 'BANK_TRANSFER', 'CHEQUE', 'CARD')),
       incurred_by TEXT NOT NULL,
       paid_to TEXT,
       utr_number TEXT,
+      bill_invoice_no TEXT,
+      receipt_url TEXT,
       linked_entity_type TEXT DEFAULT 'GENERAL',
       linked_entity_id TEXT,
+      is_recurring INTEGER DEFAULT 0,
       remarks TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
@@ -336,6 +340,47 @@ function initDatabase() {
   try { db.exec("CREATE INDEX IF NOT EXISTS idx_devices_status ON devices(current_status);"); } catch (e) { }
   try { db.exec("CREATE INDEX IF NOT EXISTS idx_dispatches_dealer ON dispatches(dealer_name);"); } catch (e) { }
   try { db.exec("CREATE INDEX IF NOT EXISTS idx_devices_rma_status ON devices(rma_status);"); } catch (e) { }
+
+  // Expenses Schema Migration: Expand categories and add tracking fields
+  try {
+    const tableInfo = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='expenses'").get();
+    if (tableInfo && tableInfo.sql && tableInfo.sql.includes('TECHNICIAN_TRAVEL') && tableInfo.sql.includes('CHECK')) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS expenses_v2 (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          expense_date TEXT NOT NULL,
+          category TEXT NOT NULL,
+          sub_category TEXT,
+          amount REAL NOT NULL,
+          payment_mode TEXT DEFAULT 'UPI',
+          incurred_by TEXT NOT NULL,
+          paid_to TEXT,
+          utr_number TEXT,
+          bill_invoice_no TEXT,
+          receipt_url TEXT,
+          linked_entity_type TEXT DEFAULT 'GENERAL',
+          linked_entity_id TEXT,
+          is_recurring INTEGER DEFAULT 0,
+          remarks TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        INSERT INTO expenses_v2 (id, expense_date, category, amount, payment_mode, incurred_by, paid_to, utr_number, linked_entity_type, linked_entity_id, remarks, created_at)
+          SELECT id, expense_date, category, amount, payment_mode, incurred_by, paid_to, utr_number, linked_entity_type, linked_entity_id, remarks, created_at FROM expenses;
+        DROP TABLE expenses;
+        ALTER TABLE expenses_v2 RENAME TO expenses;
+      `);
+      console.log('[Database] Migrated expenses table to flexible schema successfully.');
+    }
+  } catch (e) {
+    console.warn('[Database] Expenses migration notice:', e.message);
+  }
+
+  try { db.exec("ALTER TABLE expenses ADD COLUMN sub_category TEXT;"); } catch (e) { }
+  try { db.exec("ALTER TABLE expenses ADD COLUMN bill_invoice_no TEXT;"); } catch (e) { }
+  try { db.exec("ALTER TABLE expenses ADD COLUMN receipt_url TEXT;"); } catch (e) { }
+  try { db.exec("ALTER TABLE expenses ADD COLUMN is_recurring INTEGER DEFAULT 0;"); } catch (e) { }
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(expense_date);"); } catch (e) { }
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_expenses_category ON expenses(category);"); } catch (e) { }
 
   // Automatically remove legacy mock dummy dealer numbers
   try {
