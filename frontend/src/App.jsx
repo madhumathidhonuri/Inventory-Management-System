@@ -18,6 +18,7 @@ import UserManagementPage from './pages/UserManagementPage';
 import ExpensesPage from './pages/ExpensesPage';
 import StaffPerformancePage from './pages/StaffPerformancePage';
 import MobileAppView from './pages/MobileAppView';
+import PendingPaymentsPage from './pages/PendingPaymentsPage';
 
 function MainLayout() {
   const { user, isMobileMode } = useAuth();
@@ -74,6 +75,8 @@ function MainLayout() {
     switch (activeTab) {
       case 'dashboard':
         return <DashboardPage onOpenTraceDrawer={openTraceDrawer} onNavigateTab={setActiveTab} />;
+      case 'pending-payments':
+        return <PendingPaymentsPage onOpenTraceDrawer={openTraceDrawer} />;
       case 'inventory':
         return (
           <InventoryPage
@@ -87,7 +90,7 @@ function MainLayout() {
       case 'dispatches':
         return <DispatchPage onOpenScannerWithCallback={openScannerWithCallback} onOpenTraceDrawer={openTraceDrawer} />;
       case 'installations':
-        return <InstallationPage onOpenScannerWithCallback={openScannerWithCallback} onOpenTraceDrawer={openTraceDrawer} />;
+        return <InstallationPage onOpenScannerWithCallback={openScannerWithCallback} onOpenTraceDrawer={openTraceDrawer} onNavigateTab={setActiveTab} />;
       case 'expenses':
         return isSuperAdmin ? <ExpensesPage /> : <DashboardPage onOpenTraceDrawer={openTraceDrawer} onNavigateTab={setActiveTab} />;
       case 'types':

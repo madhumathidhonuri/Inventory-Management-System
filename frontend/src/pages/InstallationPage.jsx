@@ -34,7 +34,7 @@ import PaymentQrModal from '../components/PaymentQrModal';
 import PendingPaymentNotificationModal from '../components/PendingPaymentNotificationModal';
 import { useAuth } from '../context/AuthContext';
 
-export default function InstallationPage({ onOpenScannerWithCallback, onOpenTraceDrawer }) {
+export default function InstallationPage({ onOpenScannerWithCallback, onOpenTraceDrawer, onNavigateTab }) {
   const { user } = useAuth();
   const isDealer = user?.role === 'DEALER';
 
@@ -389,6 +389,52 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
           </button>
         </div>
       </div>
+
+      {/* Pending Payment Alert Ribbon */}
+      {pendingSummary && pendingSummary.total_pending_count > 0 && (
+        <div className="bg-linear-to-r from-amber-500/15 via-red-500/10 to-amber-50 border border-amber-300/80 rounded-2xl p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs animate-in fade-in-50">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-amber-500 text-white shadow-xs shrink-0 animate-bounce">
+              <Bell className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="text-xs sm:text-sm font-bold text-slate-900 flex items-center gap-2 flex-wrap">
+                <span>{pendingSummary.total_pending_count} Vehicle(s) with Pending Payments</span>
+                <span className="px-2 py-0.5 rounded-full text-[11px] font-mono font-bold bg-red-100 text-red-800 border border-red-200">
+                  ₹{(pendingSummary.total_pending_amount || 0).toLocaleString('en-IN')} Due
+                </span>
+                {pendingSummary.yesterday_pending_count > 0 && (
+                  <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-200 text-amber-900">
+                    🔴 {pendingSummary.yesterday_pending_count} installed yesterday
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-slate-600 mt-0.5">
+                Automated daily payment aging alerts & 1-click WhatsApp reminders with UPI QR codes.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => {
+                if (onNavigateTab) onNavigateTab('pending-payments');
+                else setIsPendingAlertsOpen(true);
+              }}
+              className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl shadow-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+            >
+              <CreditCard className="w-3.5 h-3.5" />
+              <span>Open Pending Payments Hub</span>
+            </button>
+            <button
+              onClick={() => setIsPendingAlertsOpen(true)}
+              className="px-3 py-1.5 bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 text-xs font-semibold rounded-xl shadow-2xs transition-colors cursor-pointer"
+            >
+              Quick Popup
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Quick Category Summary Cards (Instant Answer for 'How many installed in TG Mining?') */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
@@ -1342,6 +1388,10 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
           loadPendingAlerts();
         }}
         onOpenTraceDrawer={onOpenTraceDrawer}
+        onNavigateToPendingPayments={() => {
+          setIsPendingAlertsOpen(false);
+          if (onNavigateTab) onNavigateTab('pending-payments');
+        }}
       />
 
     </div>

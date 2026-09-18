@@ -1,14 +1,34 @@
-import React from 'react';
-import { LayoutDashboard, Boxes, FileSpreadsheet, Truck, Wrench, Users, Settings, FileText, UserCheck, Smartphone, Wallet } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { LayoutDashboard, Boxes, FileSpreadsheet, Truck, Wrench, Users, Settings, FileText, UserCheck, Smartphone, Wallet, CircleDollarSign } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { fetchPendingPaymentAlerts } from '../services/api';
 
 export default function Sidebar({ activeTab, setActiveTab }) {
   const { user } = useAuth();
+  const [pendingCount, setPendingCount] = useState(0);
 
   const isDealer = user?.role === 'DEALER';
 
+  useEffect(() => {
+    loadPendingCount();
+    const interval = setInterval(loadPendingCount, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const loadPendingCount = async () => {
+    try {
+      const res = await fetchPendingPaymentAlerts();
+      if (res.success && res.summary) {
+        setPendingCount(res.summary.total_pending || 0);
+      }
+    } catch (e) {
+      // ignore silently
+    }
+  };
+
   const NAV_ITEMS = [
     { id: 'dashboard', label: isDealer ? 'Dealer Dashboard' : 'Dashboard', icon: LayoutDashboard, roles: ['SUPER_ADMIN', 'ADMIN_TEAM', 'SALES_TEAM', 'WAREHOUSE_MANAGER', 'SALES_MANAGER', 'INSTALLER', 'DEALER'] },
+    { id: 'pending-payments', label: isDealer ? 'Pending Payments' : 'Pending Payments', icon: CircleDollarSign, roles: ['SUPER_ADMIN', 'ADMIN_TEAM', 'SALES_TEAM', 'WAREHOUSE_MANAGER', 'SALES_MANAGER', 'INSTALLER', 'DEALER'], badge: pendingCount },
     { id: 'inventory', label: isDealer ? 'My Stock Inventory' : 'Stock Inventory', icon: Boxes, roles: ['SUPER_ADMIN', 'ADMIN_TEAM', 'SALES_TEAM', 'WAREHOUSE_MANAGER', 'SALES_MANAGER', 'DEALER'] },
     { id: 'dispatches', label: isDealer ? 'My Dispatches / Receipts' : 'Stock Dispatches & Assign', icon: Truck, roles: ['SUPER_ADMIN', 'ADMIN_TEAM', 'WAREHOUSE_MANAGER', 'DEALER'] },
     { id: 'upload', label: 'Excel Bulk Upload', icon: FileSpreadsheet, roles: ['SUPER_ADMIN', 'ADMIN_TEAM', 'WAREHOUSE_MANAGER'] },
@@ -34,17 +54,25 @@ export default function Sidebar({ activeTab, setActiveTab }) {
         {visibleItems.map(item => {
           const Icon = item.icon;
           const isActive = activeTab === item.id;
+          const hasBadge = item.badge > 0;
           return (
             <button
               key={item.id}
               onClick={() => setActiveTab(item.id)}
-              className={`w-full text-left px-3 py-2.5 rounded-xl text-xs font-medium flex items-center space-x-3 transition-all ${isActive
+              className={`w-full text-left px-3 py-2.5 rounded-xl text-xs font-medium flex items-center justify-between transition-all ${isActive
                   ? 'bg-blue-50 text-blue-700 border border-blue-200 font-semibold shadow-2xs'
                   : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
                 }`}
             >
-              <Icon className={`w-4 h-4 ${isActive ? 'text-blue-600' : 'text-slate-400'}`} />
-              <span>{item.label}</span>
+              <div className="flex items-center space-x-3 min-w-0">
+                <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-blue-600' : 'text-slate-400'}`} />
+                <span className="truncate">{item.label}</span>
+              </div>
+              {hasBadge && (
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-500 text-white shadow-xs animate-pulse">
+                  {item.badge}
+                </span>
+              )}
             </button>
           );
         })}

@@ -24,7 +24,8 @@ export default function PendingPaymentNotificationModal({
   isOpen,
   onClose,
   onOpenTraceDrawer,
-  onNavigateToInstallations
+  onNavigateToInstallations,
+  onNavigateToPendingPayments
 }) {
   const [loading, setLoading] = useState(true);
   const [alertsData, setAlertsData] = useState(null);
@@ -383,11 +384,12 @@ export default function PendingPaymentNotificationModal({
             type="button"
             onClick={() => {
               onClose();
-              if (onNavigateToInstallations) onNavigateToInstallations();
+              if (onNavigateToPendingPayments) onNavigateToPendingPayments();
+              else if (onNavigateToInstallations) onNavigateToInstallations();
             }}
-            className="text-xs text-blue-700 font-bold hover:underline flex items-center gap-1 cursor-pointer"
+            className="text-xs bg-amber-500 hover:bg-amber-600 text-white font-bold px-3 py-1.5 rounded-xl shadow-xs flex items-center gap-1.5 cursor-pointer transition-colors"
           >
-            <span>View All Installations</span>
+            <span>Open Full Pending Payments Hub</span>
             <ChevronRight className="w-3.5 h-3.5" />
           </button>
 

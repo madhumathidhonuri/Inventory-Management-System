@@ -406,6 +406,10 @@ export default function Header({ onOpenScanner, onOpenTraceDrawer, onNavigateTab
           loadPendingSummary();
         }}
         onOpenTraceDrawer={onOpenTraceDrawer}
+        onNavigateToPendingPayments={() => {
+          setIsPendingAlertsOpen(false);
+          if (onNavigateTab) onNavigateTab('pending-payments');
+        }}
         onNavigateToInstallations={() => {
           setIsPendingAlertsOpen(false);
           if (onNavigateTab) onNavigateTab('installations');
