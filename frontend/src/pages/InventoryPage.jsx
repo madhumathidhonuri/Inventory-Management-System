@@ -171,6 +171,7 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
   const [isBulkAssignModalOpen, setIsBulkAssignModalOpen] = useState(false);
   const [bulkAssignImeisText, setBulkAssignImeisText] = useState('');
   const [bulkAssignDetectedModel, setBulkAssignDetectedModel] = useState('');
+  const [bulkAssignDeviceType, setBulkAssignDeviceType] = useState('');
   const [bulkAssignStockPlace, setBulkAssignStockPlace] = useState('');
   const [bulkAssignDate, setBulkAssignDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [bulkAssignRemarks, setBulkAssignRemarks] = useState('');
@@ -1416,6 +1417,7 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
         stock_place: bulkAssignStockPlace.trim(),
         stock_place_date: bulkAssignDate,
         remarks: bulkAssignRemarks,
+        device_type_id: bulkAssignDeviceType.trim() || undefined,
         performed_by: user?.username || 'Admin'
       });
       if (res.success) {
@@ -1426,6 +1428,7 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
           setIsBulkAssignModalOpen(false);
           setBulkAssignSuccessMsg('');
           setBulkAssignImeisText('');
+          setBulkAssignDeviceType('');
         }, 1300);
       }
     } catch (err) {
@@ -3196,6 +3199,7 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
                         detectDevicesByImeis(tokens.slice(0, 10)).then(res => {
                           if (res.success && res.detected_type_name) {
                             setBulkAssignDetectedModel(res.detected_type_name);
+                            setBulkAssignDeviceType(prev => (!prev ? res.detected_type_name : prev));
                           }
                         }).catch(() => {});
                       } else {
@@ -3204,10 +3208,63 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
                     }}
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-mono text-slate-800 focus:outline-none focus:border-indigo-500 focus:bg-white"
                   />
-                  {bulkAssignDetectedModel && (
-                    <div className="flex items-center gap-1.5 text-[11px] text-indigo-700 font-semibold bg-indigo-50/70 p-2 rounded-xl border border-indigo-100 animate-in fade-in-50">
-                      <Sparkles className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                      <span>Auto-detected Device Model: <strong className="text-indigo-950">{bulkAssignDetectedModel}</strong></span>
+                </div>
+
+                {/* Device Type / Model (Typeable input with datalist & quick presets) */}
+                <div className="space-y-2 p-3 bg-slate-50 border border-slate-200 rounded-2xl">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-indigo-600" /> Device Model / Type
+                    </label>
+                    {bulkAssignDetectedModel && (
+                      <button
+                        type="button"
+                        onClick={() => setBulkAssignDeviceType(bulkAssignDetectedModel)}
+                        className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-100 hover:bg-indigo-200 text-indigo-800 border border-indigo-200 transition-colors cursor-pointer flex items-center gap-1"
+                        title="Click to apply auto-detected model"
+                      >
+                        <span>Detected: <strong>{bulkAssignDetectedModel}</strong></span>
+                        <span className="text-[9px] bg-indigo-600 text-white px-1 rounded">Apply</span>
+                      </button>
+                    )}
+                  </div>
+
+                  <input
+                    type="text"
+                    list="inventory-device-types-datalist"
+                    placeholder="Type or select Device Model (e.g. VAMOSYS, TRACKNOW, VOLTY, AIS 140...)"
+                    value={bulkAssignDeviceType}
+                    onChange={(e) => setBulkAssignDeviceType(e.target.value)}
+                    className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-900 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                  />
+                  <datalist id="inventory-device-types-datalist">
+                    {deviceTypes.map(dt => (
+                      <option key={dt.id} value={dt.name}>
+                        {dt.name} ({dt.category || 'GPS Tracker'})
+                      </option>
+                    ))}
+                  </datalist>
+
+                  {deviceTypes.length > 0 && (
+                    <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                      <span className="text-[10px] text-slate-400 font-medium">Quick select:</span>
+                      {deviceTypes.slice(0, 6).map(dt => {
+                        const isSelected = bulkAssignDeviceType.trim().toLowerCase() === dt.name.toLowerCase();
+                        return (
+                          <button
+                            key={dt.id}
+                            type="button"
+                            onClick={() => setBulkAssignDeviceType(dt.name)}
+                            className={`px-2 py-0.5 rounded-lg text-[10px] font-semibold border transition-all cursor-pointer ${
+                              isSelected
+                                ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs font-bold'
+                                : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300 hover:text-indigo-600'
+                            }`}
+                          >
+                            {dt.name}
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
                 </div>

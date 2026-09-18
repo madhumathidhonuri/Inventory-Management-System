@@ -49,6 +49,7 @@ export default function BarcodeScannerModal({
   // Device Types State
   const [deviceTypes, setDeviceTypes] = useState([]);
   const [selectedDeviceTypeId, setSelectedDeviceTypeId] = useState('');
+  const [deviceModelInput, setDeviceModelInput] = useState('');
 
   // Dealer Dispatch & Stock Place Modal State
   const [showDealerModal, setShowDealerModal] = useState(false);
@@ -69,8 +70,9 @@ export default function BarcodeScannerModal({
       if (res.success && Array.isArray(res.data)) {
         setDeviceTypes(res.data);
         const preferred = res.data.find(d => /volty/i.test(d.name)) || res.data.find(d => /track/i.test(d.name)) || res.data[0];
-        if (preferred && !selectedDeviceTypeId) {
+        if (preferred && !deviceModelInput) {
           setSelectedDeviceTypeId(preferred.id);
+          setDeviceModelInput(preferred.name);
         }
       }
     } catch (e) {
@@ -94,6 +96,7 @@ export default function BarcodeScannerModal({
 
         if (detectedName) {
           setLastDetectedModel(detectedName);
+          setDeviceModelInput(prev => (!prev || prev === 'GPS Tracker' ? detectedName : prev));
         }
 
         // Intelligently auto-select or match in deviceTypes list
@@ -111,8 +114,10 @@ export default function BarcodeScannerModal({
           }
           if (matched) {
             setSelectedDeviceTypeId(matched.id);
+            setDeviceModelInput(matched.name);
           } else if (detectedName) {
             setSelectedDeviceTypeId(`NEW_${detectedName}`);
+            setDeviceModelInput(detectedName);
           }
         }
       }
@@ -402,12 +407,16 @@ export default function BarcodeScannerModal({
 
     setDealerSubmitting(true);
     try {
+      const chosenDevicePayload = deviceModelInput.trim()
+        ? (deviceTypes.find(dt => dt.name.toLowerCase() === deviceModelInput.trim().toLowerCase())?.id || `NEW_${deviceModelInput.trim()}`)
+        : (selectedDeviceTypeId || 'GPS Tracker');
+
       const res = await bulkAssignDealer({
         imeis: scannedImeis,
         stock_place: dealerStockPlace.trim(),
         stock_place_date: dealerStockDate,
         remarks: dealerRemarks,
-        device_type_id: selectedDeviceTypeId,
+        device_type_id: chosenDevicePayload,
         performed_by: 'Admin'
       });
 
@@ -822,32 +831,87 @@ export default function BarcodeScannerModal({
                   />
                 </div>
 
-                {/* Device Type / Model (Auto Detected from IMEI) */}
-                <div className="space-y-1.5 p-3 bg-slate-50 border border-slate-200 rounded-2xl">
+                {/* Device Type / Model (Typeable input with auto-suggestions & presets) */}
+                <div className="space-y-2 p-3 bg-slate-50 border border-slate-200 rounded-2xl">
                   <div className="flex items-center justify-between">
                     <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
                       <Sparkles className="w-3.5 h-3.5 text-indigo-600" /> Device Model / Type
                     </label>
                     {lastDetectedModel && (
-                      <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-100 text-indigo-800 border border-indigo-200">
-                        Detected: {lastDetectedModel}
-                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDeviceModelInput(lastDetectedModel);
+                          const matched = deviceTypes.find(dt => dt.name.toLowerCase() === lastDetectedModel.toLowerCase());
+                          if (matched) setSelectedDeviceTypeId(matched.id);
+                          else setSelectedDeviceTypeId(`NEW_${lastDetectedModel}`);
+                        }}
+                        className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-100 hover:bg-indigo-200 text-indigo-800 border border-indigo-200 transition-colors cursor-pointer flex items-center gap-1"
+                        title="Click to use auto-detected model"
+                      >
+                        <span>Detected: <strong>{lastDetectedModel}</strong></span>
+                        <span className="text-[9px] bg-indigo-600 text-white px-1 rounded">Apply</span>
+                      </button>
                     )}
                   </div>
-                  <select
-                    value={selectedDeviceTypeId}
-                    onChange={(e) => setSelectedDeviceTypeId(e.target.value)}
-                    className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-900 focus:outline-none focus:border-indigo-500"
-                  >
-                    {lastDetectedModel && !deviceTypes.some(dt => dt.id === Number(selectedDeviceTypeId) || dt.name.toLowerCase() === lastDetectedModel.toLowerCase()) && (
-                      <option value={`NEW_${lastDetectedModel}`}>
-                        ✨ {lastDetectedModel} (Detected Model)
-                      </option>
-                    )}
-                    {deviceTypes.map(dt => (
-                      <option key={dt.id} value={dt.id}>{dt.name} ({dt.category})</option>
-                    ))}
-                  </select>
+
+                  {/* Direct Typeable Input with Datalist */}
+                  <div className="relative">
+                    <input
+                      type="text"
+                      list="device-types-datalist"
+                      placeholder="Type or select Device Model (e.g. VAMOSYS, TRACKNOW, AIS 140...)"
+                      value={deviceModelInput}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setDeviceModelInput(val);
+                        const matched = deviceTypes.find(dt => dt.name.toLowerCase() === val.trim().toLowerCase());
+                        if (matched) {
+                          setSelectedDeviceTypeId(matched.id);
+                        } else {
+                          setSelectedDeviceTypeId(val.trim() ? `NEW_${val.trim()}` : '');
+                        }
+                      }}
+                      className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-900 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                    />
+                    <datalist id="device-types-datalist">
+                      {lastDetectedModel && !deviceTypes.some(dt => dt.name.toLowerCase() === lastDetectedModel.toLowerCase()) && (
+                        <option value={lastDetectedModel}>Auto-detected Model</option>
+                      )}
+                      {deviceTypes.map(dt => (
+                        <option key={dt.id} value={dt.name}>
+                          {dt.name} ({dt.category || 'GPS Tracker'})
+                        </option>
+                      ))}
+                    </datalist>
+                  </div>
+
+                  {/* Quick Preset Badges for One-Click Selection */}
+                  {deviceTypes.length > 0 && (
+                    <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                      <span className="text-[10px] text-slate-400 font-medium">Quick select:</span>
+                      {deviceTypes.slice(0, 6).map(dt => {
+                        const isSelected = deviceModelInput.trim().toLowerCase() === dt.name.toLowerCase();
+                        return (
+                          <button
+                            key={dt.id}
+                            type="button"
+                            onClick={() => {
+                              setDeviceModelInput(dt.name);
+                              setSelectedDeviceTypeId(dt.id);
+                            }}
+                            className={`px-2 py-0.5 rounded-lg text-[10px] font-semibold border transition-all cursor-pointer ${
+                              isSelected
+                                ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs font-bold'
+                                : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300 hover:text-indigo-600'
+                            }`}
+                          >
+                            {dt.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
 
                 {/* Optional Remarks / Courier info */}

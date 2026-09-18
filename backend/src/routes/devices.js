@@ -1045,23 +1045,31 @@ router.post('/bulk-assign-dealer', (req, res) => {
     const updatedDevices = [];
     const missingImeis = [];
 
-    // Resolve intelligent default device type
+    // Resolve intelligent default device type and custom model name
     let defaultTypeId = null;
+    let customModelName = '';
+
     if (device_type_id) {
       if (typeof device_type_id === 'number' || /^\d+$/.test(String(device_type_id))) {
         defaultTypeId = parseInt(device_type_id);
+        const dt = db.prepare('SELECT name FROM device_types WHERE id = ?').get(defaultTypeId);
+        if (dt) customModelName = dt.name;
       } else {
-        const customName = String(device_type_id).replace(/^NEW_/, '').trim();
-        const found = db.prepare('SELECT id FROM device_types WHERE LOWER(name) = LOWER(?)').get(customName);
-        if (found) {
-          defaultTypeId = found.id;
-        } else if (customName) {
-          try {
-            const ins = db.prepare("INSERT INTO device_types (name, category, custom_fields, template_columns) VALUES (?, 'GPS Tracker', '{}', '[]')").run(customName);
-            defaultTypeId = ins.lastInsertRowid;
-          } catch (e) {
-            const fallback = db.prepare('SELECT id FROM device_types LIMIT 1').get();
-            defaultTypeId = fallback ? fallback.id : 1;
+        const rawCustomName = String(device_type_id).replace(/^NEW_/, '').trim();
+        if (rawCustomName) {
+          customModelName = rawCustomName;
+          const found = db.prepare('SELECT id, name FROM device_types WHERE LOWER(name) = LOWER(?)').get(rawCustomName);
+          if (found) {
+            defaultTypeId = found.id;
+            customModelName = found.name;
+          } else {
+            try {
+              const ins = db.prepare("INSERT INTO device_types (name, category, custom_fields, template_columns) VALUES (?, 'GPS Tracker', '{}', '[]')").run(rawCustomName);
+              defaultTypeId = ins.lastInsertRowid;
+            } catch (e) {
+              const fallback = db.prepare('SELECT id FROM device_types LIMIT 1').get();
+              defaultTypeId = fallback ? fallback.id : 1;
+            }
           }
         }
       }
@@ -1081,14 +1089,15 @@ router.post('/bulk-assign-dealer', (req, res) => {
         if (!imei) continue;
 
         const detected = detectDeviceByImei(imei);
-        const resolvedTypeId = device_type_id ? parseInt(device_type_id) : (detected.device_type_id || defaultTypeId);
+        const resolvedTypeId = defaultTypeId || detected.device_type_id || 1;
+        const chosenDeviceName = customModelName || detected.device_name || 'GPS Tracker';
 
         let dev = db.prepare('SELECT * FROM devices WHERE imei_number = ?').get(imei);
         
         if (!dev) {
-          // If not in database yet, auto-create the device record with the assigned Stock Place & Date & detected Device Name
+          // If not in database yet, auto-create the device record with the assigned Stock Place & Date & detected/typed Device Name
           const initAttrs = {
-            'DEVICE NAME': detected.device_name || 'GPS Tracker',
+            'DEVICE NAME': chosenDeviceName,
             'STOCK PLACE': cleanPlace,
             'STOCK PLACE DATE': cleanDate
           };
@@ -1102,12 +1111,12 @@ router.post('/bulk-assign-dealer', (req, res) => {
           db.prepare(`
             INSERT INTO device_history (device_id, imei_number, event_type, event_date, from_holder, to_holder, performed_by, remarks)
             VALUES (?, ?, 'DISPATCHED', datetime('now'), 'Unassigned', ?, ?, ?)
-          `).run(newId, imei, cleanPlace, performed_by, `Device (${detected.device_name}) added & dispatched to ${cleanPlace} on ${cleanDate}`);
+          `).run(newId, imei, cleanPlace, performed_by, `Device (${chosenDeviceName}) added & dispatched to ${cleanPlace} on ${cleanDate}`);
 
           updatedDevices.push({
             id: newId,
             imei_number: imei,
-            device_name: detected.device_name,
+            device_name: chosenDeviceName,
             stock_place: cleanPlace,
             stock_place_date: cleanDate
           });
@@ -1117,8 +1126,11 @@ router.post('/bulk-assign-dealer', (req, res) => {
         let attrs = {};
         try { attrs = JSON.parse(dev.additional_attributes || '{}'); } catch {}
 
-        // Ensure DEVICE NAME is recorded if not present
-        if (!attrs['DEVICE NAME'] && !attrs['Device Name']) {
+        if (customModelName) {
+          attrs['DEVICE NAME'] = customModelName;
+          attrs['Device Name'] = customModelName;
+          attrs['MODEL'] = customModelName;
+        } else if (!attrs['DEVICE NAME'] && !attrs['Device Name']) {
           attrs['DEVICE NAME'] = detected.device_name || 'GPS Tracker';
         }
 
@@ -1140,13 +1152,14 @@ router.post('/bulk-assign-dealer', (req, res) => {
 
         db.prepare(`
           UPDATE devices
-          SET current_status = ?,
+          SET device_type_id = COALESCE(?, device_type_id),
+              current_status = ?,
               current_holder_type = 'DEALER',
               current_holder_name = ?,
               additional_attributes = ?,
               updated_at = CURRENT_TIMESTAMP
           WHERE id = ?
-        `).run(status, cleanPlace, attrsJson, dev.id);
+        `).run(defaultTypeId || dev.device_type_id, status, cleanPlace, attrsJson, dev.id);
 
         // Audit Trail in device_history
         const historyRemarks = remarks
@@ -1161,6 +1174,7 @@ router.post('/bulk-assign-dealer', (req, res) => {
         updatedDevices.push({
           id: dev.id,
           imei_number: imei,
+          device_name: chosenDeviceName,
           stock_place: cleanPlace,
           stock_place_date: cleanDate
         });
