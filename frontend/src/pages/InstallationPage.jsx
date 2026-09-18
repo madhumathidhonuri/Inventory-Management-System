@@ -24,12 +24,14 @@ import {
   Download,
   ShieldCheck,
   HardHat,
-  Truck
+  Truck,
+  Bell
 } from 'lucide-react';
-import { recordInstallation, recordBulkInstallations, fetchInstallations, lookupCustomerByPhone, getCustomerDirectoryExportUrl } from '../services/api';
+import { recordInstallation, recordBulkInstallations, fetchInstallations, lookupCustomerByPhone, getCustomerDirectoryExportUrl, fetchPendingPaymentAlerts } from '../services/api';
 import { buildCustomerCredentialsWhatsAppMessage, buildPaymentQrWhatsAppMessage, buildPaymentReceivedWhatsAppMessage } from '../utils/whatsapp';
 import { exportInstallationsToExcel } from '../utils/excelExport';
 import PaymentQrModal from '../components/PaymentQrModal';
+import PendingPaymentNotificationModal from '../components/PendingPaymentNotificationModal';
 import { useAuth } from '../context/AuthContext';
 
 export default function InstallationPage({ onOpenScannerWithCallback, onOpenTraceDrawer }) {
@@ -40,6 +42,8 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [exportingExcel, setExportingExcel] = useState(false);
+  const [pendingSummary, setPendingSummary] = useState(null);
+  const [isPendingAlertsOpen, setIsPendingAlertsOpen] = useState(false);
 
   // Payment QR Modal State
   const [paymentQrData, setPaymentQrData] = useState(null);
@@ -85,6 +89,7 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
 
   useEffect(() => {
     loadData();
+    loadPendingAlerts();
   }, [search]);
 
   const loadData = async () => {
@@ -96,6 +101,15 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
       console.error(err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadPendingAlerts = async () => {
+    try {
+      const res = await fetchPendingPaymentAlerts();
+      if (res.success) setPendingSummary(res.summary);
+    } catch (e) {
+      console.warn('Could not load pending alerts in InstallationPage:', e);
     }
   };
 
@@ -485,6 +499,41 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
               </button>
             )}
             <button onClick={() => { setSuccessToast(''); setPostInstallQrPrompt(null); }} className="text-emerald-700 hover:text-emerald-900 font-normal ml-1">✕</button>
+          </div>
+        </div>
+      )}
+
+      {/* Active Pending Payments Notification Banner */}
+      {pendingSummary && pendingSummary.total_pending_count > 0 && (
+        <div className="p-4 bg-linear-to-r from-amber-500/15 via-red-500/10 to-amber-50 rounded-2xl border border-amber-300 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs animate-in fade-in-50">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-xl bg-amber-500 text-white shadow-xs animate-bounce">
+              <Bell className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="text-xs font-bold text-slate-900 flex items-center gap-2">
+                <span>Pending Payment Vehicles Alert</span>
+                {pendingSummary.yesterday_pending_count > 0 && (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-red-600 text-white animate-pulse">
+                    🚨 {pendingSummary.yesterday_pending_count} Fitted Yesterday (1 Day Due)
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-slate-600 mt-0.5">
+                Total <strong>{pendingSummary.total_pending_count} vehicle(s)</strong> awaiting payment totaling <strong className="font-mono text-red-600 font-bold">₹{pendingSummary.total_pending_amount.toLocaleString('en-IN')}</strong>.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsPendingAlertsOpen(true)}
+              className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+            >
+              <Bell className="w-3.5 h-3.5" />
+              <span>Review & Collect ({pendingSummary.total_pending_count})</span>
+            </button>
           </div>
         </div>
       )}
@@ -1282,6 +1331,17 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
         onClose={() => setIsPaymentQrOpen(false)}
         paymentData={paymentQrData}
         onPaymentUpdated={() => loadData()}
+      />
+
+      {/* Pending Payment Notification Drawer Modal */}
+      <PendingPaymentNotificationModal
+        isOpen={isPendingAlertsOpen}
+        onClose={() => {
+          setIsPendingAlertsOpen(false);
+          loadData();
+          loadPendingAlerts();
+        }}
+        onOpenTraceDrawer={onOpenTraceDrawer}
       />
 
     </div>

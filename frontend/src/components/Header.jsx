@@ -18,22 +18,43 @@ import {
   Database,
   Cloud,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  Bell
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { globalSearchDevices, fetchCloudSyncStatus, triggerCloudSyncNow } from '../services/api';
+import { globalSearchDevices, fetchCloudSyncStatus, triggerCloudSyncNow, fetchPendingPaymentAlerts } from '../services/api';
+import PendingPaymentNotificationModal from './PendingPaymentNotificationModal';
 
-
-export default function Header({ onOpenScanner, onOpenTraceDrawer }) {
+export default function Header({ onOpenScanner, onOpenTraceDrawer, onNavigateTab }) {
   const { user, roleInfo, logout, isMobileMode, setIsMobileMode } = useAuth();
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
   const [showResultsDropdown, setShowResultsDropdown] = useState(false);
   const [showUserDropdown, setShowUserDropdown] = useState(false);
+  const [isPendingAlertsOpen, setIsPendingAlertsOpen] = useState(false);
+  const [pendingAlertsSummary, setPendingAlertsSummary] = useState(null);
   const searchInputRef = useRef(null);
   const searchDropdownRef = useRef(null);
   const userDropdownRef = useRef(null);
+
+  // Periodic check for pending payment alerts (every 30 seconds)
+  useEffect(() => {
+    loadPendingSummary();
+    const interval = setInterval(loadPendingSummary, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const loadPendingSummary = async () => {
+    try {
+      const res = await fetchPendingPaymentAlerts();
+      if (res.success && res.summary) {
+        setPendingAlertsSummary(res.summary);
+      }
+    } catch (e) {
+      console.warn('Could not fetch pending payment alerts summary:', e);
+    }
+  };
 
   // Global Ctrl+K / Cmd+K shortcut
   useEffect(() => {
@@ -240,7 +261,34 @@ export default function Header({ onOpenScanner, onOpenTraceDrawer }) {
 
       {/* Right Controls */}
       <div className="flex items-center space-x-2">
-        
+
+        {/* Pending Payment Notification Bell */}
+        <button
+          type="button"
+          onClick={() => setIsPendingAlertsOpen(true)}
+          className={`relative p-2 rounded-xl border transition-all cursor-pointer flex items-center justify-center ${
+            (pendingAlertsSummary?.yesterday_pending_count || 0) > 0 || (pendingAlertsSummary?.total_pending_count || 0) > 0
+              ? 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300 shadow-2xs'
+              : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200'
+          }`}
+          title={
+            (pendingAlertsSummary?.yesterday_pending_count || 0) > 0
+              ? `⚠️ ${pendingAlertsSummary.yesterday_pending_count} vehicle(s) fitted yesterday have pending payment!`
+              : `${pendingAlertsSummary?.total_pending_count || 0} vehicle(s) with pending payments`
+          }
+        >
+          <Bell className={`w-4 h-4 ${(pendingAlertsSummary?.yesterday_pending_count || 0) > 0 ? 'text-amber-600 animate-pulse' : 'text-slate-700'}`} />
+          
+          {/* Badge Count */}
+          {(pendingAlertsSummary?.total_pending_count || 0) > 0 && (
+            <span className={`absolute -top-1 -right-1 min-w-4 h-4 px-1 rounded-full text-[9px] font-mono font-bold text-white flex items-center justify-center shadow-xs ${
+              (pendingAlertsSummary?.yesterday_pending_count || 0) > 0 ? 'bg-red-600 animate-bounce' : 'bg-amber-500'
+            }`}>
+              {pendingAlertsSummary.total_pending_count}
+            </span>
+          )}
+        </button>
+
         {/* Scanner Modal Trigger */}
         <button
           onClick={onOpenScanner}
@@ -298,12 +346,14 @@ export default function Header({ onOpenScanner, onOpenTraceDrawer }) {
                     className="w-full text-left px-3 py-2 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-100 flex items-center gap-2 transition-colors cursor-pointer"
                     title="Download a full live backup snapshot of your entire database"
                   >
-                    <Database className="w-3.5 h-3.5 text-indigo-600" />
-                    <span>Download Live DB Backup</span>
+                    <Download className="w-3.5 h-3.5 text-blue-600" />
+                    <span>Download Database Backup</span>
                   </a>
 
                   <button
+                    type="button"
                     onClick={async () => {
+                      setShowUserDropdown(false);
                       try {
                         const res = await triggerCloudSyncNow();
                         alert(`Cloud Sync: ${res.message || 'Database snapshot uploaded to Cloud Storage!'}`);
@@ -347,6 +397,20 @@ export default function Header({ onOpenScanner, onOpenTraceDrawer }) {
         </button>
 
       </div>
+
+      {/* Pending Payment Notification Drawer & Action Modal */}
+      <PendingPaymentNotificationModal
+        isOpen={isPendingAlertsOpen}
+        onClose={() => {
+          setIsPendingAlertsOpen(false);
+          loadPendingSummary();
+        }}
+        onOpenTraceDrawer={onOpenTraceDrawer}
+        onNavigateToInstallations={() => {
+          setIsPendingAlertsOpen(false);
+          if (onNavigateTab) onNavigateTab('installations');
+        }}
+      />
     </header>
   );
 }

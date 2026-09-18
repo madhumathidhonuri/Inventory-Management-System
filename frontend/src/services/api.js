@@ -279,6 +279,12 @@ export async function fetchInstallations(params = {}) {
   return res.json();
 }
 
+export async function fetchPendingPaymentAlerts() {
+  const res = await fetch(`${API_BASE}/installations/pending-alerts`);
+  if (!res.ok) throw new Error('Failed to fetch pending payment alerts');
+  return res.json();
+}
+
 export async function fetchCustomers(params = {}) {
   const query = new URLSearchParams(params).toString();
   const res = await fetch(`${API_BASE}/customers?${query}`);

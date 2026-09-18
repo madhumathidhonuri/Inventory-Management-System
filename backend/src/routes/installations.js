@@ -416,6 +416,107 @@ function extractInstCategory(inst) {
   return (devAttrs['CATEGORY'] || devAttrs['DEVICE CATEGORY'] || inst.vehicle_type || 'VLTD').toString().toUpperCase().trim();
 }
 
+// GET /api/installations/pending-alerts - Return grouped pending payment alerts with aging (Today, Yesterday, Overdue)
+router.get('/pending-alerts', (req, res) => {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const yesterdayDate = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+
+    const rows = db.prepare(`
+      SELECT i.*, d.sim_number, d.additional_attributes as device_additional_attributes, dt.name as device_type_name
+      FROM installations i
+      JOIN devices d ON i.device_id = d.id
+      JOIN device_types dt ON d.device_type_id = dt.id
+      WHERE (i.payment_status IS NULL OR UPPER(i.payment_status) NOT IN ('RECEIVED', 'PAID', 'YES'))
+      ORDER BY i.installation_date DESC, i.id DESC
+    `).all();
+
+    let totalPendingAmount = 0;
+    let todayCount = 0;
+    let todayAmount = 0;
+    let yesterdayCount = 0;
+    let yesterdayAmount = 0;
+    let overdueCount = 0;
+    let overdueAmount = 0;
+
+    const items = rows.map(item => {
+      const price = parseFloat(item.sale_price) || 0;
+      totalPendingAmount += price;
+
+      const instDate = item.installation_date ? String(item.installation_date).trim() : today;
+      let daysOverdue = 0;
+      try {
+        const dInst = new Date(instDate);
+        const dToday = new Date(today);
+        const diffMs = dToday - dInst;
+        daysOverdue = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
+      } catch (e) {
+        daysOverdue = 0;
+      }
+
+      let bucket = 'OTHER';
+      let urgency = 'NORMAL';
+      let agingLabel = '';
+
+      if (instDate === today || daysOverdue === 0) {
+        bucket = 'TODAY';
+        urgency = 'TODAY_PENDING';
+        agingLabel = 'Installed Today';
+        todayCount++;
+        todayAmount += price;
+      } else if (instDate === yesterdayDate || daysOverdue === 1) {
+        bucket = 'YESTERDAY';
+        urgency = 'YESTERDAY_OVERDUE';
+        agingLabel = 'Installed Yesterday (1 day due)';
+        yesterdayCount++;
+        yesterdayAmount += price;
+      } else if (daysOverdue <= 7) {
+        bucket = 'RECENT_DUE';
+        urgency = 'MODERATE';
+        agingLabel = `${daysOverdue} days due`;
+        overdueCount++;
+        overdueAmount += price;
+      } else {
+        bucket = 'CRITICAL_OVERDUE';
+        urgency = 'CRITICAL';
+        agingLabel = `Overdue (${daysOverdue} days)`;
+        overdueCount++;
+        overdueAmount += price;
+      }
+
+      const reminderMessage = `Dear ${item.customer_name || 'Customer'},\n\nThis is a friendly payment reminder from FuelTracks IMS for the GPS Tracker installed in your vehicle *${item.vehicle_number || ''}* on *${instDate}*.\n\n*Pending Amount Due:* ₹${price.toLocaleString('en-IN')}\n\nPlease transfer via UPI / Bank or contact us to clear the invoice balance.\n\nThank you!`;
+
+      return {
+        ...item,
+        days_overdue: daysOverdue,
+        bucket,
+        urgency,
+        aging_label: agingLabel,
+        reminder_message: reminderMessage
+      };
+    });
+
+    res.json({
+      success: true,
+      summary: {
+        total_pending_count: items.length,
+        total_pending_amount: totalPendingAmount,
+        today_pending_count: todayCount,
+        today_pending_amount: todayAmount,
+        yesterday_pending_count: yesterdayCount,
+        yesterday_pending_amount: yesterdayAmount,
+        older_pending_count: overdueCount,
+        older_pending_amount: overdueAmount,
+        server_date: today,
+        yesterday_date: yesterdayDate
+      },
+      data: items
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // GET /api/installations - List installations with category filtering & category counts breakdown
 router.get('/', (req, res) => {
   try {

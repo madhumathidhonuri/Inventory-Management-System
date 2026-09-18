@@ -110,6 +110,7 @@ function MainLayout() {
       <Header
         onOpenScanner={() => openScannerWithCallback(null)}
         onOpenTraceDrawer={openTraceDrawer}
+        onNavigateTab={setActiveTab}
       />
 
       {/* Main Workspace */}
