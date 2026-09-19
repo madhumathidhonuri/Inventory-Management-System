@@ -58,11 +58,14 @@ export async function updateDevice(id, payload) {
   return data;
 }
 
-export async function updateQuickPayment(id, payload) {
-  const res = await fetch(`${API_BASE}/devices/${id}/quick-payment`, {
+export async function updateQuickPayment(idOrPayload, payload = {}) {
+  const targetId = typeof idOrPayload === 'object' ? (idOrPayload.id || idOrPayload.device_id) : idOrPayload;
+  const body = typeof idOrPayload === 'object' ? idOrPayload : payload;
+
+  const res = await fetch(`${API_BASE}/devices/${targetId}/quick-payment`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(body)
   });
   const data = await res.json();
   if (!res.ok || !data.success) throw new Error(data.error || 'Failed to update payment');

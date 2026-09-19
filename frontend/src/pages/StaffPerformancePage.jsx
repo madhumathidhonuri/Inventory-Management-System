@@ -10,6 +10,7 @@ import {
   Eye,
   X,
   FileSpreadsheet,
+  Download,
   CheckCircle2,
   Car,
   Truck,
@@ -28,6 +29,10 @@ import {
   fetchSalesPerformance,
   fetchStaffDrilldown
 } from '../services/api';
+import {
+  exportTechnicianInstallationsToExcel,
+  exportAllTechniciansSummaryToExcel
+} from '../utils/excelExport';
 import { useAuth } from '../context/AuthContext';
 
 export default function StaffPerformancePage({ onOpenTraceDrawer }) {
@@ -182,6 +187,75 @@ export default function StaffPerformancePage({ onOpenTraceDrawer }) {
       (i.installation_location && i.installation_location.toLowerCase().includes(q))
     );
   }, [drilldownData, drilldownSearch]);
+
+  // Export states
+  const [exportingTechName, setExportingTechName] = useState('');
+  const [exportingAllTech, setExportingAllTech] = useState(false);
+
+  // Export a Single Technician's Complete Installations to Excel (.xlsx)
+  const handleExportSingleTechnicianExcel = async (technicianName) => {
+    try {
+      setExportingTechName(technicianName);
+      const params = {
+        type: 'technician',
+        name: technicianName,
+        payoutRate
+      };
+      if (startDate) params.startDate = startDate;
+      if (endDate) params.endDate = endDate;
+
+      const res = await fetchStaffDrilldown(params);
+      const dateRangeStr = startDate && endDate ? `${startDate} to ${endDate}` : 'All Time';
+
+      await exportTechnicianInstallationsToExcel(technicianName, res.installations || [], {
+        payoutRate,
+        dateRange: dateRangeStr,
+        expenses: res.expenses || [],
+        floatingStock: res.floating_stock || [],
+        payoutSummary: res.payout_summary
+      });
+    } catch (err) {
+      console.error('Failed to export technician installations:', err);
+      alert('Failed to download technician Excel report: ' + err.message);
+    } finally {
+      setExportingTechName('');
+    }
+  };
+
+  // Export Current Drilldown to Excel (.xlsx)
+  const handleExportCurrentDrilldownExcel = async () => {
+    if (!drilldownData) return;
+    try {
+      const dateRangeStr = startDate && endDate ? `${startDate} to ${endDate}` : 'All Time';
+      await exportTechnicianInstallationsToExcel(drilldownData.staff_name, drilldownData.installations || [], {
+        payoutRate,
+        dateRange: dateRangeStr,
+        expenses: drilldownData.expenses || [],
+        floatingStock: drilldownData.floating_stock || [],
+        payoutSummary: drilldownData.payout_summary
+      });
+    } catch (err) {
+      console.error('Failed to export drilldown to Excel:', err);
+      alert('Failed to generate Excel report: ' + err.message);
+    }
+  };
+
+  // Export All Technicians Summary to Excel (.xlsx)
+  const handleExportAllTechniciansExcel = async () => {
+    try {
+      setExportingAllTech(true);
+      const dateRangeStr = startDate && endDate ? `${startDate} to ${endDate}` : 'All Time';
+      await exportAllTechniciansSummaryToExcel(technicians, {
+        dateRange: dateRangeStr,
+        payoutRate
+      });
+    } catch (err) {
+      console.error('Failed to export all technicians summary:', err);
+      alert('Failed to generate Technicians Summary Excel: ' + err.message);
+    } finally {
+      setExportingAllTech(false);
+    }
+  };
 
   // Export Drilldown to CSV
   const exportDrilldownCsv = () => {
@@ -482,12 +556,21 @@ export default function StaffPerformancePage({ onOpenTraceDrawer }) {
                 </span>
               </div>
 
-              <div className="flex items-center gap-4">
-                <div className="text-[11px] text-slate-600">
-                  Total Technicians: <strong className="text-slate-900">{filteredTechnicians.length}</strong>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={handleExportAllTechniciansExcel}
+                  disabled={exportingAllTech || filteredTechnicians.length === 0}
+                  className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-white hover:bg-emerald-50 text-emerald-800 border border-emerald-300 font-bold text-xs transition shadow-2xs disabled:opacity-50 cursor-pointer"
+                  title="Download complete performance summary & leaderboard of all technicians as Excel (.xlsx)"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                  <span>{exportingAllTech ? 'Generating Excel...' : 'Export All Technicians Excel'}</span>
+                </button>
+                <div className="text-[11px] text-slate-600 hidden md:block">
+                  Total Techs: <strong className="text-slate-900">{filteredTechnicians.length}</strong>
                 </div>
                 <div className="text-[11px] text-indigo-900 font-bold bg-indigo-100/80 px-2.5 py-1 rounded-lg">
-                  Total Net Payable: ₹{filteredTechnicians.reduce((sum, t) => sum + (t.net_payout_due || 0), 0).toLocaleString('en-IN')}
+                  Net Payable: ₹{filteredTechnicians.reduce((sum, t) => sum + (t.net_payout_due || 0), 0).toLocaleString('en-IN')}
                 </div>
               </div>
             </div>
@@ -578,13 +661,26 @@ export default function StaffPerformancePage({ onOpenTraceDrawer }) {
                           </span>
                         </td>
                         <td className="py-3.5 px-4 text-right">
-                          <button
-                            onClick={() => handleOpenDrilldown('technician', tech.technician_name)}
-                            className="inline-flex items-center space-x-1 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs transition cursor-pointer shadow-2xs"
-                          >
-                            <Eye className="w-3.5 h-3.5" />
-                            <span>Drilldown & Payout</span>
-                          </button>
+                          <div className="flex items-center justify-end space-x-1.5">
+                            <button
+                              onClick={() => handleExportSingleTechnicianExcel(tech.technician_name)}
+                              disabled={exportingTechName === tech.technician_name}
+                              className="inline-flex items-center space-x-1 px-2.5 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 font-semibold text-xs transition cursor-pointer shadow-2xs disabled:opacity-50"
+                              title={`Download complete Excel sheet (.xlsx) of all ${tech.total_installations} installations done by ${tech.technician_name}`}
+                            >
+                              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                              <span className="hidden sm:inline">
+                                {exportingTechName === tech.technician_name ? 'Exporting...' : 'Export Excel'}
+                              </span>
+                            </button>
+                            <button
+                              onClick={() => handleOpenDrilldown('technician', tech.technician_name)}
+                              className="inline-flex items-center space-x-1 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs transition cursor-pointer shadow-2xs"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                              <span>Drilldown</span>
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))
@@ -767,12 +863,23 @@ export default function StaffPerformancePage({ onOpenTraceDrawer }) {
 
               <div className="flex items-center space-x-2">
                 <button
+                  onClick={handleExportCurrentDrilldownExcel}
+                  disabled={!filteredDrilldownInstallations.length}
+                  className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm transition disabled:opacity-50 cursor-pointer"
+                  title={`Download complete Excel sheet (.xlsx) of all ${filteredDrilldownInstallations.length} installations done by ${drilldownData?.staff_name}`}
+                >
+                  <FileSpreadsheet className="w-4 h-4" />
+                  <span>Download Excel ({filteredDrilldownInstallations.length})</span>
+                </button>
+
+                <button
                   onClick={exportDrilldownCsv}
                   disabled={!filteredDrilldownInstallations.length}
-                  className="flex items-center space-x-1 px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 shadow-sm transition disabled:opacity-50"
+                  className="flex items-center space-x-1 px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 shadow-sm transition disabled:opacity-50 cursor-pointer"
+                  title="Export records to CSV"
                 >
-                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>Export CSV</span>
+                  <Download className="w-3.5 h-3.5 text-slate-500" />
+                  <span>CSV</span>
                 </button>
 
                 <button

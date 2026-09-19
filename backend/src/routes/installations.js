@@ -419,14 +419,21 @@ function extractInstCategory(inst) {
 // GET /api/installations/pending-alerts - Return grouped pending payment alerts with aging (Today, Yesterday, Overdue)
 router.get('/pending-alerts', (req, res) => {
   try {
+    const { syncFitmentsToInstallations, standardizeDate } = require('../db/syncFitments');
+    try {
+      syncFitmentsToInstallations();
+    } catch (sErr) {
+      console.warn('[PendingAlerts] Sync fitments notice:', sErr.message);
+    }
+
     const today = new Date().toISOString().split('T')[0];
     const yesterdayDate = new Date(Date.now() - 86400000).toISOString().split('T')[0];
 
     const rows = db.prepare(`
       SELECT i.*, d.sim_number, d.additional_attributes as device_additional_attributes, dt.name as device_type_name
       FROM installations i
-      JOIN devices d ON i.device_id = d.id
-      JOIN device_types dt ON d.device_type_id = dt.id
+      LEFT JOIN devices d ON i.device_id = d.id
+      LEFT JOIN device_types dt ON d.device_type_id = dt.id
       WHERE (i.payment_status IS NULL OR UPPER(i.payment_status) NOT IN ('RECEIVED', 'PAID', 'YES'))
       ORDER BY i.installation_date DESC, i.id DESC
     `).all();
@@ -443,7 +450,8 @@ router.get('/pending-alerts', (req, res) => {
       const price = parseFloat(item.sale_price) || 0;
       totalPendingAmount += price;
 
-      const instDate = item.installation_date ? String(item.installation_date).trim() : today;
+      const rawInstDate = item.installation_date || item.created_at;
+      const instDate = standardizeDate(rawInstDate) || today;
       let daysOverdue = 0;
       try {
         const dInst = new Date(instDate);
@@ -488,6 +496,8 @@ router.get('/pending-alerts', (req, res) => {
 
       return {
         ...item,
+        device_id: item.device_id || item.id,
+        installation_date: instDate,
         days_overdue: daysOverdue,
         bucket,
         urgency,
@@ -524,8 +534,8 @@ router.get('/', (req, res) => {
     let query = `
       SELECT i.*, d.sim_number, d.additional_attributes as device_additional_attributes, dt.name as device_type_name
       FROM installations i
-      JOIN devices d ON i.device_id = d.id
-      JOIN device_types dt ON d.device_type_id = dt.id
+      LEFT JOIN devices d ON i.device_id = d.id
+      LEFT JOIN device_types dt ON d.device_type_id = dt.id
       WHERE 1=1
     `;
 
@@ -614,8 +624,8 @@ router.get('/export', async (req, res) => {
     let query = `
       SELECT i.*, d.sim_number, d.additional_attributes as device_additional_attributes, dt.name as device_type_name
       FROM installations i
-      JOIN devices d ON i.device_id = d.id
-      JOIN device_types dt ON d.device_type_id = dt.id
+      LEFT JOIN devices d ON i.device_id = d.id
+      LEFT JOIN device_types dt ON d.device_type_id = dt.id
       WHERE 1=1
     `;
 

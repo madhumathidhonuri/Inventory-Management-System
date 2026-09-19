@@ -96,7 +96,9 @@ export default function PendingPaymentsPage({ onOpenTraceDrawer }) {
         const c = (item.customer_name || '').toLowerCase();
         const p = (item.customer_contact || '').toLowerCase();
         const imei = (item.imei_number || '').toLowerCase();
-        return v.includes(q) || c.includes(q) || p.includes(q) || imei.includes(q);
+        const tech = (item.installed_by || '').toLowerCase();
+        const loc = (item.installation_location || '').toLowerCase();
+        return v.includes(q) || c.includes(q) || p.includes(q) || imei.includes(q) || tech.includes(q) || loc.includes(q);
       }
       return true;
     });

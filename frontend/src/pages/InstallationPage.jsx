@@ -75,6 +75,7 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
   const [category, setCategory] = useState('VLTD'); // 'VLTD' | 'TG MINING' | 'AP MINING' | 'GENERAL' | 'CUSTOM'
   const [customCategoryInput, setCustomCategoryInput] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('ALL');
+  const [technicianFilter, setTechnicianFilter] = useState('ALL');
 
   // Bulk WhatsApp Installs State
   const [showBulkModal, setShowBulkModal] = useState(false);
@@ -143,6 +144,18 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
     return counts;
   }, [installations]);
 
+  // Extract Unique Technicians for quick filtering
+  const uniqueTechnicians = useMemo(() => {
+    const set = new Set();
+    installations.forEach(inst => {
+      const t = (inst.installed_by || '').trim();
+      if (t && t !== '-' && t !== '—' && t.toLowerCase() !== 'technician') {
+        set.add(t);
+      }
+    });
+    return Array.from(set).sort();
+  }, [installations]);
+
   // Filtered Installations List
   const filteredInstallations = useMemo(() => {
     return installations.filter(inst => {
@@ -155,6 +168,11 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
         } catch {}
         const cat = (devAttrs['CATEGORY'] || devAttrs['DEVICE CATEGORY'] || inst.vehicle_type || '').toUpperCase();
         if (!cat.includes(categoryFilter)) return false;
+      }
+
+      if (technicianFilter !== 'ALL') {
+        const t = (inst.installed_by || '').trim().toLowerCase();
+        if (t !== technicianFilter.toLowerCase()) return false;
       }
 
       if (search && search.trim()) {
@@ -172,9 +190,9 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
 
       return true;
     });
-  }, [installations, categoryFilter, search]);
+  }, [installations, categoryFilter, technicianFilter, search]);
 
-  // Category Excel Export Handler
+  // Category & Technician Excel Export Handler
   const handleExportCategoryExcel = async () => {
     try {
       setExportingExcel(true);
@@ -188,11 +206,15 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
 
       const today = getFormattedDateDDMMYYYY();
       let catName = 'ALL_INSTALLATIONS';
-      if (categoryFilter && categoryFilter !== 'ALL') {
+      if (technicianFilter !== 'ALL') {
+        catName = `${technicianFilter.toUpperCase().replace(/[_\s]+/g, '_')}_INSTALLATIONS`;
+      } else if (categoryFilter && categoryFilter !== 'ALL') {
         catName = categoryFilter.toUpperCase().replace(/[_\s]+/g, '');
       }
       const filename = `${catName}_${today}`;
-      const sheetName = categoryFilter === 'ALL' ? 'All Installations' : `${categoryFilter} Installs`;
+      const sheetName = technicianFilter !== 'ALL'
+        ? `${technicianFilter} Installs`
+        : (categoryFilter === 'ALL' ? 'All Installations' : `${categoryFilter} Installs`);
       await exportInstallationsToExcel(filename, sheetName, filteredInstallations, categoryFilter);
     } catch (err) {
       console.error('Failed to export Excel:', err);
@@ -613,12 +635,31 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {/* 1-Click Category Excel Download Button */}
+          {/* Technician Filter Dropdown */}
+          {uniqueTechnicians.length > 0 && (
+            <div className="flex items-center bg-slate-50 px-2 py-1 rounded-xl border border-slate-200 text-xs">
+              <span className="text-slate-400 font-semibold mr-1.5 hidden md:inline">Tech:</span>
+              <select
+                value={technicianFilter}
+                onChange={(e) => setTechnicianFilter(e.target.value)}
+                className="bg-transparent text-xs font-bold text-slate-800 focus:outline-none cursor-pointer"
+              >
+                <option value="ALL">All Technicians</option>
+                {uniqueTechnicians.map(t => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* 1-Click Category & Technician Excel Download Button */}
           <button
             onClick={handleExportCategoryExcel}
             disabled={exportingExcel || filteredInstallations.length === 0}
             className={`px-3.5 py-2 text-xs font-bold rounded-xl flex items-center gap-2 shadow-xs transition-all cursor-pointer ${
-              categoryFilter === 'TG MINING'
+              technicianFilter !== 'ALL'
+                ? 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                : categoryFilter === 'TG MINING'
                 ? 'bg-amber-600 hover:bg-amber-700 text-white'
                 : categoryFilter === 'AP MINING'
                 ? 'bg-purple-600 hover:bg-purple-700 text-white'
@@ -628,7 +669,7 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
                 ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
                 : 'bg-emerald-700 hover:bg-emerald-800 text-white'
             } disabled:opacity-50`}
-            title={`Download ${categoryFilter} Installation records in Excel (.xlsx)`}
+            title={`Download ${technicianFilter !== 'ALL' ? technicianFilter : categoryFilter} Installation records in Excel (.xlsx)`}
           >
             {exportingExcel ? (
               <RefreshCw className="w-3.5 h-3.5 animate-spin" />
@@ -638,7 +679,7 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
             <span>
               {exportingExcel
                 ? 'Generating Excel...'
-                : `📥 Download ${categoryFilter === 'ALL' ? 'All' : categoryFilter} Excel (${filteredInstallations.length})`}
+                : `📥 Download ${technicianFilter !== 'ALL' ? technicianFilter : (categoryFilter === 'ALL' ? 'All' : categoryFilter)} Excel (${filteredInstallations.length})`}
             </span>
           </button>
 

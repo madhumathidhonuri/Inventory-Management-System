@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import QRCode from 'qrcode';
 import {
   X,
@@ -286,8 +287,8 @@ export default function PaymentQrModal({
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-200">
+  return createPortal(
+    <div className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-200">
 
       {/* Print Specific Styles */}
       <style>{`
@@ -667,6 +668,7 @@ export default function PaymentQrModal({
         </div>
 
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

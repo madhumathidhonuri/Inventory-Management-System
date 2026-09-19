@@ -381,6 +381,12 @@ router.post('/confirm', (req, res) => {
 
     const result = transaction();
 
+    // Auto-sync fitments to installations table
+    try {
+      const { syncFitmentsToInstallations } = require('../db/syncFitments');
+      syncFitmentsToInstallations();
+    } catch (e) {}
+
     // Auto-sync instantly to Supabase Cloud Storage (No manual click needed)
     try {
       const cloudSync = require('../db/cloudSync');

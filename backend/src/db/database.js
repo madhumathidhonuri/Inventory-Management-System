@@ -386,6 +386,17 @@ function initDatabase() {
   try {
     db.prepare("DELETE FROM users WHERE phone = '8096985742' OR email = 'allabakshu@gmail.com'").run();
   } catch (e) { }
+
+  // Auto-sync fitments from devices table to installations table on startup
+  try {
+    const { syncFitmentsToInstallations } = require('./syncFitments');
+    const syncRes = syncFitmentsToInstallations(db);
+    if (syncRes && syncRes.synchronized > 0) {
+      console.log(`[Database] Auto-synced ${syncRes.synchronized} fitment records to installations ledger.`);
+    }
+  } catch (e) {
+    console.warn('[Database] Sync fitments warning:', e.message);
+  }
 }
 
 initDatabase();
@@ -397,3 +408,4 @@ db.cloudSync = cloudSync;
 db.triggerCloudSync = cloudSync.triggerDebouncedSync;
 
 module.exports = db;
+

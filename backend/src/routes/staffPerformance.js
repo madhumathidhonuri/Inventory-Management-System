@@ -144,7 +144,9 @@ function getUnifiedStaffRecords(startDate, endDate) {
       i.installation_location,
       i.remarks,
       i.created_at,
-      dt.name as device_type_name
+      dt.name as device_type_name,
+      d.sim_number,
+      d.additional_attributes as device_additional_attributes
     FROM installations i
     LEFT JOIN devices d ON i.device_id = d.id
     LEFT JOIN device_types dt ON d.device_type_id = dt.id
@@ -167,6 +169,8 @@ function getUnifiedStaffRecords(startDate, endDate) {
       id: item.id,
       device_id: item.device_id,
       imei_number: item.imei_number,
+      sim_number: item.sim_number || '',
+      device_additional_attributes: item.device_additional_attributes || '{}',
       customer_id: item.customer_id,
       installation_date: date,
       installed_by: tech,
@@ -262,6 +266,8 @@ function getUnifiedStaffRecords(startDate, endDate) {
         id: `dev_${d.id}`,
         device_id: d.id,
         imei_number: d.imei_number,
+        sim_number: d.sim_number || attrs['SIM NUMBER'] || attrs['SIM'] || attrs['Sim Number'] || '',
+        device_additional_attributes: d.additional_attributes || '{}',
         customer_id: null,
         installation_date: date,
         installed_by: finalTech || 'Technician',

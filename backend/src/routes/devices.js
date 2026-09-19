@@ -633,6 +633,25 @@ router.patch('/:id/quick-payment', (req, res) => {
       WHERE id = ?
     `).run(updatedAttrsStr, id);
 
+    // Also synchronize payment status in installations ledger
+    try {
+      db.prepare(`
+        UPDATE installations
+        SET payment_status = ?,
+            payment_date = ?,
+            payment_mode = COALESCE(?, payment_mode)
+        WHERE device_id = ? OR imei_number = ?
+      `).run(
+        isPaid ? 'RECEIVED' : 'PENDING',
+        isPaid ? new Date().toISOString().split('T')[0] : null,
+        payment_mode || 'UPI',
+        id,
+        device.imei_number
+      );
+    } catch (instErr) {
+      console.warn('[QuickPayment] Note updating installations ledger:', instErr.message);
+    }
+
     // Record History Audit
     const remarks = isPaid
       ? `Payment marked RECEIVED${payment_mode ? ` via ${payment_mode}` : ''}`
