@@ -105,13 +105,13 @@ function extractEffectiveDate(dev = {}, attrs = {}) {
     }
   }
 
-  if (dev.current_status === 'INSTALLED' && dev.updated_at) {
-    const parsed = standardizeDate(dev.updated_at);
+  if (dev.purchase_date) {
+    const parsed = standardizeDate(dev.purchase_date);
     if (parsed && /^\d{4}-\d{2}-\d{2}$/.test(parsed)) return parsed;
   }
 
-  if (dev.purchase_date) {
-    const parsed = standardizeDate(dev.purchase_date);
+  if (dev.created_at) {
+    const parsed = standardizeDate(dev.created_at);
     if (parsed && /^\d{4}-\d{2}-\d{2}$/.test(parsed)) return parsed;
   }
 

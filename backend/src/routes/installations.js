@@ -450,35 +450,39 @@ router.get('/pending-alerts', (req, res) => {
       const price = parseFloat(item.sale_price) || 0;
       totalPendingAmount += price;
 
-      const rawInstDate = item.installation_date || item.created_at;
-      const instDate = standardizeDate(rawInstDate) || today;
+      const rawInstDate = item.installation_date;
+      const instDate = rawInstDate ? standardizeDate(rawInstDate) : '';
       let daysOverdue = 0;
-      try {
-        const dInst = new Date(instDate);
-        const dToday = new Date(today);
-        const diffMs = dToday - dInst;
-        daysOverdue = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
-      } catch (e) {
-        daysOverdue = 0;
+      
+      if (instDate) {
+        try {
+          const dInst = new Date(instDate);
+          const dToday = new Date(today);
+          const diffMs = dToday - dInst;
+          const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+          daysOverdue = Math.max(0, diffDays);
+        } catch (e) {
+          daysOverdue = 0;
+        }
       }
 
       let bucket = 'OTHER';
       let urgency = 'NORMAL';
       let agingLabel = '';
 
-      if (instDate === today || daysOverdue === 0) {
+      if (instDate && instDate === today) {
         bucket = 'TODAY';
         urgency = 'TODAY_PENDING';
         agingLabel = 'Installed Today';
         todayCount++;
         todayAmount += price;
-      } else if (instDate === yesterdayDate || daysOverdue === 1) {
+      } else if (instDate && (instDate === yesterdayDate || daysOverdue === 1)) {
         bucket = 'YESTERDAY';
         urgency = 'YESTERDAY_OVERDUE';
         agingLabel = 'Installed Yesterday (1 day due)';
         yesterdayCount++;
         yesterdayAmount += price;
-      } else if (daysOverdue <= 7) {
+      } else if (daysOverdue > 1 && daysOverdue <= 7) {
         bucket = 'RECENT_DUE';
         urgency = 'MODERATE';
         agingLabel = `${daysOverdue} days due`;
@@ -487,7 +491,7 @@ router.get('/pending-alerts', (req, res) => {
       } else {
         bucket = 'CRITICAL_OVERDUE';
         urgency = 'CRITICAL';
-        agingLabel = `Overdue (${daysOverdue} days)`;
+        agingLabel = daysOverdue > 7 ? `Overdue (${daysOverdue} days)` : 'Pending Collection';
         overdueCount++;
         overdueAmount += price;
       }

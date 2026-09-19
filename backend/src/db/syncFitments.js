@@ -150,10 +150,15 @@ function extractPaymentStatus(attrs = {}) {
  */
 function extractInstallationDate(dev = {}, attrs = {}) {
   const keys = [
-    'CERTIFICATE ISSUED DATE', 'Certificate Issued Date', 'INSTALLATION DATE', 'Installation Date',
-    'TG MINING DATE', 'TG_MINING_DATE', 'Tg Mining Date', 'MINING DATE', 'Mining Date',
-    'STOCK PLACE DATE', 'Stock Place Date', 'PAYMENT RECEIVED DATE', 'Payment Received Date',
-    'PAYMENT DATE', 'Payment Date', 'DATE', 'Date'
+    'CERTIFICATE ISSUED DATE', 'Certificate Issued Date', 'certificate_issued_date',
+    'CERTIFICATE DATE', 'Certificate Date', 'certificate_date',
+    'INSTALLATION DATE', 'Installation Date', 'installation_date',
+    'TG MINING DATE', 'TG_MINING_DATE', 'Tg Mining Date', 'tg_mining_date',
+    'MINING DATE', 'Mining Date', 'mining_date',
+    'STOCK PLACE DATE', 'Stock Place Date',
+    'PAYMENT RECEIVED DATE', 'Payment Received Date',
+    'PAYMENT DATE', 'Payment Date',
+    'DATE', 'Date'
   ];
   for (const k of keys) {
     if (attrs[k] !== undefined && attrs[k] !== null && String(attrs[k]).trim() !== '') {
@@ -169,7 +174,7 @@ function extractInstallationDate(dev = {}, attrs = {}) {
     const parsed = standardizeDate(dev.created_at);
     if (parsed && /^\d{4}-\d{2}-\d{2}$/.test(parsed)) return parsed;
   }
-  return new Date().toISOString().split('T')[0];
+  return '';
 }
 
 /**
@@ -190,7 +195,7 @@ function syncFitmentsToInstallations(dbParam) {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
-    const findInstByDeviceOrImeiStmt = db.prepare('SELECT id, payment_status, sale_price, vehicle_number FROM installations WHERE device_id = ? OR imei_number = ?');
+    const findInstByDeviceOrImeiStmt = db.prepare('SELECT id, payment_status, sale_price, vehicle_number, installation_date FROM installations WHERE device_id = ? OR imei_number = ?');
     const insertInstStmt = db.prepare(`
       INSERT INTO installations (
         device_id, imei_number, customer_id, installation_date, installed_by,
@@ -213,7 +218,7 @@ function syncFitmentsToInstallations(dbParam) {
       UPDATE installations
       SET device_id = ?,
           customer_id = COALESCE(?, customer_id),
-          installation_date = COALESCE(?, installation_date),
+          installation_date = COALESCE(NULLIF(?, ''), installation_date),
           customer_name = COALESCE(?, customer_name),
           customer_contact = COALESCE(?, customer_contact),
           vehicle_number = COALESCE(?, vehicle_number),
@@ -230,8 +235,7 @@ function syncFitmentsToInstallations(dbParam) {
       SET current_status = 'INSTALLED',
           current_holder_type = 'CUSTOMER',
           current_holder_id = ?,
-          current_holder_name = ?,
-          updated_at = CURRENT_TIMESTAMP
+          current_holder_name = ?
       WHERE id = ?
     `);
 

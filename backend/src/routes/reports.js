@@ -905,15 +905,9 @@ router.get('/export', (req, res) => {
 
 // Helper: Extract normalized YYYY-MM-DD certificate date from device & attributes
 function extractDeviceCertificateDate(dev = {}, attrs = {}) {
-  const isInstalled = dev.current_status === 'INSTALLED' || 
-    Boolean(String(attrs['VEHICLE NUMBER'] || attrs['VEHICLE NO'] || attrs['vehicle_number'] || '').trim()) ||
-    Boolean(String(attrs['CERTIFICATE ISSUED TO'] || attrs['CERTIFICATE ISSUED'] || '').trim()) ||
-    Boolean(String(attrs['CUSTOMER NAME'] || attrs['CUSTOMER'] || '').trim());
-
   const directCertKeys = [
     'CERTIFICATE ISSUED DATE', 'Certificate Issued Date', 'certificate_issued_date',
-    'CERTIFICATE DATE', 'Certificate Date', 'certificate_date',
-    'INSTALLATION DATE', 'Installation Date', 'installation_date'
+    'CERTIFICATE DATE', 'Certificate Date', 'certificate_date'
   ];
 
   for (const k of directCertKeys) {
@@ -933,7 +927,7 @@ function extractDeviceCertificateDate(dev = {}, attrs = {}) {
 
       const str = String(val).trim();
       // Match DD/MM/YYYY or DD-MM-YYYY
-      const dmy = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+      const dmy = str.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
       if (dmy) {
         const day = dmy[1].padStart(2, '0');
         const month = dmy[2].padStart(2, '0');
@@ -942,7 +936,7 @@ function extractDeviceCertificateDate(dev = {}, attrs = {}) {
       }
 
       // Match YYYY-MM-DD
-      const ymd = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+      const ymd = str.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
       if (ymd) {
         const year = ymd[1];
         const month = ymd[2].padStart(2, '0');
@@ -957,30 +951,6 @@ function extractDeviceCertificateDate(dev = {}, attrs = {}) {
     }
   }
 
-  // Only if the device is actually installed / has vehicle, fallback to general date
-  if (isInstalled) {
-    for (const k of ['DATE', 'Date', 'date']) {
-      if (attrs[k] !== undefined && attrs[k] !== null && String(attrs[k]).trim() !== '') {
-        const val = attrs[k];
-        if (typeof val === 'number' || /^\d{5}$/.test(String(val).trim())) {
-          const num = Number(val);
-          if (num > 30000 && num < 60000) {
-            const d = new Date(Math.round((num - 25569) * 86400 * 1000));
-            if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
-          }
-        }
-        const str = String(val).trim();
-        const dmy = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
-        if (dmy) return `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
-        const ymd = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
-        if (ymd) return `${ymd[1]}-${ymd[2].padStart(2, '0')}-${ymd[3].padStart(2, '0')}`;
-      }
-    }
-    if (dev.updated_at && dev.current_status === 'INSTALLED') {
-      return dev.updated_at.split('T')[0].split(' ')[0];
-    }
-  }
-
   return null;
 }
 
@@ -988,7 +958,8 @@ function extractDeviceCertificateDate(dev = {}, attrs = {}) {
 function isTgMiningDevice(dev = {}, attrs = {}) {
   const cat = String(attrs['CATEGORY'] || attrs['DEVICE CATEGORY'] || attrs['PROJECT CATEGORY'] || attrs['PROJECT'] || attrs['Category'] || '').toUpperCase().trim();
   const typeName = String(dev.device_name || dev.device_type_name || '').toUpperCase().trim();
-  return cat.includes('TG MINING') || cat.includes('TG_MINING') || (cat.includes('MINING') && !cat.includes('AP MINING')) || typeName.includes('TG MINING') || typeName.includes('TG_MINING');
+  const stockPlace = String(attrs['STOCK PLACE'] || '').toUpperCase().trim();
+  return cat.includes('TG MINING') || cat.includes('TG_MINING') || (cat.includes('MINING') && !cat.includes('AP MINING')) || typeName.includes('TG MINING') || typeName.includes('TG_MINING') || stockPlace.includes('TG MINING');
 }
 
 // Helper: Extract normalized YYYY-MM-DD TG Mining date from device & attributes
@@ -997,10 +968,7 @@ function extractTgMiningDate(dev = {}, attrs = {}) {
     'TG MINING DATE', 'TG_MINING_DATE', 'Tg Mining Date', 'tg_mining_date',
     'MINING DATE', 'Mining Date', 'mining_date',
     'ACTIVATION DATE', 'Activation Date', 'activation_date',
-    'ISSUE DATE', 'Issue Date', 'issue_date',
-    'INSTALLATION DATE', 'Installation Date', 'installation_date',
-    'DATE', 'Date', 'date',
-    'STOCK PLACE DATE', 'Stock Place Date'
+    'SIM ACTIVATED DATE', 'Sim Activated Date'
   ];
 
   for (const k of directKeys) {
@@ -1015,9 +983,9 @@ function extractTgMiningDate(dev = {}, attrs = {}) {
       }
 
       const str = String(val).trim();
-      const dmy = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+      const dmy = str.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
       if (dmy) return `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
-      const ymd = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+      const ymd = str.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
       if (ymd) return `${ymd[1]}-${ymd[2].padStart(2, '0')}-${ymd[3].padStart(2, '0')}`;
 
       const parsed = new Date(str);
@@ -1027,8 +995,25 @@ function extractTgMiningDate(dev = {}, attrs = {}) {
     }
   }
 
-  if (dev.updated_at && (dev.current_status === 'INSTALLED' || dev.current_status === 'WITH_DEALER')) {
-    return dev.updated_at.split('T')[0].split(' ')[0];
+  // Fallback to explicit installation date or stock place date if it is specifically a TG mining device
+  if (isTgMiningDevice(dev, attrs)) {
+    for (const k of ['INSTALLATION DATE', 'Installation Date', 'installation_date', 'STOCK PLACE DATE', 'Stock Place Date']) {
+      if (attrs[k] !== undefined && attrs[k] !== null && String(attrs[k]).trim() !== '') {
+        const val = attrs[k];
+        if (typeof val === 'number' || /^\d{5}$/.test(String(val).trim())) {
+          const num = Number(val);
+          if (num > 30000 && num < 60000) {
+            const d = new Date(Math.round((num - 25569) * 86400 * 1000));
+            if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
+          }
+        }
+        const str = String(val).trim();
+        const dmy = str.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
+        if (dmy) return `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
+        const ymd = str.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+        if (ymd) return `${ymd[1]}-${ymd[2].padStart(2, '0')}-${ymd[3].padStart(2, '0')}`;
+      }
+    }
   }
 
   return null;
