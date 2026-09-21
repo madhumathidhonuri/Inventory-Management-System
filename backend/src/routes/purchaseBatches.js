@@ -212,12 +212,13 @@ router.post('/confirm', (req, res) => {
       // Preserve existing template columns and merge any new columns from upload
       let orderedHeaders = [];
       const seen = new Set();
+      const isGhostCol = (k) => !k || typeof k !== 'string' || /^__empty|^empty(\s*|_)\d*/i.test(k.trim()) || k.trim() === 'original_row';
 
       // Seed with existing device type template columns to keep all master operational fields intact
       if (existingCols.length > 0) {
         existingCols.forEach(h => {
           const trimmed = String(h || '').trim();
-          if (trimmed && !seen.has(trimmed)) {
+          if (trimmed && !isGhostCol(trimmed) && !seen.has(trimmed)) {
             seen.add(trimmed);
             orderedHeaders.push(trimmed);
           }
@@ -228,7 +229,7 @@ router.post('/confirm', (req, res) => {
       if (Array.isArray(headers) && headers.length > 0) {
         headers.forEach(h => {
           const trimmed = String(h || '').trim();
-          if (trimmed && !seen.has(trimmed)) {
+          if (trimmed && !isGhostCol(trimmed) && !seen.has(trimmed)) {
             seen.add(trimmed);
             orderedHeaders.push(trimmed);
           }
@@ -237,7 +238,7 @@ router.post('/confirm', (req, res) => {
         for (const item of items) {
           if (item.additional_attributes) {
             Object.keys(item.additional_attributes).forEach(k => {
-              if (k && k !== 'original_row' && !seen.has(k)) {
+              if (k && !isGhostCol(k) && !seen.has(k)) {
                 seen.add(k);
                 orderedHeaders.push(k);
               }
@@ -261,11 +262,19 @@ router.post('/confirm', (req, res) => {
 
       const batchId = batchResult.lastInsertRowid;
 
-      const getExistingDeviceStmt = db.prepare('SELECT id, additional_attributes, current_status, current_holder_name FROM devices WHERE imei_number = ?');
+      // 2. Insert or Update Devices & Log History
+      const getExistingDeviceStmt = db.prepare('SELECT id, imei_number, additional_attributes, current_holder_name FROM devices WHERE imei_number = ?');
 
       const insertDeviceStmt = db.prepare(`
-        INSERT INTO devices (imei_number, sim_number, device_type_id, purchase_batch_id, purchase_date, purchase_price, vendor_name, current_status, current_holder_type, current_holder_id, current_holder_name, additional_attributes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'IN_WAREHOUSE', 'WAREHOUSE', 1, 'Central Warehouse', ?)
+        INSERT INTO devices (
+          imei_number, sim_number, device_type_id, purchase_batch_id, purchase_date,
+          purchase_price, vendor_name, current_status, current_holder_type, current_holder_name,
+          additional_attributes
+        ) VALUES (
+          ?, ?, ?, ?, ?,
+          ?, ?, 'IN_WAREHOUSE', 'WAREHOUSE', 'Central Warehouse',
+          ?
+        )
       `);
 
       const updateDeviceStmt = db.prepare(`
@@ -292,6 +301,13 @@ router.post('/confirm', (req, res) => {
 
         try {
           const extraAttrs = { ...(item.additional_attributes || {}) };
+          // Purge any ghost keys
+          Object.keys(extraAttrs).forEach(k => {
+            if (isGhostCol(k)) {
+              delete extraAttrs[k];
+            }
+          });
+
           // Auto-normalize any Excel serial date numbers to readable DD-MM-YYYY format
           Object.keys(extraAttrs).forEach(k => {
             if (/date|month|validity/i.test(k) && extraAttrs[k] !== undefined && extraAttrs[k] !== null) {
@@ -316,6 +332,9 @@ router.post('/confirm', (req, res) => {
               // Merge existing attributes with newly uploaded spreadsheet attributes
               let oldAttrs = {};
               try { oldAttrs = JSON.parse(existingDev.additional_attributes || '{}'); } catch {}
+              Object.keys(oldAttrs).forEach(k => {
+                if (isGhostCol(k)) delete oldAttrs[k];
+              });
               const mergedAttrs = { ...oldAttrs, ...extraAttrs };
 
               updateDeviceStmt.run(

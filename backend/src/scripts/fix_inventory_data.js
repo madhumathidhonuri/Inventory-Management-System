@@ -34,7 +34,7 @@ const fixTransaction = db.transaction(() => {
 
     let modifiedAttrs = false;
 
-    // 1. Clean Ghost Columns (_1 -> SIM 2 ICCID, _2 -> SECONDARY SERIAL)
+    // 1. Clean Ghost Columns (_1, _2, and any __EMPTY / EMPTY_ keys)
     if (attrs._1 !== undefined) {
       if (attrs._1 && !attrs['SIM 2 ICCID']) {
         attrs['SIM 2 ICCID'] = attrs._1;
@@ -50,6 +50,14 @@ const fixTransaction = db.transaction(() => {
       delete attrs._2;
       modifiedAttrs = true;
     }
+
+    Object.keys(attrs).forEach(k => {
+      if (/^__empty|^empty(\s*|_)\d*/i.test(k.trim()) || k.trim() === 'original_row') {
+        delete attrs[k];
+        modifiedAttrs = true;
+        ghostColumnsCleaned++;
+      }
+    });
 
     // 2. Map Primary SIM Number from ICCID
     let simNum = dev.sim_number;

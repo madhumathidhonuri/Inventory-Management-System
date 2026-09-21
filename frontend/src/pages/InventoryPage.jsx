@@ -294,7 +294,7 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
           fields = Object.keys(targetDt.custom_fields);
         }
         fields.forEach(f => {
-          if (f && f !== 'original_row' && !/require.*sim/i.test(f) && !seen.has(f)) {
+          if (!isGhostOrEmptyKey(f) && !seen.has(f)) {
             seen.add(f);
             keysList.push(f);
           }
@@ -305,7 +305,7 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
       devices.forEach(dev => {
         if (dev.device_type_id && dev.device_type_id.toString() === activeTypeId && dev.additional_attributes && typeof dev.additional_attributes === 'object') {
           Object.keys(dev.additional_attributes).forEach(k => {
-            if (k && k !== 'original_row' && !/require.*sim/i.test(k) && !seen.has(k)) {
+            if (!isGhostOrEmptyKey(k) && !seen.has(k)) {
               seen.add(k);
               keysList.push(k);
             }
@@ -342,7 +342,7 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
     devices.forEach(dev => {
       if (dev.additional_attributes && typeof dev.additional_attributes === 'object') {
         Object.keys(dev.additional_attributes).forEach(k => {
-          if (k && k !== 'original_row' && !/require.*sim/i.test(k)) {
+          if (!isGhostOrEmptyKey(k)) {
             const val = dev.additional_attributes[k];
             if (val !== undefined && val !== null && String(val).trim() !== '' && String(val).trim() !== '-') {
               keysSet.add(k);
@@ -384,7 +384,7 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
         fields = Object.keys(targetDt.custom_fields);
       }
       fields.forEach(f => {
-        if (f && f !== 'original_row' && !/require.*sim/i.test(f) && !seen.has(f)) {
+        if (!isGhostOrEmptyKey(f) && !seen.has(f)) {
           seen.add(f);
           keysList.push(f);
         }
@@ -398,7 +398,7 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
     }
     if (attrs && typeof attrs === 'object') {
       Object.keys(attrs).forEach(k => {
-        if (k && k !== 'original_row' && !/require.*sim/i.test(k) && !seen.has(k)) {
+        if (!isGhostOrEmptyKey(k) && !seen.has(k)) {
           seen.add(k);
           keysList.push(k);
         }
@@ -474,7 +474,9 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
     setEditingRowDevice(dev);
     const draft = dev.additional_attributes ? { ...dev.additional_attributes } : {};
     Object.keys(draft).forEach(k => {
-      if (/date|month|validity/i.test(k) && draft[k] !== undefined && draft[k] !== null) {
+      if (isGhostOrEmptyKey(k)) {
+        delete draft[k];
+      } else if (/date|month|validity/i.test(k) && draft[k] !== undefined && draft[k] !== null) {
         draft[k] = formatDisplayCellValue(k, draft[k]);
       }
     });
@@ -492,7 +494,9 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
     try {
       const cleanedAttrs = { ...rowFormData.additional_attributes };
       Object.keys(cleanedAttrs).forEach(k => {
-        if (/date|month|validity/i.test(k) && cleanedAttrs[k]) {
+        if (isGhostOrEmptyKey(k)) {
+          delete cleanedAttrs[k];
+        } else if (/date|month|validity/i.test(k) && cleanedAttrs[k]) {
           cleanedAttrs[k] = formatDisplayCellValue(k, cleanedAttrs[k]);
         }
       });

@@ -397,6 +397,62 @@ function initDatabase() {
   } catch (e) {
     console.warn('[Database] Sync fitments warning:', e.message);
   }
+
+  // Automatically sanitize and purge ghost __EMPTY columns from device_types and devices
+  try {
+    const isGhostKey = (k) => !k || typeof k !== 'string' || /^__empty|^empty(\s*|_)\d*/i.test(k.trim()) || k.trim() === 'original_row';
+
+    // 1. Clean device_types custom_fields & template_columns
+    const allDeviceTypes = db.prepare('SELECT id, custom_fields, template_columns FROM device_types').all();
+    for (const dt of allDeviceTypes) {
+      let customFields = [];
+      let templateCols = [];
+      try {
+        const parsedCf = JSON.parse(dt.custom_fields || '[]');
+        customFields = Array.isArray(parsedCf) ? parsedCf : Object.keys(parsedCf);
+      } catch { customFields = []; }
+
+      try {
+        const parsedTc = JSON.parse(dt.template_columns || '[]');
+        templateCols = Array.isArray(parsedTc) ? parsedTc : Object.keys(parsedTc);
+      } catch { templateCols = []; }
+
+      const cleanedCf = customFields.filter(f => !isGhostKey(f));
+      const cleanedTc = templateCols.filter(f => !isGhostKey(f));
+
+      if (cleanedCf.length !== customFields.length || cleanedTc.length !== templateCols.length) {
+        db.prepare('UPDATE device_types SET custom_fields = ?, template_columns = ? WHERE id = ?')
+          .run(JSON.stringify(cleanedCf), JSON.stringify(cleanedTc), dt.id);
+        console.log(`[Database] Purged ghost columns from device type ID ${dt.id}`);
+      }
+    }
+
+    // 2. Clean devices additional_attributes
+    const devicesWithGhostAttrs = db.prepare("SELECT id, additional_attributes FROM devices WHERE additional_attributes LIKE '%__EMPTY%' OR additional_attributes LIKE '%EMPTY_%'").all();
+    const updateDevStmt = db.prepare('UPDATE devices SET additional_attributes = ? WHERE id = ?');
+    let devicesCleaned = 0;
+    for (const dev of devicesWithGhostAttrs) {
+      try {
+        const attrs = JSON.parse(dev.additional_attributes || '{}');
+        let modified = false;
+        Object.keys(attrs).forEach(k => {
+          if (isGhostKey(k)) {
+            delete attrs[k];
+            modified = true;
+          }
+        });
+        if (modified) {
+          updateDevStmt.run(JSON.stringify(attrs), dev.id);
+          devicesCleaned++;
+        }
+      } catch {}
+    }
+    if (devicesCleaned > 0) {
+      console.log(`[Database] Cleaned ghost __EMPTY attributes from ${devicesCleaned} device records.`);
+    }
+  } catch (e) {
+    console.warn('[Database] Cleanup ghost columns warning:', e.message);
+  }
 }
 
 initDatabase();
