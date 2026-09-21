@@ -25,12 +25,20 @@ export default function MarkPaymentModal({
 }) {
   if (!isOpen || !item) return null;
 
-  const initialAmount = parseFloat(item.sale_price || item.cost || item.total_cost || 0);
-  const [amount, setAmount] = useState(initialAmount);
+  const totalCost = parseFloat(item.total_sale_price || item.total_cost || item.cost || item.sale_price || 0);
+  const previouslyPaid = parseFloat(item.amount_paid || 0);
+  const currentPendingDue = parseFloat(item.sale_price || item.pending_amount || (totalCost - previouslyPaid) || 0);
+
+  const [amount, setAmount] = useState(currentPendingDue > 0 ? currentPendingDue : totalCost);
   const [paymentMode, setPaymentMode] = useState('UPI'); // 'UPI' | 'CASH' | 'BANK_TRANSFER' | 'CHEQUE'
   const [remarks, setRemarks] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+
+  // Calculate remaining balance dynamically
+  const remainingDue = Math.max(0, currentPendingDue - (parseFloat(amount) || 0));
+  const isPartial = remainingDue > 0 && (parseFloat(amount) || 0) < currentPendingDue;
+  const isFull = (parseFloat(amount) || 0) >= currentPendingDue;
 
   const paymentModes = [
     { id: 'UPI', label: 'UPI / GPay / PhonePe', icon: Smartphone, color: 'text-purple-600 bg-purple-50 border-purple-200' },
@@ -44,18 +52,25 @@ export default function MarkPaymentModal({
     setLoading(true);
     setErrorMsg('');
 
+    const amtNum = parseFloat(amount) || 0;
+    if (amtNum <= 0) {
+      setErrorMsg('Please enter a valid amount received');
+      setLoading(false);
+      return;
+    }
+
     try {
       const res = await updateQuickPayment({
         id: item.device_id || item.id,
-        payment_status: 'RECEIVED',
+        payment_status: isFull ? 'RECEIVED' : 'PARTIAL',
         payment_mode: paymentMode,
-        amount_received: amount,
-        payment_remarks: remarks || `Payment received via ${paymentMode}`
+        amount_received: previouslyPaid + amtNum,
+        payment_remarks: remarks || `Payment of ₹${amtNum.toLocaleString('en-IN')} received via ${paymentMode}${isPartial ? ` (Partial, Balance Due: ₹${remainingDue.toLocaleString('en-IN')})` : ''}`
       });
 
       if (res.success) {
         if (onPaymentSuccess) {
-          onPaymentSuccess(item, paymentMode, amount);
+          onPaymentSuccess(item, paymentMode, amtNum);
         }
         onClose();
       } else {
@@ -83,7 +98,7 @@ export default function MarkPaymentModal({
             </div>
             <div>
               <h2 className="text-base font-bold tracking-tight">Record Payment Received</h2>
-              <p className="text-xs text-emerald-100">Select payment method & confirm collection</p>
+              <p className="text-xs text-emerald-100">Full or Partial payment collection entry</p>
             </div>
           </div>
 
@@ -97,7 +112,7 @@ export default function MarkPaymentModal({
         </div>
 
         {/* Form Body */}
-        <form onSubmit={handleSubmit} className="p-6 space-y-5">
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
           
           {/* Vehicle & Customer Summary Card */}
           <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200/80 space-y-2">
@@ -122,34 +137,69 @@ export default function MarkPaymentModal({
                 <span>{item.customer_contact || 'No Phone'}</span>
               </div>
             </div>
+
+            {/* Total Cost & Previous Paid Breakdown */}
+            <div className="pt-2 border-t border-slate-200/60 grid grid-cols-2 gap-2 text-xs">
+              <div className="bg-white p-2 rounded-xl border border-slate-200">
+                <span className="text-[10px] text-slate-500 block font-bold uppercase">Total Bill / Cost</span>
+                <span className="text-sm font-mono font-black text-slate-900">₹{totalCost.toLocaleString('en-IN')}</span>
+              </div>
+              <div className="bg-white p-2 rounded-xl border border-slate-200">
+                <span className="text-[10px] text-slate-500 block font-bold uppercase">Pending Before This</span>
+                <span className="text-sm font-mono font-black text-red-600">₹{currentPendingDue.toLocaleString('en-IN')}</span>
+              </div>
+            </div>
           </div>
 
-          {/* Amount Collected Input */}
+          {/* Amount Received Input */}
           <div className="space-y-1.5">
-            <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block">
-              Amount Received (₹)
-            </label>
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block">
+                Amount Received (₹)
+              </label>
+              <span className="text-[11px] font-bold text-slate-500">
+                Type received amount for partial/full
+              </span>
+            </div>
             <div className="relative">
               <span className="absolute left-3.5 top-1/2 -translate-y-1/2 font-bold text-slate-400 text-base">₹</span>
               <input
                 type="number"
-                min="0"
+                min="1"
+                max={currentPendingDue || totalCost || undefined}
                 step="1"
                 required
                 value={amount}
-                onChange={(e) => setAmount(parseFloat(e.target.value) || 0)}
+                onChange={(e) => setAmount(e.target.value)}
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-8 pr-4 py-2.5 text-base font-mono font-black text-slate-900 focus:outline-none focus:border-emerald-500 focus:bg-white transition-colors"
                 placeholder="Enter amount received"
               />
             </div>
+
+            {/* Live Partial vs Full Settlement Badge */}
+            {isPartial ? (
+              <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 text-xs font-bold flex items-center justify-between animate-fade-in">
+                <span>⚠️ Partial Payment: ₹{(parseFloat(amount) || 0).toLocaleString('en-IN')} received</span>
+                <span className="px-2 py-0.5 rounded bg-amber-200/70 text-amber-950 font-mono">
+                  Remaining Due: ₹{remainingDue.toLocaleString('en-IN')}
+                </span>
+              </div>
+            ) : isFull ? (
+              <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-900 text-xs font-bold flex items-center justify-between animate-fade-in">
+                <span>✅ Full Payment: Complete ₹{currentPendingDue.toLocaleString('en-IN')} received</span>
+                <span className="px-2 py-0.5 rounded bg-emerald-200/70 text-emerald-950 font-mono">
+                  Remaining Due: ₹0
+                </span>
+              </div>
+            ) : null}
           </div>
 
           {/* Payment Mode Selector (Cash, UPI, Bank Transfer, Cheque) */}
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block">
               Payment Form / Mode
             </label>
-            <div className="grid grid-cols-2 gap-2.5">
+            <div className="grid grid-cols-2 gap-2">
               {paymentModes.map((mode) => {
                 const IconComponent = mode.icon;
                 const isSelected = paymentMode === mode.id;
@@ -159,13 +209,13 @@ export default function MarkPaymentModal({
                     key={mode.id}
                     type="button"
                     onClick={() => setPaymentMode(mode.id)}
-                    className={`p-3 rounded-2xl border text-left flex items-center gap-3 transition-all cursor-pointer ${
+                    className={`p-2.5 rounded-2xl border text-left flex items-center gap-2.5 transition-all cursor-pointer ${
                       isSelected
                         ? 'bg-slate-900 text-white border-slate-900 shadow-md ring-2 ring-emerald-500/30'
                         : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-700'
                     }`}
                   >
-                    <div className={`p-2 rounded-xl shrink-0 ${isSelected ? 'bg-white/20 text-white' : mode.color}`}>
+                    <div className={`p-1.5 rounded-xl shrink-0 ${isSelected ? 'bg-white/20 text-white' : mode.color}`}>
                       <IconComponent className="w-4 h-4" />
                     </div>
                     <div>
@@ -183,7 +233,7 @@ export default function MarkPaymentModal({
           </div>
 
           {/* Optional Remarks */}
-          <div className="space-y-1.5">
+          <div className="space-y-1">
             <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block">
               Transaction Remarks / Reference (Optional)
             </label>
@@ -204,7 +254,7 @@ export default function MarkPaymentModal({
           )}
 
           {/* Action Buttons */}
-          <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+          <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100">
             <button
               type="button"
               onClick={onClose}
@@ -214,7 +264,7 @@ export default function MarkPaymentModal({
             </button>
             <button
               type="submit"
-              disabled={loading || amount <= 0}
+              disabled={loading || (parseFloat(amount) || 0) <= 0}
               className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold rounded-xl flex items-center gap-2 shadow-md shadow-emerald-200 transition-all cursor-pointer"
             >
               {loading ? (
@@ -222,7 +272,7 @@ export default function MarkPaymentModal({
               ) : (
                 <CheckCircle2 className="w-4 h-4" />
               )}
-              <span>Confirm Payment Received (₹{amount.toLocaleString('en-IN')})</span>
+              <span>Confirm Payment (₹{(parseFloat(amount) || 0).toLocaleString('en-IN')})</span>
             </button>
           </div>
 

@@ -3016,27 +3016,68 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
                             <option value="OTHER">Other</option>
                           </select>
                         ) : isPaymentStatusCol ? (
-                          <select
-                            disabled={!canEdit}
-                            value={(rowFormData.additional_attributes[col] || '').toUpperCase()}
-                            onChange={(e) => setRowFormData({
-                              ...rowFormData,
-                              additional_attributes: {
-                                ...rowFormData.additional_attributes,
-                                [col]: e.target.value
-                              }
-                            })}
-                            className={`w-full border rounded-xl p-2 font-mono text-xs font-bold focus:outline-none cursor-pointer ${
-                              canEdit
-                                ? 'bg-emerald-50/70 border-emerald-300 text-emerald-900 focus:border-emerald-600'
-                                : 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed'
-                            }`}
-                          >
-                            <option value="">-- Select Status --</option>
-                            <option value="RECEIVED">✅ RECEIVED</option>
-                            <option value="PENDING">⏳ PENDING</option>
-                            <option value="PARTIAL">⚠️ PARTIAL</option>
-                          </select>
+                          <div className="space-y-1.5">
+                            <select
+                              disabled={!canEdit}
+                              value={(rowFormData.additional_attributes[col] || '').toUpperCase()}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                const newAttrs = { ...rowFormData.additional_attributes, [col]: val };
+                                if (val === 'RECEIVED') {
+                                  const totalCost = parseFloat(newAttrs['TOTAL COST'] || newAttrs['COST'] || newAttrs['SALE PRICE'] || 0);
+                                  if (totalCost > 0) newAttrs['AMOUNT PAID'] = totalCost;
+                                  newAttrs['BALANCE DUE'] = 0;
+                                } else if (val === 'PENDING') {
+                                  delete newAttrs['AMOUNT PAID'];
+                                  delete newAttrs['BALANCE DUE'];
+                                }
+                                setRowFormData({ ...rowFormData, additional_attributes: newAttrs });
+                              }}
+                              className={`w-full border rounded-xl p-2 font-mono text-xs font-bold focus:outline-none cursor-pointer ${
+                                canEdit
+                                  ? 'bg-emerald-50/70 border-emerald-300 text-emerald-900 focus:border-emerald-600'
+                                  : 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed'
+                              }`}
+                            >
+                              <option value="">-- Select Status --</option>
+                              <option value="RECEIVED">✅ RECEIVED</option>
+                              <option value="PENDING">⏳ PENDING</option>
+                              <option value="PARTIAL">⚠️ PARTIAL</option>
+                            </select>
+
+                            {(rowFormData.additional_attributes[col] || '').toUpperCase() === 'PARTIAL' && (
+                              <div className="p-2 bg-amber-50 border border-amber-200 rounded-xl space-y-1">
+                                <label className="text-[10px] font-bold text-amber-900 uppercase block">
+                                  Partial Amount Received (₹)
+                                </label>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  placeholder="Enter received amount"
+                                  value={rowFormData.additional_attributes['AMOUNT PAID'] || ''}
+                                  onChange={(e) => {
+                                    const pVal = parseFloat(e.target.value) || 0;
+                                    const totalCost = parseFloat(rowFormData.additional_attributes['TOTAL COST'] || rowFormData.additional_attributes['COST'] || rowFormData.additional_attributes['SALE PRICE'] || 0);
+                                    const bal = Math.max(0, totalCost - pVal);
+                                    setRowFormData({
+                                      ...rowFormData,
+                                      additional_attributes: {
+                                        ...rowFormData.additional_attributes,
+                                        'AMOUNT PAID': e.target.value,
+                                        'BALANCE DUE': bal
+                                      }
+                                    });
+                                  }}
+                                  className="w-full bg-white border border-amber-300 rounded-lg p-1.5 font-mono text-xs font-bold text-amber-950 focus:outline-none"
+                                />
+                                {rowFormData.additional_attributes['BALANCE DUE'] !== undefined && (
+                                  <div className="text-[10px] font-bold text-amber-800">
+                                    Remaining Due: ₹{(parseFloat(rowFormData.additional_attributes['BALANCE DUE']) || 0).toLocaleString('en-IN')}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         ) : isActivationStatusCol ? (
                           <select
                             disabled={!canEdit}
