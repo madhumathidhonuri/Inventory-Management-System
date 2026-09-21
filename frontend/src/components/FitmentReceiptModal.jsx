@@ -28,8 +28,8 @@ export default function FitmentReceiptModal({ isOpen, onClose, deviceData }) {
   const payDate = certificate_date || additional_attributes['PAYMENT RECEIVED DATE'] || additional_attributes['CERTIFICATE ISSUED DATE'] || new Date().toLocaleDateString('en-IN');
   const modelName = device_type_name || additional_attributes['DEVICE NAME'] || 'AIS-140 GPS';
   
-  const rawCost = cost || additional_attributes['TOTAL COST'] || additional_attributes['COST'] || additional_attributes['AMOUNT RECEIVED'] || 5000;
-  const numCost = parseFloat(String(rawCost).replace(/[^0-9.]/g, '')) || 5000;
+  const rawCost = cost || additional_attributes['TOTAL COST'] || additional_attributes['COST'] || additional_attributes['AMOUNT RECEIVED'] || 0;
+  const numCost = parseFloat(String(rawCost).replace(/[^0-9.]/g, '')) || 0;
   const formattedCost = `₹${numCost.toLocaleString('en-IN')}`;
   
   const payModeLabel = payment_mode || additional_attributes['AMOUNT RECEIVED BY'] || 'UPI / Bank Transfer';

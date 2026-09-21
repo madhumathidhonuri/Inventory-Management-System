@@ -712,7 +712,7 @@ router.get('/stats', (req, res) => {
       const engine = attrs['ENGINE NUMBER'] || attrs['engine_number'] || '-';
       const dateVal = attrs['CERTIFICATE ISSUED DATE'] || attrs['INSTALLATION DATE'] || attrs['DATE'] || act.event_date || '';
 
-      const costVal = extractCostValue(attrs, act.purchase_price) || 5000;
+      const costVal = extractCostValue(attrs, act.purchase_price) || 0;
       const isPaid = isPaymentReceived(attrs, act.current_status);
       const username = attrs['USERNAME'] || attrs['Username'] || attrs['USER ID'] || attrs['Software User ID'] || '';
       const password = attrs['PASSWORD'] || attrs['Password'] || '123456';

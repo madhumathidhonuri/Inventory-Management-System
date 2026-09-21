@@ -96,8 +96,8 @@ const fixTransaction = db.transaction(() => {
       const existingInst = db.prepare('SELECT id FROM installations WHERE device_id = ? OR imei_number = ?').get(dev.id, dev.imei_number);
 
       const instDate = normalizeDate(attrs['CERTIFICATE ISSUED DATE'] || attrs['PAYMENT DATE'] || attrs['STOCK PLACE DATE'] || dev.purchase_date);
-      const rawPrice = attrs['TOTAL COST'] || attrs['COST'] || '5000';
-      const salePrice = parseFloat(rawPrice.replace(/[^0-9.]/g, '')) || 5000;
+      const rawPrice = attrs['TOTAL COST'] || attrs['COST'] || attrs['SALE PRICE'] || '0';
+      const salePrice = parseFloat(rawPrice.replace(/[^0-9.]/g, '')) || 0;
       const rawPaymentStatus = (attrs['AMOUNT RECEIVED'] || '').toUpperCase();
       const paymentStatus = (rawPaymentStatus === 'RECEIVED' || rawPaymentStatus === 'PAID' || rawPaymentStatus === 'YES') ? 'RECEIVED' : 'PENDING';
 

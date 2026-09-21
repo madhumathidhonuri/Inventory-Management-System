@@ -148,7 +148,7 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
     vehicle_number: '',
     customer_name: '',
     customer_phone: '',
-    sale_price: '5000',
+    sale_price: '',
     payment_status: 'RECEIVED',
     installation_location: '',
     software_user_id: '',
@@ -219,7 +219,7 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
           'CHASSIS NUMBER': a['CHASIS NUMBER'] || a['CHASSIS NUMBER'] || '',
           'ENGINE NUMBER': a['ENGINE NUMBER'] || '',
           'RTO LOCATION': a['RTO LOCATION'] || '',
-          'FITMENT PRICE (₹)': Number(a['COST'] || a['TOTAL COST'] || 5000),
+          'FITMENT PRICE (₹)': Number(a['COST'] || a['TOTAL COST'] || a['SALE PRICE'] || 0),
           'PAYMENT STATUS': (a['AMOUNT RECEIVED'] === 'RECEIVED' || a['payment_status'] === 'PAID') ? 'RECEIVED' : 'PENDING',
           'SALES PERSON': a['SALES PERSON NAME'] || a['SALES PERSON'] || user?.name || '',
           'BRANCH / STOCK PLACE': a['STOCK PLACE'] || dealerQuery
@@ -437,7 +437,7 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
     try {
       const res = await updateQuickPayment(devId, {
         payment_status: newStatus,
-        amount_received: newStatus === 'RECEIVED' ? (act.cost || 5000) : 0
+        amount_received: newStatus === 'RECEIVED' ? (act.cost || 0) : 0
       });
       if (res && res.success) {
         setStats(prev => {
@@ -493,7 +493,7 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
       engine_number: attrs['ENGINE NUMBER'] || prev.engine_number || '',
       rto_location: attrs['RTO LOCATION'] || prev.rto_location || user?.region || 'GUNTUR',
       installation_location: attrs['RTO LOCATION'] || prev.installation_location || user?.region || 'GUNTUR',
-      sale_price: String(attrs['TOTAL COST'] || attrs['COST'] || prev.sale_price || '5000'),
+      sale_price: String(attrs['TOTAL COST'] || attrs['COST'] || attrs['SALE PRICE'] || prev.sale_price || ''),
       payment_status: attrs['AMOUNT RECEIVED'] === 'RECEIVED' ? 'RECEIVED' : (prev.payment_status || 'RECEIVED'),
       sales_person: attrs['SALES PERSON NAME'] || prev.sales_person || user?.name || 'ALLABAKSHU',
       additional_attributes: { ...attrs }
@@ -537,7 +537,7 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
           rto_location: attrs['RTO LOCATION'] || user?.region || 'GUNTUR',
           sales_manager: attrs['SALES MANAGER NAME'] || user?.name || 'ALLABAKSHU',
           sales_person: attrs['SALES PERSON NAME'] || user?.name || 'ALLABAKSHU',
-          sale_price: String(attrs['TOTAL COST'] || attrs['COST'] || '5000'),
+          sale_price: String(attrs['TOTAL COST'] || attrs['COST'] || attrs['SALE PRICE'] || ''),
           additional_attributes: { ...attrs }
         }));
       }
@@ -565,7 +565,7 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
         customer_name: fastFitmentForm.customer_name.trim(),
         customer_phone: fastFitmentForm.customer_phone.trim(),
         customer_address: fastFitmentForm.customer_address ? fastFitmentForm.customer_address.trim() : '',
-        sale_price: parseFloat(fastFitmentForm.sale_price) || 5000,
+        sale_price: parseFloat(fastFitmentForm.sale_price) || 0,
         payment_status: fastFitmentForm.payment_status || 'RECEIVED',
         installed_by: user?.name || 'Authorized Dealer',
         sales_manager: fastFitmentForm.sales_manager || user?.name || 'ALLABAKSHU',
@@ -592,7 +592,7 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
           aadhar_number: '',
           pan_number: '',
           customer_address: '',
-          sale_price: '5000',
+          sale_price: '',
           payment_status: 'RECEIVED',
           sales_manager: '',
           sales_person: '',
@@ -770,8 +770,8 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
     const paidInstCount = (stats?.recentActivity || []).filter(a => a.payment_status === 'PAID').length;
     const pendingInstCount = totalInstCount - paidInstCount;
     const targetAchievedPct = Math.min(100, Math.round((installed / (monthlyTarget || 1)) * 100));
-    const totalRevenue = installed * 5000;
-    const collectedRevenue = financials?.payment_received_amount || (paidInstCount * 5000);
+    const totalRevenue = (stats?.recentActivity || []).reduce((sum, a) => sum + (parseFloat(a.cost) || 0), 0);
+    const collectedRevenue = financials?.payment_received_amount || (stats?.recentActivity || []).filter(a => a.payment_status === 'PAID').reduce((sum, a) => sum + (parseFloat(a.cost) || 0), 0);
     const pendingRevenue = Math.max(0, totalRevenue - collectedRevenue);
     const daysRemainingInMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate() - new Date().getDate();
 
@@ -983,7 +983,7 @@ export default function DashboardPage({ onOpenTraceDrawer, onNavigateTab }) {
               </div>
             </div>
             <div className="text-2xl font-bold font-mono text-slate-900">
-              ₹{(financials?.payment_received_amount || (paidInstCount * 5000)).toLocaleString()}
+              ₹{(financials?.payment_received_amount || (stats?.recentActivity || []).filter(a => a.payment_status === 'PAID').reduce((sum, a) => sum + (parseFloat(a.cost) || 0), 0)).toLocaleString()}
             </div>
             <div className="text-[11px] text-slate-500 mt-1 flex items-center justify-between">
               <span>{paidInstCount} Paid • {pendingInstCount} Due</span>

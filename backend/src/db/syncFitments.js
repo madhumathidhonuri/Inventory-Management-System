@@ -122,7 +122,7 @@ function extractSalePrice(attrs = {}, dev = {}) {
   if (dev.purchase_price && Number(dev.purchase_price) > 0) {
     return Number(dev.purchase_price);
   }
-  return 5000;
+  return 0;
 }
 
 /**
