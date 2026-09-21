@@ -21,7 +21,8 @@ import {
   Sparkles,
   Phone,
   Clock,
-  ShieldAlert
+  ShieldAlert,
+  ExternalLink
 } from 'lucide-react';
 import {
   fetchStaffPerformanceSummary,
@@ -392,40 +393,70 @@ export default function StaffPerformancePage({ onOpenTraceDrawer }) {
         </div>
 
         {/* Top Technician */}
-        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm relative overflow-hidden group hover:border-amber-300 transition">
+        <div 
+          onClick={() => {
+            if (summary?.top_technician?.name && summary?.top_technician?.name !== 'None') {
+              handleOpenDrilldown('technician', summary.top_technician.name);
+            }
+          }}
+          className={`bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm relative overflow-hidden group transition ${
+            summary?.top_technician?.name && summary?.top_technician?.name !== 'None'
+              ? 'cursor-pointer hover:border-amber-400 hover:shadow-md'
+              : ''
+          }`}
+          title={summary?.top_technician?.name && summary?.top_technician?.name !== 'None' ? `Click to view all installations by ${summary.top_technician.name}` : undefined}
+        >
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs font-semibold text-amber-600 uppercase tracking-wider flex items-center gap-1">
                 <Award className="w-3.5 h-3.5 text-amber-500" /> Top Fitter / Tech
               </p>
-              <h3 className="text-xl font-bold text-slate-900 mt-1 truncate max-w-[170px]" title={summary?.top_technician?.name || 'None'}>
+              <h3 className="text-xl font-bold text-slate-900 mt-1 truncate max-w-[170px] group-hover:text-amber-700 transition" title={summary?.top_technician?.name || 'None'}>
                 {summary?.top_technician?.name || 'None'}
               </h3>
-              <p className="text-[11px] font-semibold text-amber-600 mt-1">
+              <p className="text-[11px] font-semibold text-amber-600 mt-1 flex items-center gap-1">
                 {summary?.top_technician?.count ? `${summary.top_technician.count} installations completed` : 'No installations'}
+                {summary?.top_technician?.name && summary?.top_technician?.name !== 'None' && (
+                  <ExternalLink className="w-3 h-3 text-amber-500 opacity-60 group-hover:opacity-100 transition" />
+                )}
               </p>
             </div>
-            <div className="w-12 h-12 rounded-2xl bg-amber-50 border border-amber-100 text-amber-600 flex items-center justify-center">
+            <div className="w-12 h-12 rounded-2xl bg-amber-50 border border-amber-100 text-amber-600 flex items-center justify-center group-hover:bg-amber-100 transition">
               <Sparkles className="w-6 h-6" />
             </div>
           </div>
         </div>
 
         {/* Top Sales Person */}
-        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm relative overflow-hidden group hover:border-emerald-300 transition">
+        <div 
+          onClick={() => {
+            if (summary?.top_sales_person?.name && summary?.top_sales_person?.name !== 'None') {
+              handleOpenDrilldown('sales_person', summary.top_sales_person.name);
+            }
+          }}
+          className={`bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm relative overflow-hidden group transition ${
+            summary?.top_sales_person?.name && summary?.top_sales_person?.name !== 'None'
+              ? 'cursor-pointer hover:border-emerald-400 hover:shadow-md'
+              : ''
+          }`}
+          title={summary?.top_sales_person?.name && summary?.top_sales_person?.name !== 'None' ? `Click to view sales by ${summary.top_sales_person.name}` : undefined}
+        >
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs font-semibold text-emerald-600 uppercase tracking-wider flex items-center gap-1">
                 <TrendingUp className="w-3.5 h-3.5 text-emerald-500" /> Top Sales Executive
               </p>
-              <h3 className="text-xl font-bold text-slate-900 mt-1 truncate max-w-[170px]" title={summary?.top_sales_person?.name || 'None'}>
+              <h3 className="text-xl font-bold text-slate-900 mt-1 truncate max-w-[170px] group-hover:text-emerald-700 transition" title={summary?.top_sales_person?.name || 'None'}>
                 {summary?.top_sales_person?.name || 'None'}
               </h3>
-              <p className="text-[11px] font-semibold text-emerald-600 mt-1">
+              <p className="text-[11px] font-semibold text-emerald-600 mt-1 flex items-center gap-1">
                 {summary?.top_sales_person?.count ? `${summary.top_sales_person.count} units sold` : 'No sales recorded'}
+                {summary?.top_sales_person?.name && summary?.top_sales_person?.name !== 'None' && (
+                  <ExternalLink className="w-3 h-3 text-emerald-500 opacity-60 group-hover:opacity-100 transition" />
+                )}
               </p>
             </div>
-            <div className="w-12 h-12 rounded-2xl bg-emerald-50 border border-emerald-100 text-emerald-600 flex items-center justify-center">
+            <div className="w-12 h-12 rounded-2xl bg-emerald-50 border border-emerald-100 text-emerald-600 flex items-center justify-center group-hover:bg-emerald-100 transition">
               <Briefcase className="w-6 h-6" />
             </div>
           </div>
@@ -626,22 +657,35 @@ export default function StaffPerformancePage({ onOpenTraceDrawer }) {
                           )}
                         </td>
                         <td className="py-3.5 px-4 font-bold text-slate-900">
-                          <div className="flex items-center space-x-2.5">
-                            <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 font-bold text-xs flex items-center justify-center">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenDrilldown('technician', tech.technician_name)}
+                            className="flex items-center space-x-2.5 text-left group cursor-pointer hover:opacity-95 transition focus:outline-none"
+                            title={`Click to view all installations by ${tech.technician_name}`}
+                          >
+                            <div className="w-8 h-8 rounded-full bg-indigo-100 group-hover:bg-indigo-600 text-indigo-700 group-hover:text-white font-bold text-xs flex items-center justify-center transition-colors shrink-0">
                               {tech.technician_name.charAt(0).toUpperCase()}
                             </div>
                             <div>
-                              <p className="font-semibold text-slate-900">{tech.technician_name}</p>
+                              <p className="font-semibold text-slate-900 group-hover:text-indigo-600 group-hover:underline transition-colors flex items-center gap-1">
+                                <span>{tech.technician_name}</span>
+                                <ExternalLink className="w-3 h-3 text-indigo-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+                              </p>
                               <p className="text-[10px] text-slate-400 font-normal">
                                 {tech.unique_customers || 1} clients • {tech.first_install_date ? `${tech.first_install_date} to ${tech.last_install_date}` : 'Active'}
                               </p>
                             </div>
-                          </div>
+                          </button>
                         </td>
                         <td className="py-3.5 px-4 text-center">
-                          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenDrilldown('technician', tech.technician_name)}
+                            className="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 hover:text-indigo-800 border border-indigo-200 transition cursor-pointer"
+                            title={`View all ${tech.total_installations} installations`}
+                          >
                             {tech.total_installations} fitments
-                          </span>
+                          </button>
                         </td>
                         <td className="py-3.5 px-4 text-right font-bold text-slate-800">
                           ₹{Number(tech.fitment_payout !== undefined ? tech.fitment_payout : (tech.total_installations * (parseFloat(payoutRate) || 0))).toLocaleString('en-IN')}
@@ -683,9 +727,10 @@ export default function StaffPerformancePage({ onOpenTraceDrawer }) {
                             <button
                               onClick={() => handleOpenDrilldown('technician', tech.technician_name)}
                               className="inline-flex items-center space-x-1 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs transition cursor-pointer shadow-2xs"
+                              title={`View all ${tech.total_installations} installations by ${tech.technician_name}`}
                             >
                               <Eye className="w-3.5 h-3.5" />
-                              <span>Drilldown</span>
+                              <span>View Fitments</span>
                             </button>
                           </div>
                         </td>
@@ -728,15 +773,23 @@ export default function StaffPerformancePage({ onOpenTraceDrawer }) {
                         {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : idx + 1}
                       </td>
                       <td className="py-3.5 px-4 font-bold text-slate-900">
-                        <div className="flex items-center space-x-2.5">
-                          <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-700 font-bold text-xs flex items-center justify-center">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenDrilldown('sales_person', rep.sales_person)}
+                          className="flex items-center space-x-2.5 text-left group cursor-pointer hover:opacity-95 transition focus:outline-none"
+                          title={`Click to view sales portfolio for ${rep.sales_person}`}
+                        >
+                          <div className="w-8 h-8 rounded-full bg-emerald-100 group-hover:bg-emerald-600 text-emerald-700 group-hover:text-white font-bold text-xs flex items-center justify-center transition-colors shrink-0">
                             {rep.sales_person.charAt(0).toUpperCase()}
                           </div>
                           <div>
-                            <p className="font-semibold text-slate-900">{rep.sales_person}</p>
+                            <p className="font-semibold text-slate-900 group-hover:text-emerald-700 group-hover:underline transition-colors flex items-center gap-1">
+                              <span>{rep.sales_person}</span>
+                              <ExternalLink className="w-3 h-3 text-emerald-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+                            </p>
                             <p className="text-[10px] text-slate-400 font-normal">{rep.unique_customers} distinct clients</p>
                           </div>
-                        </div>
+                        </button>
                       </td>
                       <td className="py-3.5 px-4">
                         <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-semibold bg-purple-50 text-purple-700 border border-purple-100">
@@ -744,9 +797,14 @@ export default function StaffPerformancePage({ onOpenTraceDrawer }) {
                         </span>
                       </td>
                       <td className="py-3.5 px-4 text-center">
-                        <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenDrilldown('sales_person', rep.sales_person)}
+                          className="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-700 hover:text-emerald-800 border border-emerald-200 transition cursor-pointer"
+                          title={`View all ${rep.total_sales} sales records`}
+                        >
                           {rep.total_sales} units
-                        </span>
+                        </button>
                       </td>
                       <td className="py-3.5 px-4 text-right font-bold text-slate-900">
                         ₹{Number(rep.total_revenue || 0).toLocaleString('en-IN')}
@@ -757,7 +815,7 @@ export default function StaffPerformancePage({ onOpenTraceDrawer }) {
                       <td className="py-3.5 px-4 text-right">
                         <button
                           onClick={() => handleOpenDrilldown('sales_person', rep.sales_person)}
-                          className="inline-flex items-center space-x-1 px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-700 hover:bg-emerald-100 font-semibold text-xs transition"
+                          className="inline-flex items-center space-x-1 px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-700 hover:bg-emerald-100 font-semibold text-xs transition cursor-pointer shadow-2xs"
                         >
                           <Eye className="w-3.5 h-3.5" />
                           <span>View Sales</span>
@@ -800,15 +858,23 @@ export default function StaffPerformancePage({ onOpenTraceDrawer }) {
                         {idx + 1}
                       </td>
                       <td className="py-3.5 px-4 font-bold text-slate-900">
-                        <div className="flex items-center space-x-2.5">
-                          <div className="w-8 h-8 rounded-full bg-purple-100 text-purple-700 font-bold text-xs flex items-center justify-center">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenDrilldown('sales_manager', mgr.manager_name)}
+                          className="flex items-center space-x-2.5 text-left group cursor-pointer hover:opacity-95 transition focus:outline-none"
+                          title={`Click to view team installations for ${mgr.manager_name}`}
+                        >
+                          <div className="w-8 h-8 rounded-full bg-purple-100 group-hover:bg-purple-600 text-purple-700 group-hover:text-white font-bold text-xs flex items-center justify-center transition-colors shrink-0">
                             {mgr.manager_name.charAt(0).toUpperCase()}
                           </div>
                           <div>
-                            <p className="font-semibold text-slate-900">{mgr.manager_name}</p>
+                            <p className="font-semibold text-slate-900 group-hover:text-purple-700 group-hover:underline transition-colors flex items-center gap-1">
+                              <span>{mgr.manager_name}</span>
+                              <ExternalLink className="w-3 h-3 text-purple-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+                            </p>
                             <p className="text-[10px] text-slate-400 font-normal">{mgr.team_members_count} team members</p>
                           </div>
-                        </div>
+                        </button>
                       </td>
                       <td className="py-3.5 px-4">
                         <div className="flex flex-wrap gap-1 max-w-sm">
