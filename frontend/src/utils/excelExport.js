@@ -752,7 +752,7 @@ export async function exportInstallationsToExcel(filename, sheetName, installati
  */
 export async function exportTechnicianInstallationsToExcel(technicianName = 'Technician', installations = [], options = {}) {
   const {
-    payoutRate = 300,
+    payoutRate = 0,
     dateRange = 'All Time',
     expenses = [],
     floatingStock = [],
@@ -812,7 +812,7 @@ export async function exportTechnicianInstallationsToExcel(technicianName = 'Tec
   metaRow.height = 24;
   const metaCell = worksheet.getCell('A2');
   const totalFitments = installations.length;
-  const rateVal = Math.max(0, parseFloat(payoutRate) || 300);
+  const rateVal = Math.max(0, parseFloat(payoutRate) || 0);
   const totalFitmentPayout = totalFitments * rateVal;
   const totalSaleRev = installations.reduce((sum, item) => sum + (parseFloat(item.sale_price) || 0), 0);
   const dateStr = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
@@ -1127,7 +1127,7 @@ export async function exportTechnicianInstallationsToExcel(technicianName = 'Tec
  * Exports All Technicians Summary Leaderboard and aggregates to Excel (.xlsx)
  */
 export async function exportAllTechniciansSummaryToExcel(technicians = [], options = {}) {
-  const { dateRange = 'All Time', payoutRate = 300 } = options;
+  const { dateRange = 'All Time', payoutRate = 0 } = options;
 
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'FuelTracks IMS';
@@ -1217,7 +1217,7 @@ export async function exportAllTechniciansSummaryToExcel(technicians = [], optio
 
   technicians.forEach((t, idx) => {
     sumFitments += (t.total_installations || 0);
-    const fitPayout = t.fitment_payout !== undefined ? t.fitment_payout : (t.total_installations * (payoutRate || 300));
+    const fitPayout = t.fitment_payout !== undefined ? t.fitment_payout : (t.total_installations * (parseFloat(payoutRate) || 0));
     sumFitmentPayout += fitPayout;
     sumTravel += (t.travel_expenses || 0);
     sumSettled += (t.payouts_settled || 0);
@@ -1230,7 +1230,7 @@ export async function exportAllTechniciansSummaryToExcel(technicians = [], optio
       idx + 1,
       t.technician_name,
       t.total_installations,
-      t.fitment_rate || payoutRate || 300,
+      t.fitment_rate !== undefined ? t.fitment_rate : (parseFloat(payoutRate) || 0),
       fitPayout,
       t.travel_expenses || 0,
       t.payouts_settled || 0,

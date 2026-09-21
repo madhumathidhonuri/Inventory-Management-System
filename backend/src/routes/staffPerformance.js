@@ -364,8 +364,10 @@ router.get('/summary', (req, res) => {
 // GET /api/staff-performance/technicians
 router.get('/technicians', (req, res) => {
   try {
-    const { startDate, endDate, search, payoutRate = 300 } = req.query;
-    const defaultRate = Math.max(0, parseFloat(payoutRate) || 300);
+    const { startDate, endDate, search, payoutRate } = req.query;
+    const defaultRate = (payoutRate !== undefined && payoutRate !== '' && !isNaN(parseFloat(payoutRate)))
+      ? Math.max(0, parseFloat(payoutRate))
+      : 0;
 
     let records = getUnifiedStaffRecords(startDate, endDate);
 
@@ -594,7 +596,7 @@ router.get('/sales', (req, res) => {
 // GET /api/staff-performance/drilldown
 router.get('/drilldown', (req, res) => {
   try {
-    const { type, name, startDate, endDate, limit = 500, payoutRate = 300 } = req.query;
+    const { type, name, startDate, endDate, limit = 500, payoutRate } = req.query;
 
     if (!name) {
       return res.status(400).json({ success: false, error: 'Staff name is required for drilldown' });
@@ -623,7 +625,9 @@ router.get('/drilldown', (req, res) => {
     let payoutSummary = null;
 
     if (type === 'technician') {
-      const rate = Math.max(0, parseFloat(payoutRate) || 300);
+      const rate = (payoutRate !== undefined && payoutRate !== '' && !isNaN(parseFloat(payoutRate)))
+        ? Math.max(0, parseFloat(payoutRate))
+        : 0;
       try {
         const allExp = db.prepare(`SELECT * FROM expenses WHERE category IN ('TECHNICIAN_TRAVEL', 'TECHNICIAN_PAYOUT') ORDER BY expense_date DESC`).all();
         expenses = allExp.filter(e => {

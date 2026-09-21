@@ -41,8 +41,8 @@ export default function StaffPerformancePage({ onOpenTraceDrawer }) {
   // Active Tab: 'technicians' | 'sales' | 'managers'
   const [activeTab, setActiveTab] = useState('technicians');
 
-  // Technician Payout Configuration Rate (INR per fitment)
-  const [payoutRate, setPayoutRate] = useState(300);
+  // Technician Payout Configuration Rate (INR per fitment) - empty by default
+  const [payoutRate, setPayoutRate] = useState('');
 
   // Date Filter State
   const [datePreset, setDatePreset] = useState('this_month');
@@ -107,13 +107,14 @@ export default function StaffPerformancePage({ onOpenTraceDrawer }) {
   }, []);
 
   // Fetch performance data whenever dates or payoutRate changes
+  // Fetch performance data whenever dates or payoutRate changes
   const loadData = async () => {
     setLoading(true);
     try {
       const params = {};
       if (startDate) params.startDate = startDate;
       if (endDate) params.endDate = endDate;
-      params.payoutRate = payoutRate;
+      params.payoutRate = (payoutRate !== '' && payoutRate !== null && !isNaN(Number(payoutRate))) ? Number(payoutRate) : 0;
 
       const [sumRes, techRes, salesRes] = await Promise.all([
         fetchStaffPerformanceSummary(params),
@@ -143,7 +144,8 @@ export default function StaffPerformancePage({ onOpenTraceDrawer }) {
     setDrilldownSearch('');
     setActiveDrilldownTab('installs');
     try {
-      const params = { type, name, payoutRate };
+      const effectiveRate = (payoutRate !== '' && payoutRate !== null && !isNaN(Number(payoutRate))) ? Number(payoutRate) : 0;
+      const params = { type, name, payoutRate: effectiveRate };
       if (startDate) params.startDate = startDate;
       if (endDate) params.endDate = endDate;
       const res = await fetchStaffDrilldown(params);
@@ -196,10 +198,11 @@ export default function StaffPerformancePage({ onOpenTraceDrawer }) {
   const handleExportSingleTechnicianExcel = async (technicianName) => {
     try {
       setExportingTechName(technicianName);
+      const effectiveRate = (payoutRate !== '' && payoutRate !== null && !isNaN(Number(payoutRate))) ? Number(payoutRate) : 0;
       const params = {
         type: 'technician',
         name: technicianName,
-        payoutRate
+        payoutRate: effectiveRate
       };
       if (startDate) params.startDate = startDate;
       if (endDate) params.endDate = endDate;
@@ -208,7 +211,7 @@ export default function StaffPerformancePage({ onOpenTraceDrawer }) {
       const dateRangeStr = startDate && endDate ? `${startDate} to ${endDate}` : 'All Time';
 
       await exportTechnicianInstallationsToExcel(technicianName, res.installations || [], {
-        payoutRate,
+        payoutRate: effectiveRate,
         dateRange: dateRangeStr,
         expenses: res.expenses || [],
         floatingStock: res.floating_stock || [],
@@ -545,14 +548,18 @@ export default function StaffPerformancePage({ onOpenTraceDrawer }) {
                     type="number"
                     min="0"
                     step="50"
+                    placeholder="0"
                     value={payoutRate}
-                    onChange={(e) => setPayoutRate(Math.max(0, parseInt(e.target.value) || 0))}
-                    className="w-16 font-bold text-indigo-900 focus:outline-none"
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setPayoutRate(v === '' ? '' : Math.max(0, parseInt(v) || 0));
+                    }}
+                    className="w-16 font-bold text-indigo-900 focus:outline-none placeholder:text-slate-300"
                   />
                   <span className="text-[10px] text-slate-400 font-medium">/ install</span>
                 </div>
                 <span className="text-[11px] text-indigo-700 hidden sm:inline">
-                  (Auto-calculates gross fitment earnings across all completed jobs)
+                  (Optional: Enter rate to calculate gross fitment earnings)
                 </span>
               </div>
 
@@ -637,14 +644,14 @@ export default function StaffPerformancePage({ onOpenTraceDrawer }) {
                           </span>
                         </td>
                         <td className="py-3.5 px-4 text-right font-bold text-slate-800">
-                          ₹{Number(tech.fitment_payout || (tech.total_installations * payoutRate)).toLocaleString('en-IN')}
+                          ₹{Number(tech.fitment_payout !== undefined ? tech.fitment_payout : (tech.total_installations * (parseFloat(payoutRate) || 0))).toLocaleString('en-IN')}
                         </td>
                         <td className="py-3.5 px-4 text-right text-slate-600">
                           {tech.travel_expenses ? `₹${Number(tech.travel_expenses).toLocaleString('en-IN')}` : '₹0'}
                         </td>
                         <td className="py-3.5 px-4 text-right">
                           <span className="inline-flex items-center px-2.5 py-1 rounded-lg font-mono font-bold text-xs bg-emerald-50 text-emerald-700 border border-emerald-200">
-                            ₹{Number(tech.net_payout_due !== undefined ? tech.net_payout_due : (tech.total_installations * payoutRate)).toLocaleString('en-IN')}
+                            ₹{Number(tech.net_payout_due !== undefined ? tech.net_payout_due : ((tech.total_installations * (parseFloat(payoutRate) || 0)) + (tech.travel_expenses || 0) - (tech.payouts_settled || 0))).toLocaleString('en-IN')}
                           </span>
                         </td>
                         <td className="py-3.5 px-4 text-center">
