@@ -966,9 +966,11 @@ function isTgMiningDevice(dev = {}, attrs = {}) {
 function extractTgMiningDate(dev = {}, attrs = {}) {
   const directKeys = [
     'TG MINING DATE', 'TG_MINING_DATE', 'Tg Mining Date', 'tg_mining_date',
+    'INSTALLATION DATE', 'Installation Date', 'installation_date', 'INSTALL DATE', 'Install Date',
     'MINING DATE', 'Mining Date', 'mining_date',
     'ACTIVATION DATE', 'Activation Date', 'activation_date',
-    'SIM ACTIVATED DATE', 'Sim Activated Date'
+    'STOCK PLACE DATE', 'Stock Place Date',
+    'SIM ACTIVATED DATE', 'Sim Activated Date', 'SIM ACTIVATION DATE', 'Sim Activation Date'
   ];
 
   for (const k of directKeys) {
@@ -991,27 +993,6 @@ function extractTgMiningDate(dev = {}, attrs = {}) {
       const parsed = new Date(str);
       if (!isNaN(parsed.getTime()) && parsed.getFullYear() > 2020 && parsed.getFullYear() < 2100) {
         return parsed.toISOString().split('T')[0];
-      }
-    }
-  }
-
-  // Fallback to explicit installation date or stock place date if it is specifically a TG mining device
-  if (isTgMiningDevice(dev, attrs)) {
-    for (const k of ['INSTALLATION DATE', 'Installation Date', 'installation_date', 'STOCK PLACE DATE', 'Stock Place Date']) {
-      if (attrs[k] !== undefined && attrs[k] !== null && String(attrs[k]).trim() !== '') {
-        const val = attrs[k];
-        if (typeof val === 'number' || /^\d{5}$/.test(String(val).trim())) {
-          const num = Number(val);
-          if (num > 30000 && num < 60000) {
-            const d = new Date(Math.round((num - 25569) * 86400 * 1000));
-            if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
-          }
-        }
-        const str = String(val).trim();
-        const dmy = str.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
-        if (dmy) return `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
-        const ymd = str.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
-        if (ymd) return `${ymd[1]}-${ymd[2].padStart(2, '0')}-${ymd[3].padStart(2, '0')}`;
       }
     }
   }

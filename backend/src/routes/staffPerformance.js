@@ -68,8 +68,10 @@ function extractEffectiveDate(dev = {}, attrs = {}) {
   
   const priorityMiningKeys = [
     'TG MINING DATE', 'TG_MINING_DATE', 'Tg Mining Date', 'tg_mining_date',
+    'INSTALLATION DATE', 'Installation Date', 'installation_date',
     'MINING DATE', 'Mining Date', 'mining_date',
     'ACTIVATION DATE', 'Activation Date', 'activation_date',
+    'STOCK PLACE DATE', 'Stock Place Date',
     'SIM ACTIVATION DATE', 'SIM ACTIVATED DATE', 'Sim Activated Date', 'sim_activated_date'
   ];
 
