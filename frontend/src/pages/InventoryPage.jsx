@@ -61,6 +61,16 @@ import ImeiVerificationSheet from '../components/ImeiVerificationSheet';
 import { buildCustomerCredentialsWhatsAppMessage, buildPaymentDueReminderWhatsAppMessage, formatINR, formatDisplayCellValue } from '../utils/whatsapp';
 import { exportDevicesToExcel } from '../utils/excelExport';
 
+const isGhostOrEmptyKey = (k) => {
+  if (!k || typeof k !== 'string') return true;
+  const trimmed = k.trim();
+  if (!trimmed || trimmed === 'original_row') return true;
+  if (/require.*sim/i.test(trimmed)) return true;
+  if (/^__empty/i.test(trimmed)) return true;
+  if (/^empty(\s*|_)\d*/i.test(trimmed)) return true;
+  return false;
+};
+
 export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClearInitialFilter }) {
   const { user } = useAuth();
   const isSuperAdmin = user?.role === 'SUPER_ADMIN';
