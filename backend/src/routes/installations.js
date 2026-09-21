@@ -419,7 +419,7 @@ function extractInstCategory(inst) {
 // GET /api/installations/pending-alerts - Return date-wise and month-wise grouped pending payment alerts with aging and reminders
 router.get('/pending-alerts', (req, res) => {
   try {
-    const { syncFitmentsToInstallations, standardizeDate } = require('../db/syncFitments');
+    const { syncFitmentsToInstallations, standardizeDate, extractInstallationDate } = require('../db/syncFitments');
     try {
       syncFitmentsToInstallations();
     } catch (sErr) {
@@ -454,8 +454,17 @@ router.get('/pending-alerts', (req, res) => {
 
     for (const item of allRows) {
       const price = parseFloat(item.sale_price) || 0;
-      const rawInstDate = item.installation_date;
-      const instDate = rawInstDate ? standardizeDate(rawInstDate) : 'Unknown Date';
+      let attrs = {};
+      try {
+        attrs = typeof item.device_additional_attributes === 'string'
+          ? JSON.parse(item.device_additional_attributes || '{}')
+          : (item.device_additional_attributes || {});
+      } catch {}
+
+      // Extract accurate date from attributes first, fallback to installation_date
+      const attrDate = extractInstallationDate(item, attrs);
+      const rawInstDate = attrDate || item.installation_date;
+      const instDate = (rawInstDate && String(rawInstDate).trim()) ? standardizeDate(rawInstDate) : 'Date Not Specified';
       
       let displayDate = instDate;
       if (/^\d{4}-\d{2}-\d{2}$/.test(instDate)) {
@@ -463,7 +472,7 @@ router.get('/pending-alerts', (req, res) => {
         displayDate = `${d}-${m}-${y}`;
       }
 
-      const monthKey = instDate.length >= 7 ? instDate.substring(0, 7) : 'Unknown Month';
+      const monthKey = instDate.length >= 7 && /^\d{4}-\d{2}/.test(instDate) ? instDate.substring(0, 7) : 'Unknown Month';
 
       // Initialize daily stats map
       if (!dailyStatsMap[instDate]) {

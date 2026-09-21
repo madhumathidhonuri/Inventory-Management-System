@@ -166,14 +166,6 @@ function extractInstallationDate(dev = {}, attrs = {}) {
       if (parsed && /^\d{4}-\d{2}-\d{2}$/.test(parsed)) return parsed;
     }
   }
-  if (dev.purchase_date) {
-    const parsed = standardizeDate(dev.purchase_date);
-    if (parsed && /^\d{4}-\d{2}-\d{2}$/.test(parsed)) return parsed;
-  }
-  if (dev.created_at) {
-    const parsed = standardizeDate(dev.created_at);
-    if (parsed && /^\d{4}-\d{2}-\d{2}$/.test(parsed)) return parsed;
-  }
   return '';
 }
 
@@ -218,7 +210,7 @@ function syncFitmentsToInstallations(dbParam) {
       UPDATE installations
       SET device_id = ?,
           customer_id = COALESCE(?, customer_id),
-          installation_date = COALESCE(NULLIF(?, ''), installation_date),
+          installation_date = ?,
           customer_name = COALESCE(?, customer_name),
           customer_contact = COALESCE(?, customer_contact),
           vehicle_number = COALESCE(?, vehicle_number),
