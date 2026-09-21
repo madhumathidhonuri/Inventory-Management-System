@@ -610,18 +610,44 @@ router.patch('/:id/quick-payment', (req, res) => {
     let attrs = {};
     try { attrs = JSON.parse(device.additional_attributes || '{}'); } catch {}
 
-    const isPaid = String(payment_status || '').toUpperCase() === 'RECEIVED';
-    attrs['AMOUNT RECEIVED'] = isPaid ? 'RECEIVED' : 'PENDING';
-    attrs['PAYMENT STATUS'] = isPaid ? 'RECEIVED' : 'PENDING';
+    const totalDeviceCost = parseFloat(attrs['TOTAL COST'] || attrs['COST'] || attrs['SALE PRICE'] || 0);
+    const amountReceivedNum = amount_received !== undefined && amount_received !== null && !isNaN(Number(amount_received)) ? Number(amount_received) : totalDeviceCost;
 
-    if (isPaid) {
-      if (payment_mode) attrs['AMOUNT RECEIVED BY'] = String(payment_mode).trim();
-      if (amount_received !== undefined && amount_received !== null && !isNaN(Number(amount_received))) {
-        attrs['COST'] = Number(amount_received);
-        attrs['TOTAL COST'] = Number(amount_received);
+    let finalStatus = 'PENDING';
+    let balanceDue = totalDeviceCost;
+
+    if (String(payment_status || '').toUpperCase() === 'RECEIVED') {
+      if (totalDeviceCost > 0 && amountReceivedNum < totalDeviceCost) {
+        finalStatus = 'PARTIAL';
+        balanceDue = Math.max(0, totalDeviceCost - amountReceivedNum);
+      } else {
+        finalStatus = 'RECEIVED';
+        balanceDue = 0;
       }
+    } else if (String(payment_status || '').toUpperCase() === 'PARTIAL') {
+      finalStatus = 'PARTIAL';
+      balanceDue = Math.max(0, totalDeviceCost - amountReceivedNum);
+    }
+
+    const isFullyPaid = finalStatus === 'RECEIVED';
+    const isPartial = finalStatus === 'PARTIAL';
+
+    attrs['AMOUNT RECEIVED'] = isFullyPaid ? 'RECEIVED' : isPartial ? 'PARTIAL' : 'PENDING';
+    attrs['PAYMENT STATUS'] = finalStatus;
+
+    if (isFullyPaid || isPartial) {
+      if (payment_mode) {
+        attrs['PAYMENT MODE'] = String(payment_mode).trim();
+      }
+      if (req.body.received_by) {
+        attrs['AMOUNT RECEIVED BY'] = String(req.body.received_by).trim();
+      }
+      attrs['AMOUNT PAID'] = amountReceivedNum;
+      attrs['BALANCE DUE'] = balanceDue;
     } else {
-      delete attrs['AMOUNT RECEIVED BY'];
+      delete attrs['PAYMENT MODE'];
+      delete attrs['AMOUNT PAID'];
+      delete attrs['BALANCE DUE'];
     }
 
     const updatedAttrsStr = JSON.stringify(attrs);
@@ -638,13 +664,17 @@ router.patch('/:id/quick-payment', (req, res) => {
       db.prepare(`
         UPDATE installations
         SET payment_status = ?,
+            amount_paid = ?,
             payment_date = ?,
-            payment_mode = COALESCE(?, payment_mode)
+            payment_mode = COALESCE(?, payment_mode),
+            payment_remarks = COALESCE(?, payment_remarks)
         WHERE device_id = ? OR imei_number = ?
       `).run(
-        isPaid ? 'RECEIVED' : 'PENDING',
-        isPaid ? new Date().toISOString().split('T')[0] : null,
+        finalStatus,
+        isFullyPaid ? (totalDeviceCost || amountReceivedNum) : amountReceivedNum,
+        (isFullyPaid || isPartial) ? new Date().toISOString().split('T')[0] : null,
         payment_mode || 'UPI',
+        req.body.payment_remarks || null,
         id,
         device.imei_number
       );
@@ -653,14 +683,18 @@ router.patch('/:id/quick-payment', (req, res) => {
     }
 
     // Record History Audit
-    const remarks = isPaid
-      ? `Payment marked RECEIVED${payment_mode ? ` via ${payment_mode}` : ''}`
-      : 'Payment marked PENDING';
+    try {
+      const remarks = isPaid
+        ? `Payment marked RECEIVED${payment_mode ? ` via ${payment_mode}` : ''}`
+        : 'Payment marked PENDING';
 
-    db.prepare(`
-      INSERT INTO device_history (device_id, imei_number, event_type, event_date, from_holder, to_holder, performed_by, remarks)
-      VALUES (?, ?, 'PAYMENT_UPDATED', datetime('now'), ?, ?, ?, ?)
-    `).run(id, device.imei_number, device.current_holder_name || 'Dealer/Customer', device.current_holder_name || 'Dealer/Customer', performed_by || 'Staff', remarks);
+      db.prepare(`
+        INSERT INTO device_history (device_id, imei_number, event_type, event_date, from_holder, to_holder, performed_by, remarks)
+        VALUES (?, ?, 'STATUS_CHANGED', datetime('now'), ?, ?, ?, ?)
+      `).run(id, device.imei_number, device.current_holder_name || 'Dealer/Customer', device.current_holder_name || 'Dealer/Customer', performed_by || 'Staff', remarks);
+    } catch (hErr) {
+      console.warn('[QuickPayment] Note writing history audit:', hErr.message);
+    }
 
     res.json({
       success: true,
@@ -668,8 +702,9 @@ router.patch('/:id/quick-payment', (req, res) => {
       data: {
         id: device.id,
         imei_number: device.imei_number,
-        payment_status: isPaid ? 'RECEIVED' : 'PENDING',
-        payment_mode: attrs['AMOUNT RECEIVED BY'] || '',
+        payment_status: isFullyPaid ? 'RECEIVED' : isPartial ? 'PARTIAL' : 'PENDING',
+        payment_mode: attrs['PAYMENT MODE'] || attrs['MODE OF PAYMENT'] || '',
+        received_by: attrs['AMOUNT RECEIVED BY'] || '',
         additional_attributes: attrs
       }
     });

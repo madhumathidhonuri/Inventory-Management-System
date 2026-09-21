@@ -405,6 +405,13 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
       });
     }
 
+    // Ensure dedicated PAYMENT MODE is always an editable field when payment fields exist
+    const hasPaymentFields = keysList.some(k => /amount.*received|payment/i.test(k));
+    const hasPaymentMode = keysList.some(k => /payment\s*mode|mode\s*of\s*payment|payment\s*form/i.test(k));
+    if (hasPaymentFields && !hasPaymentMode) {
+      keysList.push('PAYMENT MODE');
+    }
+
     // 3. Fallback: if no specific columns found, use customColumns
     return keysList.length > 0 ? keysList : customColumns;
   }, [editingRowDevice, deviceTypes, customColumns]);
@@ -2970,31 +2977,114 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
                 </div>
                 <div className="grid grid-cols-2 gap-3 text-xs">
                   {rowEditColumns.map((col) => {
-
                     const canEdit = canUserEditField(user, col);
+                    const normCol = (col || '').toUpperCase().trim();
+                    const isPaymentModeCol = normCol === 'PAYMENT MODE' || normCol === 'PAYMENT FORM' || normCol === 'PAYMENT METHOD' || normCol === 'PAYMENT TYPE' || normCol === 'MODE OF PAYMENT';
+                    const isPaymentStatusCol = normCol === 'PAYMENT STATUS' || normCol === 'AMOUNT RECEIVED' || normCol === 'PAYMENT' || normCol === 'PAID STATUS';
+                    const isActivationStatusCol = normCol === 'ACTIVATION STATUS' || normCol === 'SIM ACTIVATED';
+
                     return (
                       <div key={col}>
                         <label className="block font-medium text-slate-600 mb-1 flex items-center justify-between">
                           <span className="truncate max-w-[140px]">{col}</span>
                           {!canEdit && <span className="text-[10px] text-amber-600">🔒 Locked</span>}
                         </label>
-                        <input
-                          type="text"
-                          disabled={!canEdit}
-                          value={rowFormData.additional_attributes[col] || ''}
-                          onChange={(e) => setRowFormData({
-                            ...rowFormData,
-                            additional_attributes: {
-                              ...rowFormData.additional_attributes,
-                              [col]: e.target.value
+
+                        {isPaymentModeCol ? (
+                          <select
+                            disabled={!canEdit}
+                            value={(rowFormData.additional_attributes[col] || '').toUpperCase()}
+                            onChange={(e) => setRowFormData({
+                              ...rowFormData,
+                              additional_attributes: {
+                                ...rowFormData.additional_attributes,
+                                [col]: e.target.value
+                              }
+                            })}
+                            className={`w-full border rounded-xl p-2 font-mono text-xs font-bold focus:outline-none cursor-pointer ${
+                              canEdit
+                                ? 'bg-purple-50/70 border-purple-300 text-purple-900 focus:border-purple-600'
+                                : 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed'
+                            }`}
+                          >
+                            <option value="">-- Select Payment Mode / Form --</option>
+                            <option value="UPI">📱 UPI / GPay / PhonePe</option>
+                            <option value="CASH">💵 Cash</option>
+                            <option value="BANK TRANSFER">🏦 Bank Transfer / NEFT / IMPS</option>
+                            <option value="CHEQUE">📝 Cheque / DD</option>
+                            <option value="CREDIT">⏳ Credit / Due</option>
+                            <option value="OTHER">Other</option>
+                          </select>
+                        ) : isPaymentStatusCol ? (
+                          <select
+                            disabled={!canEdit}
+                            value={(rowFormData.additional_attributes[col] || '').toUpperCase()}
+                            onChange={(e) => setRowFormData({
+                              ...rowFormData,
+                              additional_attributes: {
+                                ...rowFormData.additional_attributes,
+                                [col]: e.target.value
+                              }
+                            })}
+                            className={`w-full border rounded-xl p-2 font-mono text-xs font-bold focus:outline-none cursor-pointer ${
+                              canEdit
+                                ? 'bg-emerald-50/70 border-emerald-300 text-emerald-900 focus:border-emerald-600'
+                                : 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed'
+                            }`}
+                          >
+                            <option value="">-- Select Status --</option>
+                            <option value="RECEIVED">✅ RECEIVED</option>
+                            <option value="PENDING">⏳ PENDING</option>
+                            <option value="PARTIAL">⚠️ PARTIAL</option>
+                          </select>
+                        ) : isActivationStatusCol ? (
+                          <select
+                            disabled={!canEdit}
+                            value={(rowFormData.additional_attributes[col] || '').toUpperCase()}
+                            onChange={(e) => setRowFormData({
+                              ...rowFormData,
+                              additional_attributes: {
+                                ...rowFormData.additional_attributes,
+                                [col]: e.target.value
+                              }
+                            })}
+                            className={`w-full border rounded-xl p-2 font-mono text-xs font-bold focus:outline-none cursor-pointer ${
+                              canEdit
+                                ? 'bg-blue-50/70 border-blue-300 text-blue-900 focus:border-blue-600'
+                                : 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed'
+                            }`}
+                          >
+                            <option value="">-- Select Activation --</option>
+                            <option value="YES">YES</option>
+                            <option value="NO">NO</option>
+                            <option value="ACTIVE">ACTIVE</option>
+                            <option value="INACTIVE">INACTIVE</option>
+                            <option value="PENDING">PENDING</option>
+                          </select>
+                        ) : (
+                          <input
+                            type="text"
+                            disabled={!canEdit}
+                            placeholder={
+                              normCol.includes('RECEIVED BY') || normCol.includes('SALES PERSON') || normCol.includes('TECHNICIAN')
+                                ? 'e.g. Staff / Sales Person Name'
+                                : `Enter ${col}`
                             }
-                          })}
-                          className={`w-full border rounded-xl p-2 font-mono text-xs focus:outline-none ${
-                            canEdit
-                              ? 'bg-slate-50 border-slate-200 text-slate-800 focus:border-blue-500'
-                              : 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed'
-                          }`}
-                        />
+                            value={rowFormData.additional_attributes[col] || ''}
+                            onChange={(e) => setRowFormData({
+                              ...rowFormData,
+                              additional_attributes: {
+                                ...rowFormData.additional_attributes,
+                                [col]: e.target.value
+                              }
+                            })}
+                            className={`w-full border rounded-xl p-2 font-mono text-xs focus:outline-none ${
+                              canEdit
+                                ? 'bg-slate-50 border-slate-200 text-slate-800 focus:border-blue-500'
+                                : 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed'
+                            }`}
+                          />
+                        )}
                       </div>
                     );
                   })}

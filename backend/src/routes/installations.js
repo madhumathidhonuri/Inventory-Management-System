@@ -416,7 +416,7 @@ function extractInstCategory(inst) {
   return (devAttrs['CATEGORY'] || devAttrs['DEVICE CATEGORY'] || inst.vehicle_type || 'VLTD').toString().toUpperCase().trim();
 }
 
-// GET /api/installations/pending-alerts - Return grouped pending payment alerts with aging (Today, Yesterday, Overdue)
+// GET /api/installations/pending-alerts - Return date-wise and month-wise grouped pending payment alerts with aging and reminders
 router.get('/pending-alerts', (req, res) => {
   try {
     const { syncFitmentsToInstallations, standardizeDate } = require('../db/syncFitments');
@@ -428,103 +428,212 @@ router.get('/pending-alerts', (req, res) => {
 
     const today = new Date().toISOString().split('T')[0];
     const yesterdayDate = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+    const requestedMonth = req.query.month; // e.g. '2026-09' or 'all'
 
-    const rows = db.prepare(`
+    // Fetch ALL installations so we can calculate total installed vs paid vs pending per date
+    const allRows = db.prepare(`
       SELECT i.*, d.sim_number, d.additional_attributes as device_additional_attributes, dt.name as device_type_name
       FROM installations i
       LEFT JOIN devices d ON i.device_id = d.id
       LEFT JOIN device_types dt ON d.device_type_id = dt.id
-      WHERE (i.payment_status IS NULL OR UPPER(i.payment_status) NOT IN ('RECEIVED', 'PAID', 'YES'))
       ORDER BY i.installation_date DESC, i.id DESC
     `).all();
 
-    let totalPendingAmount = 0;
-    let todayCount = 0;
-    let todayAmount = 0;
-    let yesterdayCount = 0;
-    let yesterdayAmount = 0;
-    let overdueCount = 0;
-    let overdueAmount = 0;
+    const dailyStatsMap = {};
+    const monthlyStatsMap = {};
+    const allPendingItems = [];
 
-    const items = rows.map(item => {
+    let overallPendingCount = 0;
+    let overallPendingAmount = 0;
+    let todayPendingCount = 0;
+    let todayPendingAmount = 0;
+    let yesterdayPendingCount = 0;
+    let yesterdayPendingAmount = 0;
+    let olderPendingCount = 0;
+    let olderPendingAmount = 0;
+
+    for (const item of allRows) {
       const price = parseFloat(item.sale_price) || 0;
-      totalPendingAmount += price;
-
       const rawInstDate = item.installation_date;
-      const instDate = rawInstDate ? standardizeDate(rawInstDate) : '';
-      let daysOverdue = 0;
+      const instDate = rawInstDate ? standardizeDate(rawInstDate) : 'Unknown Date';
       
-      if (instDate) {
-        try {
-          const dInst = new Date(instDate);
-          const dToday = new Date(today);
-          const diffMs = dToday - dInst;
-          const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-          daysOverdue = Math.max(0, diffDays);
-        } catch (e) {
-          daysOverdue = 0;
+      let displayDate = instDate;
+      if (/^\d{4}-\d{2}-\d{2}$/.test(instDate)) {
+        const [y, m, d] = instDate.split('-');
+        displayDate = `${d}-${m}-${y}`;
+      }
+
+      const monthKey = instDate.length >= 7 ? instDate.substring(0, 7) : 'Unknown Month';
+
+      // Initialize daily stats map
+      if (!dailyStatsMap[instDate]) {
+        dailyStatsMap[instDate] = {
+          date: instDate,
+          display_date: displayDate,
+          month: monthKey,
+          total_installed: 0,
+          paid_count: 0,
+          pending_count: 0,
+          pending_amount: 0,
+          items: []
+        };
+      }
+
+      // Initialize monthly stats map
+      if (!monthlyStatsMap[monthKey]) {
+        let monthLabel = monthKey;
+        if (/^\d{4}-\d{2}$/.test(monthKey)) {
+          const [y, m] = monthKey.split('-');
+          const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+          const mIdx = parseInt(m, 10) - 1;
+          if (mIdx >= 0 && mIdx < 12) {
+            monthLabel = `${monthNames[mIdx]} ${y}`;
+          }
         }
+        monthlyStatsMap[monthKey] = {
+          month: monthKey,
+          month_label: monthLabel,
+          total_installed: 0,
+          paid_count: 0,
+          pending_count: 0,
+          pending_amount: 0
+        };
       }
 
-      let bucket = 'OTHER';
-      let urgency = 'NORMAL';
-      let agingLabel = '';
+      dailyStatsMap[instDate].total_installed += 1;
+      monthlyStatsMap[monthKey].total_installed += 1;
 
-      if (instDate && instDate === today) {
-        bucket = 'TODAY';
-        urgency = 'TODAY_PENDING';
-        agingLabel = 'Installed Today';
-        todayCount++;
-        todayAmount += price;
-      } else if (instDate && (instDate === yesterdayDate || daysOverdue === 1)) {
-        bucket = 'YESTERDAY';
-        urgency = 'YESTERDAY_OVERDUE';
-        agingLabel = 'Installed Yesterday (1 day due)';
-        yesterdayCount++;
-        yesterdayAmount += price;
-      } else if (daysOverdue > 1 && daysOverdue <= 7) {
-        bucket = 'RECENT_DUE';
-        urgency = 'MODERATE';
-        agingLabel = `${daysOverdue} days due`;
-        overdueCount++;
-        overdueAmount += price;
+      const totalPrice = parseFloat(item.sale_price) || 0;
+      const amountPaid = parseFloat(item.amount_paid) || 0;
+      const statusUpper = (item.payment_status || '').toString().toUpperCase().trim();
+      
+      const isFullyPaid = ['RECEIVED', 'PAID', 'YES'].includes(statusUpper) && (amountPaid === 0 || amountPaid >= totalPrice);
+      const isPartial = statusUpper === 'PARTIAL' || (amountPaid > 0 && amountPaid < totalPrice && statusUpper !== 'RECEIVED');
+      
+      const pendingAmount = isFullyPaid ? 0 : (isPartial ? Math.max(0, totalPrice - amountPaid) : totalPrice);
+
+      if (isFullyPaid) {
+        dailyStatsMap[instDate].paid_count += 1;
+        monthlyStatsMap[monthKey].paid_count += 1;
       } else {
-        bucket = 'CRITICAL_OVERDUE';
-        urgency = 'CRITICAL';
-        agingLabel = daysOverdue > 7 ? `Overdue (${daysOverdue} days)` : 'Pending Collection';
-        overdueCount++;
-        overdueAmount += price;
+        dailyStatsMap[instDate].pending_count += 1;
+        dailyStatsMap[instDate].pending_amount += pendingAmount;
+        monthlyStatsMap[monthKey].pending_count += 1;
+        monthlyStatsMap[monthKey].pending_amount += pendingAmount;
+
+        overallPendingCount += 1;
+        overallPendingAmount += pendingAmount;
+
+        let daysOverdue = 0;
+        if (/^\d{4}-\d{2}-\d{2}$/.test(instDate)) {
+          try {
+            const dInst = new Date(instDate);
+            const dToday = new Date(today);
+            const diffMs = dToday - dInst;
+            daysOverdue = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
+          } catch (e) {
+            daysOverdue = 0;
+          }
+        }
+
+        let bucket = 'OTHER';
+        let urgency = 'NORMAL';
+        let agingLabel = '';
+
+        if (instDate === today) {
+          bucket = 'TODAY';
+          urgency = 'TODAY_PENDING';
+          agingLabel = isPartial ? 'Partially Paid Today' : 'Installed Today';
+          todayPendingCount++;
+          todayPendingAmount += pendingAmount;
+        } else if (instDate === yesterdayDate || daysOverdue === 1) {
+          bucket = 'YESTERDAY';
+          urgency = 'YESTERDAY_OVERDUE';
+          agingLabel = isPartial ? 'Partial (1 day due)' : 'Installed Yesterday (1 day due)';
+          yesterdayPendingCount++;
+          yesterdayPendingAmount += pendingAmount;
+        } else if (daysOverdue > 1 && daysOverdue <= 7) {
+          bucket = 'RECENT_DUE';
+          urgency = 'MODERATE';
+          agingLabel = isPartial ? `Partial (${daysOverdue} days due)` : `${daysOverdue} days due`;
+          olderPendingCount++;
+          olderPendingAmount += pendingAmount;
+        } else {
+          bucket = 'CRITICAL_OVERDUE';
+          urgency = 'CRITICAL';
+          agingLabel = isPartial ? `Partial Overdue (${daysOverdue} days)` : (daysOverdue > 7 ? `Overdue (${daysOverdue} days)` : 'Pending Collection');
+          olderPendingCount++;
+          olderPendingAmount += pendingAmount;
+        }
+
+        const reminderMessage = `Dear ${item.customer_name || 'Customer'},\n\nThis is a friendly payment reminder from FuelTracks IMS for the GPS Tracker installed in your vehicle *${item.vehicle_number || ''}* on *${displayDate}*.\n\n*Remaining Balance Due:* ₹${pendingAmount.toLocaleString('en-IN')}${isPartial ? ` (Paid: ₹${amountPaid.toLocaleString('en-IN')})` : ''}\n\nPlease transfer via UPI / Bank or contact us to clear the balance.\n\nThank you!`;
+
+        const pendingObj = {
+          ...item,
+          device_id: item.device_id || item.id,
+          sale_price: pendingAmount,
+          total_sale_price: totalPrice,
+          amount_paid: amountPaid,
+          is_partial: isPartial,
+          installation_date: instDate,
+          display_date: displayDate,
+          month: monthKey,
+          days_overdue: daysOverdue,
+          bucket,
+          urgency,
+          aging_label: agingLabel,
+          reminder_message: reminderMessage
+        };
+
+        dailyStatsMap[instDate].items.push(pendingObj);
+        allPendingItems.push(pendingObj);
       }
+    }
 
-      const reminderMessage = `Dear ${item.customer_name || 'Customer'},\n\nThis is a friendly payment reminder from FuelTracks IMS for the GPS Tracker installed in your vehicle *${item.vehicle_number || ''}* on *${instDate}*.\n\n*Pending Amount Due:* ₹${price.toLocaleString('en-IN')}\n\nPlease transfer via UPI / Bank or contact us to clear the invoice balance.\n\nThank you!`;
+    // Generate date_groups sorted chronologically DESC
+    const dateGroups = Object.values(dailyStatsMap)
+      .filter(g => g.pending_count > 0)
+      .sort((a, b) => b.date.localeCompare(a.date));
 
-      return {
-        ...item,
-        device_id: item.device_id || item.id,
-        installation_date: instDate,
-        days_overdue: daysOverdue,
-        bucket,
-        urgency,
-        aging_label: agingLabel,
-        reminder_message: reminderMessage
-      };
-    });
+    // Generate date-wise reminders (e.g. "3 vehicles payment pending installed on 17-09-2026")
+    const dateReminders = dateGroups.map(g => ({
+      date: g.date,
+      display_date: g.display_date,
+      month: g.month,
+      pending_count: g.pending_count,
+      total_installed: g.total_installed,
+      paid_count: g.paid_count,
+      pending_amount: g.pending_amount,
+      reminder_text: `${g.pending_count} ${g.pending_count === 1 ? 'vehicle' : 'vehicles'} payment pending installed on ${g.display_date}`
+    }));
+
+    // Available months list sorted DESC
+    const availableMonths = Object.values(monthlyStatsMap)
+      .filter(m => m.month !== 'Unknown Month')
+      .sort((a, b) => b.month.localeCompare(a.month));
+
+    // Determine current active month (e.g. '2026-09')
+    const currentMonthKey = today.substring(0, 7);
 
     res.json({
       success: true,
       summary: {
-        total_pending_count: items.length,
-        total_pending_amount: totalPendingAmount,
-        today_pending_count: todayCount,
-        today_pending_amount: todayAmount,
-        yesterday_pending_count: yesterdayCount,
-        yesterday_pending_amount: yesterdayAmount,
-        older_pending_count: overdueCount,
-        older_pending_amount: overdueAmount,
+        total_pending_count: overallPendingCount,
+        total_pending_amount: overallPendingAmount,
+        today_pending_count: todayPendingCount,
+        today_pending_amount: todayPendingAmount,
+        yesterday_pending_count: yesterdayPendingCount,
+        yesterday_pending_amount: yesterdayPendingAmount,
+        older_pending_count: olderPendingCount,
+        older_pending_amount: olderPendingAmount,
         server_date: today,
-        yesterday_date: yesterdayDate
+        yesterday_date: yesterdayDate,
+        current_month: currentMonthKey
       },
-      data: items
+      available_months: availableMonths,
+      date_groups: dateGroups,
+      date_reminders: dateReminders,
+      data: allPendingItems
     });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });

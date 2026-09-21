@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Bell,
@@ -16,10 +16,14 @@ import {
   ExternalLink,
   Calendar,
   ChevronRight,
-  Filter
+  Filter,
+  User,
+  Wrench,
+  CalendarDays
 } from 'lucide-react';
 import { fetchPendingPaymentAlerts, updateQuickPayment } from '../services/api';
 import PaymentQrModal from './PaymentQrModal';
+import MarkPaymentModal from './MarkPaymentModal';
 
 export default function PendingPaymentNotificationModal({
   isOpen,
@@ -30,10 +34,10 @@ export default function PendingPaymentNotificationModal({
 }) {
   const [loading, setLoading] = useState(true);
   const [alertsData, setAlertsData] = useState(null);
-  const [activeTab, setActiveTab] = useState('ALL'); // 'ALL' | 'YESTERDAY' | 'TODAY' | 'OVERDUE'
+  const [selectedDateFilter, setSelectedDateFilter] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedQrItem, setSelectedQrItem] = useState(null);
-  const [markingPaidId, setMarkingPaidId] = useState(null);
+  const [selectedPayItem, setSelectedPayItem] = useState(null);
   const [successMsg, setSuccessMsg] = useState('');
 
   useEffect(() => {
@@ -56,28 +60,14 @@ export default function PendingPaymentNotificationModal({
     }
   };
 
-  const handleMarkPaid = async (item) => {
-    if (!window.confirm(`Mark vehicle ${item.vehicle_number} (₹${item.sale_price}) as Payment RECEIVED?`)) {
-      return;
-    }
-    setMarkingPaidId(item.id);
-    try {
-      const res = await updateQuickPayment({
-        id: item.device_id,
-        payment_status: 'RECEIVED',
-        amount_paid: item.sale_price,
-        payment_remarks: 'Collected via Notification Bell'
-      });
-      if (res.success) {
-        setSuccessMsg(`✅ Marked ${item.vehicle_number} as Paid!`);
-        setTimeout(() => setSuccessMsg(''), 3000);
-        loadAlerts();
-      }
-    } catch (err) {
-      alert('Failed to update payment: ' + err.message);
-    } finally {
-      setMarkingPaidId(null);
-    }
+  const handleOpenMarkPaid = (item) => {
+    setSelectedPayItem(item);
+  };
+
+  const handlePaymentSuccess = (item, paymentMode, amount) => {
+    setSuccessMsg(`✅ Marked ${item.vehicle_number} as Paid via ${paymentMode} (₹${(amount || 0).toLocaleString('en-IN')})!`);
+    setTimeout(() => setSuccessMsg(''), 3500);
+    loadAlerts();
   };
 
   const handleSendWhatsApp = (item) => {
@@ -91,11 +81,13 @@ export default function PendingPaymentNotificationModal({
 
   const summary = alertsData?.summary || {};
   const allItems = alertsData?.data || [];
+  const dateReminders = alertsData?.date_reminders || [];
+  const dateGroups = alertsData?.date_groups || [];
 
   const filteredItems = allItems.filter(item => {
-    if (activeTab === 'YESTERDAY' && item.bucket !== 'YESTERDAY') return false;
-    if (activeTab === 'TODAY' && item.bucket !== 'TODAY') return false;
-    if (activeTab === 'OVERDUE' && item.bucket !== 'RECENT_DUE' && item.bucket !== 'CRITICAL_OVERDUE') return false;
+    if (selectedDateFilter !== 'ALL' && item.installation_date !== selectedDateFilter && item.display_date !== selectedDateFilter) {
+      return false;
+    }
 
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
@@ -103,7 +95,8 @@ export default function PendingPaymentNotificationModal({
       const c = (item.customer_name || '').toLowerCase();
       const p = (item.customer_contact || '').toLowerCase();
       const imei = (item.imei_number || '').toLowerCase();
-      return v.includes(q) || c.includes(q) || p.includes(q) || imei.includes(q);
+      const tech = (item.installed_by || '').toLowerCase();
+      return v.includes(q) || c.includes(q) || p.includes(q) || imei.includes(q) || tech.includes(q);
     }
     return true;
   });
@@ -119,9 +112,9 @@ export default function PendingPaymentNotificationModal({
               <Bell className="w-5 h-5" />
             </div>
             <div>
-              <div className="flex items-center gap-2.5">
+              <div className="flex items-center gap-2.5 flex-wrap">
                 <h2 className="text-base font-bold text-slate-900 tracking-tight">
-                  Pending Payment Alerts
+                  Pending Payment Reminders
                 </h2>
                 {summary.total_pending_count > 0 && (
                   <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-red-100 text-red-700 border border-red-200">
@@ -159,46 +152,63 @@ export default function PendingPaymentNotificationModal({
           </div>
         )}
 
-        {/* Top Filter Tabs & Search Bar */}
-        <div className="px-6 py-3.5 bg-slate-50/80 border-b border-slate-200/80 flex flex-col md:flex-row md:items-center md:justify-between gap-3 shrink-0">
-          
-          {/* Tab Filter Pills */}
-          <div className="flex items-center space-x-1.5 overflow-x-auto pb-1 md:pb-0">
-            {[
-              { id: 'ALL', label: 'All Due', count: summary.total_pending_count || 0, amount: summary.total_pending_amount || 0 },
-              { id: 'YESTERDAY', label: 'Yesterday (1 Day)', count: summary.yesterday_pending_count || 0, isUrgent: true },
-              { id: 'TODAY', label: 'Fitted Today', count: summary.today_pending_count || 0 },
-              { id: 'OVERDUE', label: 'Older Overdue', count: summary.older_pending_count || 0, isCritical: true }
-            ].map(tab => (
+        {/* Date-Wise Reminder Banners Carousel / List */}
+        {dateReminders.length > 0 && (
+          <div className="px-6 py-3 bg-amber-50/50 border-b border-amber-200/60 shrink-0 space-y-2">
+            <div className="text-[11px] font-bold text-amber-900 uppercase tracking-wider flex items-center gap-1.5">
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+              <span>Daily Installation Reminders:</span>
+            </div>
+            
+            <div className="flex items-center gap-2 overflow-x-auto pb-1">
               <button
-                key={tab.id}
                 type="button"
-                onClick={() => setActiveTab(tab.id)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
-                  activeTab === tab.id
-                    ? tab.isUrgent
-                      ? 'bg-amber-600 text-white shadow-sm shadow-amber-200'
-                      : tab.isCritical
-                      ? 'bg-red-600 text-white shadow-sm shadow-red-200'
-                      : 'bg-slate-900 text-white shadow-sm'
-                    : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+                onClick={() => setSelectedDateFilter('ALL')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
+                  selectedDateFilter === 'ALL'
+                    ? 'bg-slate-900 text-white shadow-xs'
+                    : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
                 }`}
               >
-                <span>{tab.label}</span>
-                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
-                  activeTab === tab.id ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-700'
-                }`}>
-                  {tab.count}
-                </span>
+                All Dates ({summary.total_pending_count || 0})
               </button>
-            ))}
+
+              {dateReminders.slice(0, 8).map(rem => (
+                <button
+                  key={rem.date}
+                  type="button"
+                  onClick={() => setSelectedDateFilter(selectedDateFilter === rem.date ? 'ALL' : rem.date)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 ${
+                    selectedDateFilter === rem.date
+                      ? 'bg-red-600 text-white shadow-sm shadow-red-200 ring-2 ring-red-400/30'
+                      : 'bg-white text-red-700 hover:bg-red-50 border border-red-200'
+                  }`}
+                  title={rem.reminder_text}
+                >
+                  <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
+                  <span>{rem.reminder_text}</span>
+                  <span className="font-mono text-[10px] opacity-80">(₹{rem.pending_amount.toLocaleString('en-IN')})</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Filter & Search Bar */}
+        <div className="px-6 py-3 bg-slate-50 border-b border-slate-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
+          <div className="text-xs text-slate-600 font-medium">
+            Showing <strong className="text-slate-900 font-bold">{filteredItems.length}</strong> pending vehicle(s)
+            {selectedDateFilter !== 'ALL' && (
+              <span className="ml-1 text-amber-700 font-semibold">
+                for date {selectedDateFilter}
+              </span>
+            )}
           </div>
 
-          {/* Search Input Filter */}
-          <div className="relative w-full md:w-64">
+          <div className="relative w-full sm:w-64">
             <input
               type="text"
-              placeholder="Search vehicle, customer, IMEI..."
+              placeholder="Search vehicle, customer, IMEI, tech..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent"
@@ -206,13 +216,12 @@ export default function PendingPaymentNotificationModal({
             {searchQuery && (
               <button
                 onClick={() => setSearchQuery('')}
-                className="absolute right-2.5 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-bold"
               >
                 ✕
               </button>
             )}
           </div>
-
         </div>
 
         {/* List of Notification Alert Cards */}
@@ -234,90 +243,71 @@ export default function PendingPaymentNotificationModal({
             </div>
           ) : (
             filteredItems.map((item) => {
-              const isYesterday = item.bucket === 'YESTERDAY';
-              const isToday = item.bucket === 'TODAY';
-              const isCritical = item.bucket === 'CRITICAL_OVERDUE';
-
               return (
                 <div
                   key={item.id}
-                  className={`p-4.5 rounded-2xl border transition-all shadow-2xs space-y-3.5 ${
-                    isYesterday
-                      ? 'bg-amber-50/40 border-amber-200 hover:border-amber-300'
-                      : isCritical
-                      ? 'bg-red-50/30 border-red-200 hover:border-red-300'
-                      : isToday
-                      ? 'bg-blue-50/30 border-blue-200 hover:border-blue-300'
-                      : 'bg-white border-slate-200/80 hover:border-slate-300'
-                  }`}
+                  className="p-4 rounded-2xl border border-slate-200/90 bg-white hover:border-amber-300 hover:shadow-xs transition-all space-y-3"
                 >
-                  {/* Top Bar: Vehicle Badge + Customer + Aging + Amount Due */}
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2.5 border-b border-slate-100">
+                  {/* Top Bar: Vehicle Badge + Installation Date + Balance Due */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 border-b border-slate-100">
                     <div className="flex items-center gap-2.5 flex-wrap">
                       <span className="px-3 py-1.5 rounded-xl bg-slate-900 text-white font-mono font-bold text-xs shadow-2xs flex items-center gap-1.5">
                         <Car className="w-3.5 h-3.5 text-amber-400" />
                         <span>{item.vehicle_number}</span>
                       </span>
 
-                      {/* Aging Status Badge */}
-                      <span className={`px-2.5 py-1 rounded-xl text-xs font-bold border flex items-center gap-1.5 ${
-                        isYesterday
-                          ? 'bg-amber-100 text-amber-900 border-amber-300 font-extrabold'
-                          : isToday
-                          ? 'bg-blue-100 text-blue-900 border-blue-200'
-                          : isCritical
-                          ? 'bg-red-100 text-red-900 border-red-300 font-extrabold'
-                          : 'bg-slate-100 text-slate-700 border-slate-200'
-                      }`}>
-                        <Clock className="w-3.5 h-3.5" />
-                        <span>{item.aging_label || `${item.days_overdue} days due`}</span>
+                      {/* Installation Date Badge */}
+                      <span className="px-2.5 py-1 rounded-xl text-xs font-bold bg-amber-50 text-amber-900 border border-amber-200 flex items-center gap-1.5">
+                        <Calendar className="w-3.5 h-3.5 text-amber-600" />
+                        <span>Installed on {item.display_date || item.installation_date}</span>
                       </span>
 
-                      {item.device_type_name && (
-                        <span className="px-2 py-0.5 rounded-lg text-[10px] font-semibold bg-slate-100 text-slate-600">
-                          {item.device_type_name}
+                      {item.days_overdue > 0 && (
+                        <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 text-slate-600">
+                          {item.days_overdue} {item.days_overdue === 1 ? 'day' : 'days'} ago
                         </span>
                       )}
                     </div>
 
-                    <div className="flex items-center gap-2 sm:text-right">
-                      <span className="text-[11px] text-slate-400 font-medium">Balance Due:</span>
-                      <span className="text-base font-black font-mono text-red-600">
-                        ₹{(parseFloat(item.sale_price) || 0).toLocaleString('en-IN')}
-                      </span>
+                    <div className="flex flex-col sm:items-end gap-0.5 sm:text-right">
+                      <div className="flex items-center gap-1.5 sm:justify-end">
+                        <span className="text-[11px] text-slate-400 font-medium">Balance Due:</span>
+                        <span className="text-base font-black font-mono text-red-600">
+                          ₹{(parseFloat(item.sale_price) || 0).toLocaleString('en-IN')}
+                        </span>
+                      </div>
+                      {item.is_partial && item.amount_paid > 0 && (
+                        <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
+                          ₹{item.amount_paid.toLocaleString('en-IN')} paid of ₹{(item.total_sale_price || 0).toLocaleString('en-IN')}
+                        </span>
+                      )}
                     </div>
                   </div>
 
-                  {/* Middle Info Grid: Customer, Dates, Location, Tech */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                  {/* 6 Core Info Grid: Customer, Phone, IMEI, Tech */}
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs">
                     
-                    {/* Customer */}
-                    <div className="space-y-1">
-                      <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Customer / Fleet</p>
-                      <p className="font-bold text-slate-900 truncate">
-                        {item.customer_name || 'Customer'}
-                      </p>
-                      <p className="text-[11px] text-slate-500 font-mono flex items-center gap-1">
-                        <Phone className="w-3 h-3 text-emerald-600" />
-                        <span>{item.customer_contact || 'No Contact'}</span>
+                    {/* Customer Name */}
+                    <div className="space-y-0.5">
+                      <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Customer Name</p>
+                      <p className="font-bold text-slate-900 flex items-center gap-1 truncate">
+                        <User className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                        <span>{item.customer_name || 'Customer'}</span>
                       </p>
                     </div>
 
-                    {/* Fitment Date & Location */}
-                    <div className="space-y-1">
-                      <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Fitment & Area</p>
-                      <p className="font-medium text-slate-700 flex items-center gap-1">
-                        <Calendar className="w-3 h-3 text-slate-400" />
-                        <span>{item.installation_date || '—'}</span>
-                      </p>
-                      <p className="text-[11px] text-slate-500 truncate">
-                        📍 {item.installation_location || 'Field'}
+                    {/* Phone Number */}
+                    <div className="space-y-0.5">
+                      <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Phone Number</p>
+                      <p className="text-[11px] text-slate-600 font-mono font-medium flex items-center gap-1">
+                        <Phone className="w-3 h-3 text-emerald-600 shrink-0" />
+                        <span>{item.customer_contact || 'No Phone'}</span>
                       </p>
                     </div>
 
-                    {/* IMEI & Technician */}
-                    <div className="space-y-1">
-                      <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Device & Tech</p>
+                    {/* IMEI Number */}
+                    <div className="space-y-0.5">
+                      <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">IMEI Number</p>
                       <p className="font-mono text-indigo-600 font-semibold text-[11px]">
                         <button
                           type="button"
@@ -328,8 +318,14 @@ export default function PendingPaymentNotificationModal({
                           {item.imei_number}
                         </button>
                       </p>
-                      <p className="text-[11px] text-slate-500">
-                        🔧 {item.installed_by || 'Technician'}
+                    </div>
+
+                    {/* Technician */}
+                    <div className="space-y-0.5">
+                      <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Technician</p>
+                      <p className="text-[11px] text-slate-700 font-medium flex items-center gap-1 truncate">
+                        <Wrench className="w-3 h-3 text-slate-400 shrink-0" />
+                        <span>{item.installed_by || 'Technician'}</span>
                       </p>
                     </div>
 
@@ -360,19 +356,14 @@ export default function PendingPaymentNotificationModal({
                       <span>UPI QR</span>
                     </button>
 
-                    {/* 1-Click Mark as Paid */}
+                    {/* Mark Paid (Cash, UPI, Bank Transfer) */}
                     <button
                       type="button"
-                      disabled={markingPaidId === item.id}
-                      onClick={() => handleMarkPaid(item)}
-                      className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-2xs cursor-pointer"
-                      title="Mark payment as RECEIVED"
+                      onClick={() => handleOpenMarkPaid(item)}
+                      className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-2xs cursor-pointer hover:shadow-sm"
+                      title="Mark payment as RECEIVED (Cash, UPI, Bank Transfer)"
                     >
-                      {markingPaidId === item.id ? (
-                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      ) : (
-                        <CheckCircle2 className="w-3.5 h-3.5" />
-                      )}
+                      <CheckCircle2 className="w-3.5 h-3.5" />
                       <span>Mark Paid</span>
                     </button>
 
@@ -410,6 +401,16 @@ export default function PendingPaymentNotificationModal({
 
       </div>
 
+      {/* Record Payment Modal with Mode Selection (Cash, UPI, Bank Transfer, Cheque) */}
+      {selectedPayItem && (
+        <MarkPaymentModal
+          isOpen={true}
+          item={selectedPayItem}
+          onClose={() => setSelectedPayItem(null)}
+          onPaymentSuccess={handlePaymentSuccess}
+        />
+      )}
+
       {/* Payment QR Modal Popup */}
       {selectedQrItem && (
         <PaymentQrModal
@@ -439,3 +440,4 @@ export default function PendingPaymentNotificationModal({
     document.body
   );
 }
+

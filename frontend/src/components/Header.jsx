@@ -34,6 +34,7 @@ export default function Header({ onOpenScanner, onOpenTraceDrawer, onNavigateTab
   const [showUserDropdown, setShowUserDropdown] = useState(false);
   const [isPendingAlertsOpen, setIsPendingAlertsOpen] = useState(false);
   const [pendingAlertsSummary, setPendingAlertsSummary] = useState(null);
+  const [latestDateReminder, setLatestDateReminder] = useState('');
   const searchInputRef = useRef(null);
   const searchDropdownRef = useRef(null);
   const userDropdownRef = useRef(null);
@@ -50,6 +51,9 @@ export default function Header({ onOpenScanner, onOpenTraceDrawer, onNavigateTab
       const res = await fetchPendingPaymentAlerts();
       if (res.success && res.summary) {
         setPendingAlertsSummary(res.summary);
+        if (res.date_reminders && res.date_reminders.length > 0) {
+          setLatestDateReminder(res.date_reminders[0].reminder_text);
+        }
       }
     } catch (e) {
       console.warn('Could not fetch pending payment alerts summary:', e);
@@ -272,7 +276,9 @@ export default function Header({ onOpenScanner, onOpenTraceDrawer, onNavigateTab
               : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200'
           }`}
           title={
-            (pendingAlertsSummary?.yesterday_pending_count || 0) > 0
+            latestDateReminder
+              ? `⚠️ Reminder: ${latestDateReminder}`
+              : (pendingAlertsSummary?.yesterday_pending_count || 0) > 0
               ? `⚠️ ${pendingAlertsSummary.yesterday_pending_count} vehicle(s) fitted yesterday have pending payment!`
               : `${pendingAlertsSummary?.total_pending_count || 0} vehicle(s) with pending payments`
           }
