@@ -1,22 +1,13 @@
 /**
  * FuelTracks Live Google Sheets Auto-Sync Webhook
+ * Supports exact dynamic columns per brand tab (e.g. 35+ columns for VAMO, 37+ for VOLTY, etc.)
  */
 
-const SPREADSHEET_ID = '1UN8wBWys0ghMaYnAZd-lhVJSwe026ELIWgxn8oraqZM';
+const SPREADSHEET_ID = '1IKYZ-x0W4SI_W7NH-8ZqQ_-i_2NwNk9nnxKlRygJNpQ';
 
-const HEADERS = [
-  'IMEI', 'SIM NUMBER', 'DEVICE TYPE', 'STOCK PLACE', 'STOCK PLACE DATE',
-  'STATUS', 'CUSTOMER NAME', 'CUSTOMER PHONE', 'VEHICLE NUMBER',
-  'CHASIS NUMBER', 'ENGINE NUMBER', 'CATEGORY', 'INSTALLATION DATE',
-  'PAYMENT STATUS', 'AMOUNT', 'AMOUNT RECEIVED BY', 'TECHNICIAN', 'LAST UPDATED'
-];
-
-// Run this function ONCE inside Apps Script editor to authorize Google Sheets access
 function testSync() {
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   Logger.log('Connected to sheet: ' + ss.getName());
-  const sheet = getOrCreateSheet(ss, 'VAMOSYS');
-  Logger.log('VAMOSYS tab ready!');
 }
 
 function getSpreadsheet() {
@@ -28,17 +19,16 @@ function doPost(e) {
     const data = JSON.parse(e.postData.contents);
     const ss = getSpreadsheet();
 
-    if (data.action === 'UPSERT_DEVICE') {
-      upsertSingleDevice(ss, data.device);
-    } else if (data.action === 'BULK_UPSERT') {
-      if (Array.isArray(data.devices)) {
-        data.devices.forEach(dev => upsertSingleDevice(ss, dev));
+    if (data.action === 'SYNC_TAB_DATA') {
+      syncTabWithExactHeaders(ss, data.tab_name, data.headers, data.rows);
+    } else if (data.action === 'UPSERT_DEVICE_ROW') {
+      upsertDeviceRow(ss, data.tab_name, data.headers, data.row);
+    } else if (data.action === 'BULK_UPSERT_ROWS') {
+      if (Array.isArray(data.batches)) {
+        data.batches.forEach(b => {
+          syncTabWithExactHeaders(ss, b.tab_name, b.headers, b.rows);
+        });
       }
-    } else if (data.action === 'FULL_SYNC') {
-      const grouped = data.grouped_by_tab || {};
-      Object.keys(grouped).forEach(tabName => {
-        fullSyncTab(ss, tabName, grouped[tabName]);
-      });
     }
 
     return ContentService.createTextOutput(JSON.stringify({ 
@@ -54,7 +44,7 @@ function doPost(e) {
   }
 }
 
-function getOrCreateSheet(ss, tabName) {
+function getOrCreateSheet(ss, tabName, headers) {
   const target = (tabName || 'GENERAL').toUpperCase().trim();
   const sheets = ss.getSheets();
   let sheet = null;
@@ -70,45 +60,56 @@ function getOrCreateSheet(ss, tabName) {
     sheet = ss.insertSheet(target);
   }
 
-  if (sheet.getLastRow() === 0) {
-    sheet.appendRow(HEADERS);
-    const headerRange = sheet.getRange(1, 1, 1, HEADERS.length);
+  return sheet;
+}
+
+function syncTabWithExactHeaders(ss, tabName, headers, rows) {
+  if (!headers || headers.length === 0) return;
+  const sheet = getOrCreateSheet(ss, tabName, headers);
+  
+  // Clear sheet completely to guarantee fresh exact layout
+  sheet.clear();
+
+  // 1. Write headers
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  const headerRange = sheet.getRange(1, 1, 1, headers.length);
+  headerRange.setBackground('#1e3a8a')
+             .setFontColor('#ffffff')
+             .setFontWeight('bold')
+             .setFontFamily('Roboto')
+             .setFontSize(10)
+             .setHorizontalAlignment('center');
+  
+  sheet.setFrozenRows(1);
+
+  // 2. Write all data rows in ONE atomic operation (ultra-fast)
+  if (rows && rows.length > 0) {
+    sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
+  }
+
+  // 3. Auto-resize all columns
+  try {
+    for (let c = 1; c <= headers.length; c++) {
+      sheet.autoResizeColumn(c);
+    }
+  } catch(e) {}
+}
+
+function upsertDeviceRow(ss, tabName, headers, row) {
+  if (!row || row.length === 0) return;
+  const sheet = getOrCreateSheet(ss, tabName, headers);
+  
+  // If sheet is empty, set headers first
+  if (sheet.getLastRow() === 0 && headers && headers.length > 0) {
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    const headerRange = sheet.getRange(1, 1, 1, headers.length);
     headerRange.setBackground('#1e3a8a').setFontColor('#ffffff').setFontWeight('bold');
     sheet.setFrozenRows(1);
   }
 
-  return sheet;
-}
-
-function formatRowArray(d) {
-  return [
-    "'" + (d.imei || ''),
-    "'" + (d.sim || ''),
-    d.device_type || '',
-    d.stock_place || '',
-    d.stock_place_date || '',
-    d.status || '',
-    d.customer_name || '',
-    "'" + (d.customer_phone || ''),
-    d.vehicle_number || '',
-    d.chasis_number || '',
-    d.engine_number || '',
-    d.category || '',
-    d.installation_date || '',
-    d.payment_status || '',
-    d.amount || '',
-    d.received_by || '',
-    d.technician || '',
-    d.last_updated || new Date().toISOString()
-  ];
-}
-
-function upsertSingleDevice(ss, dev) {
-  if (!dev || !dev.imei) return;
-  const sheet = getOrCreateSheet(ss, dev.device_type);
   const data = sheet.getDataRange().getValues();
-  const imeiStr = String(dev.imei).trim();
-  
+  const imeiStr = String(row[0] || '').replace(/^'/, '').trim();
+
   let targetRow = -1;
   for (let r = 1; r < data.length; r++) {
     const rowImei = String(data[r][0] || '').replace(/^'/, '').trim();
@@ -118,22 +119,9 @@ function upsertSingleDevice(ss, dev) {
     }
   }
 
-  const rowValues = formatRowArray(dev);
   if (targetRow !== -1) {
-    sheet.getRange(targetRow, 1, 1, rowValues.length).setValues([rowValues]);
+    sheet.getRange(targetRow, 1, 1, row.length).setValues([row]);
   } else {
-    sheet.appendRow(rowValues);
-  }
-}
-
-function fullSyncTab(ss, tabName, devicesList) {
-  if (!Array.isArray(devicesList) || devicesList.length === 0) return;
-  const sheet = getOrCreateSheet(ss, tabName);
-  if (sheet.getLastRow() > 1) {
-    sheet.getRange(2, 1, sheet.getLastRow() - 1, HEADERS.length).clearContent();
-  }
-  const rows = devicesList.map(formatRowArray);
-  if (rows.length > 0) {
-    sheet.getRange(2, 1, rows.length, HEADERS.length).setValues(rows);
+    sheet.appendRow(row);
   }
 }

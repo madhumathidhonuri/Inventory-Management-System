@@ -2,10 +2,9 @@ const db = require('../db/database');
 
 /**
  * Google Sheets Auto-Sync Service
- * Syncs device additions, stock place movements, fitments, and payments live to Google Sheets.
+ * Syncs device additions, stock place movements, fitments, and payments live to Google Sheets
+ * with EXACT per-brand columns (e.g. all 35+ columns for VAMO, 37+ for VOLTY, 35+ for TRACKNOW, etc.)
  */
-
-const WEBHOOK_URL = process.env.GOOGLE_SHEET_WEBHOOK_URL || null;
 
 /**
  * Check if Google Sheets webhook is configured
@@ -15,64 +14,85 @@ function isConfigured() {
 }
 
 /**
- * Format a device object into clean standard row payload for Google Sheets
+ * Get ordered column headers for a specific brand / tab
  */
-function formatDevicePayload(dev) {
+function getTabHeaders(brandName) {
+  const targetBrand = (brandName || 'GENERAL').toUpperCase().trim();
+  
+  // Base columns for tracking
+  const headerSet = new Set(['IMEI', 'STATUS', 'CURRENT HOLDER']);
+
+  try {
+    const rows = db.prepare(`
+      SELECT d.additional_attributes
+      FROM devices d
+      JOIN device_types dt ON d.device_type_id = dt.id
+      WHERE UPPER(TRIM(dt.name)) = ?
+    `).all(targetBrand);
+
+    rows.forEach(r => {
+      try {
+        const attrs = typeof r.additional_attributes === 'object' 
+          ? r.additional_attributes 
+          : JSON.parse(r.additional_attributes || '{}');
+        Object.keys(attrs).forEach(k => {
+          if (k && !k.startsWith('__empty') && k !== 'original_row' && k !== '_1' && k !== '_2') {
+            headerSet.add(k);
+          }
+        });
+      } catch {}
+    });
+  } catch (e) {
+    console.warn('[GoogleSheetSync] Error fetching tab headers:', e.message);
+  }
+
+  headerSet.add('LAST UPDATED');
+  return Array.from(headerSet);
+}
+
+/**
+ * Format a device into an exact array corresponding to the tab headers
+ */
+function formatRowForTab(dev, headers) {
   let attrs = {};
   try {
-    attrs = typeof dev.additional_attributes === 'object' ? dev.additional_attributes : JSON.parse(dev.additional_attributes || '{}');
+    attrs = typeof dev.additional_attributes === 'object' 
+      ? dev.additional_attributes 
+      : JSON.parse(dev.additional_attributes || '{}');
   } catch {
     attrs = {};
   }
 
-  const deviceTypeName = dev.device_type_name || (dev.device_type_id ? getDeviceTypeName(dev.device_type_id) : 'GENERAL');
+  return headers.map(h => {
+    if (h === 'IMEI') return "'" + (dev.imei_number || dev.imei || '');
+    if (h === 'STATUS') return dev.current_status || dev.status || 'IN_WAREHOUSE';
+    if (h === 'CURRENT HOLDER') return dev.current_holder_name || dev.stock_place || 'Central Warehouse';
+    if (h === 'LAST UPDATED') return new Date().toISOString();
 
-  return {
-    id: dev.id,
-    imei: dev.imei_number,
-    sim: dev.sim_number || attrs['SIM NUMBER'] || attrs['SIM 1'] || attrs['airtel'] || attrs['bsnl'] || '',
-    device_type: deviceTypeName,
-    stock_place: dev.current_holder_name || attrs['STOCK PLACE'] || 'Central Warehouse',
-    stock_place_date: attrs['STOCK PLACE DATE'] || attrs['Stock Place Date'] || dev.purchase_date || '',
-    status: dev.current_status || 'IN_WAREHOUSE',
-    customer_name: attrs['CUSTOMER NAME'] || attrs['Customer Name'] || '',
-    customer_phone: attrs['CUSTOMER PHONE NUMBER'] || attrs['Customer Phone'] || '',
-    vehicle_number: attrs['VEHICLE NUMBER'] || attrs['Vehicle Number'] || '',
-    chasis_number: attrs['CHASIS NUMBER'] || attrs['Chasis Number'] || '',
-    engine_number: attrs['ENGINE NUMBER'] || attrs['Engine Number'] || '',
-    category: attrs['CATEGORY'] || attrs['Category'] || 'GENERAL',
-    installation_date: attrs['INSTALLATION DATE'] || attrs['Installation Date'] || '',
-    payment_status: attrs['AMOUNT RECEIVED'] || attrs['Amount Received'] || 'PENDING',
-    payment_date: attrs['PAYMENT DATE'] || attrs['Payment Date'] || '',
-    amount: attrs['TOTAL COST'] || attrs['COST'] || attrs['SALE PRICE'] || '',
-    received_by: attrs['AMOUNT RECEIVED BY'] || attrs['Amount Received By'] || '',
-    technician: attrs['TECHNICIAN'] || attrs['Technician'] || attrs['SALES PERSON NAME'] || '',
-    last_updated: new Date().toISOString()
-  };
-}
+    const val = attrs[h];
+    if (val === undefined || val === null) return '';
 
-function getDeviceTypeName(typeId) {
-  try {
-    const row = db.prepare('SELECT name FROM device_types WHERE id = ?').get(typeId);
-    return row ? row.name.toUpperCase().trim() : 'GENERAL';
-  } catch {
-    return 'GENERAL';
-  }
+    // If it's a long number string (Phone, SIM, ICCID, Aadhaar), prefix with ' so Sheets keeps full precision
+    const sVal = String(val).trim();
+    if (/^\d{10,}$/.test(sVal)) {
+      return "'" + sVal;
+    }
+    return sVal;
+  });
 }
 
 /**
- * Send an event payload to Google Sheets Webhook (Non-blocking)
+ * Send an event payload to Google Sheets Webhook
  */
-async function sendToGoogleSheet(action, data) {
+async function sendToGoogleSheet(action, data, customTimeout = 60000) {
   const url = process.env.GOOGLE_SHEET_WEBHOOK_URL;
   if (!url || !url.startsWith('http')) {
     return { success: false, reason: 'GOOGLE_SHEET_WEBHOOK_URL not configured' };
   }
 
   try {
-    // Fire and forget or quick fetch with 10s timeout
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000);
+    const timeout = setTimeout(() => controller.abort(), customTimeout);
 
     const res = await fetch(url, {
       method: 'POST',
@@ -85,12 +105,11 @@ async function sendToGoogleSheet(action, data) {
 
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
-      console.warn('[GoogleSheetSync] Webhook response warning:', res.status, errText);
+      console.warn('[GoogleSheetSync] Webhook warning:', res.status, errText.slice(0, 200));
       return { success: false, error: `HTTP ${res.status}: ${errText}` };
     }
 
     const result = await res.json().catch(() => ({ success: true }));
-    console.log(`[GoogleSheetSync] Successfully synced ${action} event to Google Sheets.`);
     return { success: true, result };
   } catch (err) {
     console.warn('[GoogleSheetSync] Sync notice:', err.message);
@@ -99,7 +118,7 @@ async function sendToGoogleSheet(action, data) {
 }
 
 /**
- * Sync a single device mutation (Add or Update)
+ * Sync a single device mutation (Add, Update, Transfer, Fitment)
  */
 function syncDeviceUpdate(deviceIdOrImei) {
   if (!isConfigured()) return;
@@ -107,7 +126,7 @@ function syncDeviceUpdate(deviceIdOrImei) {
   setImmediate(async () => {
     try {
       let dev;
-      if (typeof deviceIdOrImei === 'number' || /^\d+$/.test(String(deviceIdOrImei)) && String(deviceIdOrImei).length < 10) {
+      if (typeof deviceIdOrImei === 'number' || (/^\d+$/.test(String(deviceIdOrImei)) && String(deviceIdOrImei).length < 10)) {
         dev = db.prepare(`
           SELECT d.*, dt.name as device_type_name
           FROM devices d
@@ -124,17 +143,24 @@ function syncDeviceUpdate(deviceIdOrImei) {
       }
 
       if (dev) {
-        const payload = formatDevicePayload(dev);
-        await sendToGoogleSheet('UPSERT_DEVICE', { device: payload });
+        const tabName = (dev.device_type_name || 'GENERAL').toUpperCase().trim();
+        const headers = getTabHeaders(tabName);
+        const row = formatRowForTab(dev, headers);
+
+        await sendToGoogleSheet('UPSERT_DEVICE_ROW', {
+          tab_name: tabName,
+          headers,
+          row
+        });
       }
     } catch (e) {
-      console.warn('[GoogleSheetSync] Error syncing device:', e.message);
+      console.warn('[GoogleSheetSync] Error syncing single device:', e.message);
     }
   });
 }
 
 /**
- * Sync multiple devices (e.g. Bulk Transfer or Excel Import)
+ * Sync multiple devices in bulk
  */
 function syncBulkDevices(deviceIdsOrImeis) {
   if (!isConfigured() || !Array.isArray(deviceIdsOrImeis) || deviceIdsOrImeis.length === 0) return;
@@ -148,9 +174,26 @@ function syncBulkDevices(deviceIdsOrImeis) {
         : `SELECT d.*, dt.name as device_type_name FROM devices d JOIN device_types dt ON d.device_type_id = dt.id WHERE d.imei_number IN (${placeholders})`;
 
       const devices = db.prepare(query).all(...deviceIdsOrImeis);
-      const payloadList = devices.map(formatDevicePayload);
 
-      await sendToGoogleSheet('BULK_UPSERT', { devices: payloadList });
+      // Group by tab
+      const grouped = {};
+      for (const d of devices) {
+        const tabName = (d.device_type_name || 'GENERAL').toUpperCase().trim();
+        if (!grouped[tabName]) grouped[tabName] = [];
+        grouped[tabName].push(d);
+      }
+
+      for (const [tabName, tabDevices] of Object.entries(grouped)) {
+        const headers = getTabHeaders(tabName);
+        for (const dev of tabDevices) {
+          const row = formatRowForTab(dev, headers);
+          await sendToGoogleSheet('UPSERT_DEVICE_ROW', {
+            tab_name: tabName,
+            headers,
+            row
+          });
+        }
+      }
     } catch (e) {
       console.warn('[GoogleSheetSync] Error syncing bulk devices:', e.message);
     }
@@ -158,7 +201,7 @@ function syncBulkDevices(deviceIdsOrImeis) {
 }
 
 /**
- * Full master sync of all inventory to Google Sheets
+ * Full master sync of all inventory to Google Sheets with exact brand columns
  */
 async function syncFullMasterInventory() {
   if (!isConfigured()) {
@@ -172,33 +215,56 @@ async function syncFullMasterInventory() {
     ORDER BY d.id ASC
   `).all();
 
-  const formattedDevices = allDevices.map(formatDevicePayload);
-
-  // Group by brand tab (VAMOSYS, VOLTY, TRACKNOW, etc.)
+  // Group by brand tab
   const grouped = {};
-  for (const d of formattedDevices) {
-    const tabName = (d.device_type || 'GENERAL').toUpperCase().trim();
+  for (const d of allDevices) {
+    const tabName = (d.device_type_name || 'GENERAL').toUpperCase().trim();
     if (!grouped[tabName]) grouped[tabName] = [];
     grouped[tabName].push(d);
   }
 
-  const result = await sendToGoogleSheet('FULL_SYNC', {
-    total_count: formattedDevices.length,
-    grouped_by_tab: grouped
-  });
+  const tabNames = Object.keys(grouped);
+  console.log(`[GoogleSheetSync] Starting full sync of ${allDevices.length} devices across ${tabNames.length} tabs with exact columns...`);
+
+  const results = {};
+
+  for (const tabName of tabNames) {
+    const devices = grouped[tabName];
+    const headers = getTabHeaders(tabName);
+    const rows = devices.map(d => formatRowForTab(d, headers));
+
+    console.log(`[GoogleSheetSync] Syncing tab ${tabName}: ${rows.length} rows, ${headers.length} exact columns...`);
+
+    const res = await sendToGoogleSheet('SYNC_TAB_DATA', {
+      tab_name: tabName,
+      headers,
+      rows
+    }, 45000);
+
+    results[tabName] = {
+      device_count: rows.length,
+      column_count: headers.length,
+      headers,
+      success: res.success
+    };
+
+    // Small delay between tab creation to let Google Sheets finalize
+    await new Promise(r => setTimeout(r, 500));
+  }
 
   return {
-    success: result.success,
-    total_synced: formattedDevices.length,
-    tabs: Object.keys(grouped),
-    result
+    success: true,
+    total_devices: allDevices.length,
+    tabs: results
   };
 }
 
 module.exports = {
   isConfigured,
+  sendToGoogleSheet,
+  getTabHeaders,
+  formatRowForTab,
   syncDeviceUpdate,
   syncBulkDevices,
-  syncFullMasterInventory,
-  formatDevicePayload
+  syncFullMasterInventory
 };

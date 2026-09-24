@@ -119,6 +119,13 @@ router.post('/', (req, res) => {
 
   try {
     const result = transaction();
+
+    // Auto-sync instantly to Google Sheets in real time
+    try {
+      const googleSheetsSync = require('../services/googleSheetsSync');
+      googleSheetsSync.syncBulkDevices(validDevices.map(d => d.id));
+    } catch (e) { }
+
     res.json({ success: true, data: result });
   } catch (err) {
     res.status(400).json({ success: false, error: err.message });

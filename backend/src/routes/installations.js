@@ -262,6 +262,12 @@ router.post('/', (req, res) => {
       cloudSync.triggerDebouncedSync(1000);
     } catch (e) { }
 
+    // Auto-sync instantly to Google Sheets in real time
+    try {
+      const googleSheetsSync = require('../services/googleSheetsSync');
+      googleSheetsSync.syncDeviceUpdate(cleanImei);
+    } catch (e) { }
+
     res.json({
       success: true,
       data: result,
