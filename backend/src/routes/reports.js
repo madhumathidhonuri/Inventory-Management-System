@@ -903,11 +903,19 @@ router.get('/export', (req, res) => {
   }
 });
 
-// Helper: Extract normalized YYYY-MM-DD certificate date from device & attributes
+// Helper: Extract normalized YYYY-MM-DD certificate / installation date from device & attributes
 function extractDeviceCertificateDate(dev = {}, attrs = {}) {
   const directCertKeys = [
     'CERTIFICATE ISSUED DATE', 'Certificate Issued Date', 'certificate_issued_date',
-    'CERTIFICATE DATE', 'Certificate Date', 'certificate_date'
+    'CERTIFICATE DATE', 'Certificate Date', 'certificate_date',
+    'INSTALLATION DATE', 'Installation Date', 'installation_date',
+    'INSTALL DATE', 'Install Date', 'install_date',
+    'DATE OF INSTALLATION', 'Date Of Installation', 'Date of Installation',
+    'INSTALLED DATE', 'Installed Date', 'installed_date',
+    'ACTIVATION DATE', 'Activation Date', 'activation_date',
+    'SIM ACTIVATED DATE', 'Sim Activated Date', 'SIM ACTIVATION DATE', 'Sim Activation Date',
+    'FITTING DATE', 'Fitting Date',
+    'DATE', 'Date', 'date'
   ];
 
   for (const k of directCertKeys) {
@@ -1000,7 +1008,7 @@ function extractTgMiningDate(dev = {}, attrs = {}) {
   return null;
 }
 
-// Helper: Compute 100% dynamic Daily Master Inventory Distribution Matrix with Today's Issued Certificates & TG Mining Devices
+// Helper: Compute 100% dynamic Daily Master Inventory Distribution Matrix with Today's Issued Certificates & TG Mining Devices & Daily Installations
 function computeDailyDistributionMatrix(requestedDate = null) {
   const targetDate = requestedDate || new Date().toISOString().split('T')[0];
 
@@ -1024,6 +1032,24 @@ function computeDailyDistributionMatrix(requestedDate = null) {
     JOIN device_types dt ON d.device_type_id = dt.id
   `).all();
 
+  // Also query installations recorded on targetDate
+  let installationsOnDate = [];
+  try {
+    installationsOnDate = db.prepare(`
+      SELECT * FROM installations 
+      WHERE installation_date = ? 
+         OR installation_date LIKE ?
+         OR DATE(created_at) = ?
+    `).all(targetDate, `${targetDate}%`, targetDate);
+  } catch (e) {}
+
+  const instByDeviceId = new Map();
+  const instByImei = new Map();
+  installationsOnDate.forEach(inst => {
+    if (inst.device_id) instByDeviceId.set(inst.device_id, inst);
+    if (inst.imei_number) instByImei.set(String(inst.imei_number).trim(), inst);
+  });
+
   const locationsSet = new Set();
   const matrix = {};
   const todayIssuedDevices = [];
@@ -1043,7 +1069,13 @@ function computeDailyDistributionMatrix(requestedDate = null) {
     };
   });
 
+  const processedDeviceIds = new Set();
+  const processedImeis = new Set();
+
   devices.forEach(dev => {
+    processedDeviceIds.add(dev.id);
+    if (dev.imei_number) processedImeis.add(String(dev.imei_number).trim());
+
     let attrs = {};
     try { attrs = JSON.parse(dev.additional_attributes || '{}'); } catch {}
 
@@ -1062,36 +1094,45 @@ function computeDailyDistributionMatrix(requestedDate = null) {
       };
     }
 
-    const vehNo = String(attrs['VEHICLE NUMBER'] || attrs['VEHICLE NO'] || attrs['vehicle_number'] || attrs['vehicle_no'] || attrs['MACHINERY NUMBER'] || attrs['EQUIPMENT NUMBER'] || '').trim();
+    const instRecord = instByDeviceId.get(dev.id) || (dev.imei_number ? instByImei.get(String(dev.imei_number).trim()) : null);
+
+    const vehNo = String(attrs['VEHICLE NUMBER'] || attrs['VEHICLE NO'] || attrs['vehicle_number'] || attrs['vehicle_no'] || attrs['MACHINERY NUMBER'] || attrs['EQUIPMENT NUMBER'] || (instRecord ? instRecord.vehicle_number : '') || '').trim();
     const hasVehicle = Boolean(vehNo && vehNo !== '-' && vehNo !== '—' && vehNo !== 'NULL');
-    const isInstalled = dev.current_status === 'INSTALLED' || hasVehicle;
+    const isInstalled = dev.current_status === 'INSTALLED' || hasVehicle || Boolean(instRecord);
     const isMining = isTgMiningDevice(dev, attrs);
 
-    const certDate = extractDeviceCertificateDate(dev, attrs);
-    const tgMiningDate = extractTgMiningDate(dev, attrs);
+    let certDate = extractDeviceCertificateDate(dev, attrs);
+    if (!certDate && instRecord && instRecord.installation_date) {
+      certDate = String(instRecord.installation_date).trim().split('T')[0];
+    }
+
+    let tgMiningDate = extractTgMiningDate(dev, attrs);
+    if (!tgMiningDate && isMining && instRecord && instRecord.installation_date) {
+      tgMiningDate = String(instRecord.installation_date).trim().split('T')[0];
+    }
 
     const phone = attrs['CUSTOMER PHONE NUMBER'] || attrs['CUSTOMER PHONE'] || attrs['CUSTOMER CONTACT'] ||
       attrs['Customer Phone Number'] || attrs['Customer Phone'] || attrs['Customer Contact'] ||
       attrs['MOBILE'] || attrs['MOBILE NUMBER'] || attrs['PHONE'] || attrs['PHONE NUMBER'] ||
       attrs['customer_phone'] || attrs['customer_phone_number'] || attrs['customer_contact'] ||
-      attrs['phone_number'] || attrs['phone'] || attrs['mobile'] || '-';
+      attrs['phone_number'] || attrs['phone'] || attrs['mobile'] || (instRecord ? instRecord.customer_contact : '') || '-';
 
     const custName = attrs['CUSTOMER NAME'] || attrs['CERTIFICATE ISSUED TO'] || attrs['CUSTOMER'] ||
-      attrs['Customer Name'] || attrs['customer_name'] || attrs['MINING SITE'] || attrs['SITE NAME'] || '-';
+      attrs['Customer Name'] || attrs['customer_name'] || attrs['MINING SITE'] || attrs['SITE NAME'] || (instRecord ? instRecord.customer_name : '') || '-';
 
     const rawInstaller = attrs['TECHNICIAN'] || attrs['Technician'] || attrs['INSTALLED BY'] || attrs['Installed By'] ||
-      attrs['FITTER'] || attrs['Fitter'] || attrs['INSTALLER'] || attrs['Installer'] || attrs['installed_by'] || '';
-    const installer = (rawInstaller && String(rawInstaller).trim() && String(rawInstaller).trim().toLowerCase() !== 'technician') ? String(rawInstaller).trim() : '-';
+      attrs['FITTER'] || attrs['Fitter'] || attrs['INSTALLER'] || attrs['Installer'] || attrs['installed_by'] || (instRecord ? instRecord.installed_by : '') || '';
+    const installer = (rawInstaller && String(rawInstaller).trim() && String(rawInstaller).trim().toLowerCase() !== 'technician') ? String(rawInstaller).trim() : (instRecord && instRecord.installed_by ? instRecord.installed_by : '-');
 
     const chasis = attrs['CHASIS NUMBER'] || attrs['CHASSIS NUMBER'] || attrs['CHASIS NO'] ||
-      attrs['CHASSIS NO'] || attrs['chasis_number'] || attrs['chassis_number'] || '-';
+      attrs['CHASSIS NO'] || attrs['chasis_number'] || attrs['chassis_number'] || (instRecord ? instRecord.chasis_number : '') || '-';
 
-    const engine = attrs['ENGINE NUMBER'] || attrs['ENGINE NO'] || attrs['engine_number'] || '-';
+    const engine = attrs['ENGINE NUMBER'] || attrs['ENGINE NO'] || attrs['engine_number'] || (instRecord ? instRecord.engine_number : '') || '-';
 
-    const locName = attrs['RTO LOCATION'] || attrs['RTO Location'] || attrs['rto_location'] || attrs['STOCK PLACE'] || attrs['LOCATION'] || dev.current_holder_name || '';
+    const locName = attrs['RTO LOCATION'] || attrs['RTO Location'] || attrs['rto_location'] || attrs['STOCK PLACE'] || attrs['LOCATION'] || (instRecord ? instRecord.installation_location : '') || dev.current_holder_name || '';
 
-    // TG MINING device issued today
-    if (isMining && tgMiningDate && tgMiningDate === targetDate) {
+    // TG MINING device issued/installed today
+    if (isMining && (tgMiningDate === targetDate || (instRecord && instRecord.installation_date && instRecord.installation_date.startsWith(targetDate)))) {
       matrix[devName].tg_mining_issued_today++;
       todayTgMiningDevices.push({
         id: dev.id,
@@ -1100,7 +1141,7 @@ function computeDailyDistributionMatrix(requestedDate = null) {
         vehicle_number: vehNo || '-',
         customer_name: custName,
         customer_phone: phone,
-        tg_mining_date: tgMiningDate,
+        tg_mining_date: tgMiningDate || targetDate,
         installed_by: installer,
         chasis_number: chasis,
         engine_number: engine,
@@ -1108,8 +1149,8 @@ function computeDailyDistributionMatrix(requestedDate = null) {
       });
     }
 
-    // VLTD certificate issued today (non-mining or explicit cert)
-    if (!isMining && certDate && certDate === targetDate) {
+    // VLTD certificate / Device installed today (non-mining or standard device like V5, AIS140)
+    if (!isMining && (certDate === targetDate || (instRecord && instRecord.installation_date && instRecord.installation_date.startsWith(targetDate)))) {
       matrix[devName].certificates_issued_today++;
       todayIssuedDevices.push({
         id: dev.id,
@@ -1118,7 +1159,7 @@ function computeDailyDistributionMatrix(requestedDate = null) {
         vehicle_number: vehNo || '-',
         customer_name: custName,
         customer_phone: phone,
-        certificate_issued_date: certDate,
+        certificate_issued_date: certDate || targetDate,
         installed_by: installer,
         chasis_number: chasis,
         engine_number: engine,
@@ -1138,6 +1179,54 @@ function computeDailyDistributionMatrix(requestedDate = null) {
       matrix[devName].locations[place] = (matrix[devName].locations[place] || 0) + 1;
       matrix[devName].in_stock_total++;
     }
+  });
+
+  // Handle any standalone installations on targetDate for all device types
+  installationsOnDate.forEach(inst => {
+    const imei = String(inst.imei_number || '').trim();
+    if (inst.device_id && processedDeviceIds.has(inst.device_id)) return;
+    if (imei && processedImeis.has(imei)) return;
+
+    let devName = 'AIS140';
+    if (inst.device_type_id) {
+      const dt = deviceTypes.find(t => t.id === inst.device_type_id);
+      if (dt) devName = dt.name;
+    } else if (deviceTypes.length > 0) {
+      const cat = String(inst.category || inst.vehicle_type || '').toUpperCase();
+      const matched = deviceTypes.find(t => cat.includes(t.name.toUpperCase()) || t.name.toUpperCase().includes(cat));
+      devName = matched ? matched.name : (deviceTypes[0]?.name || 'AIS140');
+    }
+    if (!matrix[devName]) {
+      matrix[devName] = {
+        device_type_id: null,
+        device_name: devName,
+        locations: {},
+        certificates_issued_today: 0,
+        tg_mining_issued_today: 0,
+        total_installed: 0,
+        total_certificates_issued: 0,
+        in_stock_total: 0,
+        purchased_total: 0
+      };
+    }
+
+    matrix[devName].total_installed++;
+    matrix[devName].total_certificates_issued++;
+    matrix[devName].certificates_issued_today++;
+
+    todayIssuedDevices.push({
+      id: inst.device_id || null,
+      imei_number: imei || '-',
+      device_name: devName,
+      vehicle_number: inst.vehicle_number || '-',
+      customer_name: inst.customer_name || '-',
+      customer_phone: inst.customer_contact || '-',
+      certificate_issued_date: inst.installation_date ? inst.installation_date.split('T')[0] : targetDate,
+      installed_by: inst.installed_by || '-',
+      chasis_number: inst.chasis_number || '-',
+      engine_number: inst.engine_number || '-',
+      rto_location: inst.installation_location || '-'
+    });
   });
 
   // Calculate certificates issued text summary for each device
