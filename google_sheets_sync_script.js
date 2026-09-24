@@ -1,6 +1,6 @@
 /**
  * FuelTracks Live Google Sheets Auto-Sync Webhook
- * Supports exact dynamic columns per brand tab (e.g. 35+ columns for VAMO, 37+ for VOLTY, etc.)
+ * Option B: Top-Feed Mode (Updated / newly added devices always jump to Row 2 at the top!)
  */
 
 const SPREADSHEET_ID = '1IKYZ-x0W4SI_W7NH-8ZqQ_-i_2NwNk9nnxKlRygJNpQ';
@@ -67,7 +67,7 @@ function syncTabWithExactHeaders(ss, tabName, headers, rows) {
   if (!headers || headers.length === 0) return;
   const sheet = getOrCreateSheet(ss, tabName, headers);
   
-  // Clear sheet completely to guarantee fresh exact layout
+  // Clear sheet completely
   sheet.clear();
 
   // 1. Write headers
@@ -82,12 +82,12 @@ function syncTabWithExactHeaders(ss, tabName, headers, rows) {
   
   sheet.setFrozenRows(1);
 
-  // 2. Write all data rows in ONE atomic operation (ultra-fast)
+  // 2. Write rows in bulk
   if (rows && rows.length > 0) {
     sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
   }
 
-  // 3. Auto-resize all columns
+  // 3. Auto-resize columns
   try {
     for (let c = 1; c <= headers.length; c++) {
       sheet.autoResizeColumn(c);
@@ -95,11 +95,15 @@ function syncTabWithExactHeaders(ss, tabName, headers, rows) {
   } catch(e) {}
 }
 
+/**
+ * Option B: Top-Feed Implementation
+ * Deletes previous row if existing, then inserts at Row 2 (very top)
+ */
 function upsertDeviceRow(ss, tabName, headers, row) {
   if (!row || row.length === 0) return;
   const sheet = getOrCreateSheet(ss, tabName, headers);
   
-  // If sheet is empty, set headers first
+  // Ensure headers exist
   if (sheet.getLastRow() === 0 && headers && headers.length > 0) {
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
     const headerRange = sheet.getRange(1, 1, 1, headers.length);
@@ -119,9 +123,12 @@ function upsertDeviceRow(ss, tabName, headers, row) {
     }
   }
 
+  // If already exists, delete old position so it moves to the top
   if (targetRow !== -1) {
-    sheet.getRange(targetRow, 1, 1, row.length).setValues([row]);
-  } else {
-    sheet.appendRow(row);
+    sheet.deleteRow(targetRow);
   }
+
+  // Insert fresh row at Row 2 (top of table right under header)
+  sheet.insertRowBefore(2);
+  sheet.getRange(2, 1, 1, row.length).setValues([row]);
 }
