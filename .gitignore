@@ -40,6 +40,6 @@ pnpm-debug.log*
 *.db-shm
 backend/data/backups/
 backend/data/*.db
-tools/
 *.db
+!backend/src/db/initial_seed.db
 
