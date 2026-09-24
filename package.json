@@ -12,6 +12,7 @@
     "dev": "npx concurrently \"npm --prefix backend run dev\" \"npm --prefix frontend run dev\"",
     "seed": "npm --prefix backend run seed",
     "clear": "npm --prefix backend run clear",
+    "pull-cloud": "node backend/src/scripts/pull_cloud.js",
     "test": "npm --prefix backend test",
     "tunnel": ".\\tools\\cloudflared.exe tunnel --url http://localhost:5000",
     "online": ".\\tools\\ngrok.exe http --url=plant-disposal-accompany.ngrok-free.dev 5000"

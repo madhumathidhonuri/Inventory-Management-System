@@ -406,10 +406,13 @@ router.post('/confirm', (req, res) => {
       syncFitmentsToInstallations();
     } catch (e) {}
 
-    // Auto-sync instantly to Supabase Cloud Storage (No manual click needed)
+    // Auto-sync instantly to Supabase Cloud Storage & Google Sheets (No manual click needed)
     try {
       const cloudSync = require('../db/cloudSync');
       cloudSync.triggerDebouncedSync(1000);
+      const googleSheetsSync = require('../services/googleSheetsSync');
+      const importedImeis = items.map(i => i.imei).filter(Boolean);
+      googleSheetsSync.syncBulkDevices(importedImeis);
     } catch (e) {}
 
     res.json({

@@ -148,6 +148,37 @@ router.post('/factory-reset', async (req, res) => {
   }
 });
 
+// GET /api/backup/google-sheets-status - Check if Google Sheets live sync is configured
+router.get('/google-sheets-status', (req, res) => {
+  try {
+    const googleSheetsSync = require('../services/googleSheetsSync');
+    res.json({
+      success: true,
+      configured: googleSheetsSync.isConfigured()
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/backup/sync-google-sheets - Trigger full sync of all stock to Google Sheets
+router.post('/sync-google-sheets', async (req, res) => {
+  try {
+    const googleSheetsSync = require('../services/googleSheetsSync');
+    if (!googleSheetsSync.isConfigured()) {
+      return res.status(400).json({
+        success: false,
+        error: 'Google Sheets Webhook URL is not configured. Add GOOGLE_SHEET_WEBHOOK_URL in .env'
+      });
+    }
+
+    const result = await googleSheetsSync.syncFullMasterInventory();
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;
 
 

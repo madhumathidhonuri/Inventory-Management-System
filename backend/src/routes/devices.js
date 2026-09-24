@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db/database');
+const googleSheetsSync = require('../services/googleSheetsSync');
 
 // GET devices list with search & filter
 router.get('/', (req, res) => {
@@ -576,10 +577,11 @@ router.put('/:id', (req, res) => {
       VALUES (?, ?, 'STATUS_CHANGED', datetime('now'), ?, ?, ?, ?)
     `).run(id, newImei, existing.current_holder_name, newHolder, req.body.performed_by || 'Admin', remarksText);
 
-    // Auto-sync to Supabase Cloud Storage
+    // Auto-sync to Supabase Cloud Storage & Google Sheets
     try {
       const cloudSync = require('../db/cloudSync');
       cloudSync.triggerDebouncedSync(1000);
+      googleSheetsSync.syncDeviceUpdate(id);
     } catch (e) {}
 
     const updated = db.prepare('SELECT * FROM devices WHERE id = ?').get(id);
@@ -832,6 +834,14 @@ router.post('/bulk-transfer', (req, res) => {
         );
       }
     })();
+
+    // Auto-sync to Supabase & Google Sheets
+    try {
+      const cloudSync = require('../db/cloudSync');
+      cloudSync.triggerDebouncedSync(1000);
+      const transferredIds = devicesToUpdate.map(d => d.id);
+      googleSheetsSync.syncBulkDevices(transferredIds);
+    } catch (e) {}
 
     res.json({
       success: true,
