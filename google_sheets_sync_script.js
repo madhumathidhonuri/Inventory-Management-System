@@ -11,12 +11,16 @@ const HEADERS = [
   'PAYMENT STATUS', 'AMOUNT', 'AMOUNT RECEIVED BY', 'TECHNICIAN', 'LAST UPDATED'
 ];
 
+// Run this function ONCE inside Apps Script editor to authorize Google Sheets access
+function testSync() {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  Logger.log('Connected to sheet: ' + ss.getName());
+  const sheet = getOrCreateSheet(ss, 'VAMOSYS');
+  Logger.log('VAMOSYS tab ready!');
+}
+
 function getSpreadsheet() {
-  try {
-    return SpreadsheetApp.openById(SPREADSHEET_ID);
-  } catch (e) {
-    return SpreadsheetApp.getActiveSpreadsheet();
-  }
+  return SpreadsheetApp.openById(SPREADSHEET_ID);
 }
 
 function doPost(e) {
@@ -55,7 +59,6 @@ function getOrCreateSheet(ss, tabName) {
   const sheets = ss.getSheets();
   let sheet = null;
 
-  // Case-insensitive match or match existing tabs
   for (let s of sheets) {
     if (s.getName().toUpperCase().trim() === target) {
       sheet = s;
@@ -67,7 +70,6 @@ function getOrCreateSheet(ss, tabName) {
     sheet = ss.insertSheet(target);
   }
 
-  // Ensure header row exists
   if (sheet.getLastRow() === 0) {
     sheet.appendRow(HEADERS);
     const headerRange = sheet.getRange(1, 1, 1, HEADERS.length);
@@ -127,12 +129,9 @@ function upsertSingleDevice(ss, dev) {
 function fullSyncTab(ss, tabName, devicesList) {
   if (!Array.isArray(devicesList) || devicesList.length === 0) return;
   const sheet = getOrCreateSheet(ss, tabName);
-  
-  // Clear existing data except header
   if (sheet.getLastRow() > 1) {
     sheet.getRange(2, 1, sheet.getLastRow() - 1, HEADERS.length).clearContent();
   }
-
   const rows = devicesList.map(formatRowArray);
   if (rows.length > 0) {
     sheet.getRange(2, 1, rows.length, HEADERS.length).setValues(rows);
