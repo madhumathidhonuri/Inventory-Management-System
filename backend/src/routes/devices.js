@@ -1247,6 +1247,17 @@ router.post('/bulk-assign-dealer', (req, res) => {
 
     transaction();
 
+    // Auto-sync instantly to Supabase Cloud Storage & Google Sheets
+    try {
+      const cloudSync = require('../db/cloudSync');
+      cloudSync.triggerDebouncedSync(1000);
+      const googleSheetsSync = require('../services/googleSheetsSync');
+      const syncedImeis = updatedDevices.map(d => d.imei_number || d.id);
+      googleSheetsSync.syncBulkDevices(syncedImeis);
+    } catch (e) {
+      console.warn('[BulkAssignDealer] Sync notice:', e.message);
+    }
+
     res.json({
       success: true,
       updated_count: updatedDevices.length,
