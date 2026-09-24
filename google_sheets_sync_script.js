@@ -1,18 +1,8 @@
 /**
- * FuelTracks Inventory Management System — Live Google Sheets Auto-Sync Webhook
- * 
- * INSTRUCTIONS (30 Seconds Setup):
- * 1. Open Google Sheets (https://sheets.new)
- * 2. Create tabs named: VAMOSYS, VOLTY, TRACKNOW (and any others like GENERAL)
- * 3. Go to Extensions -> Apps Script
- * 4. Paste this entire code and click Save (Floppy disk icon)
- * 5. Click "Deploy" (top right) -> "New deployment"
- * 6. Select type: "Web app"
- * 7. Set "Execute as": "Me"
- * 8. Set "Who has access": "Anyone"
- * 9. Click Deploy -> Authorize Access -> Copy the Web App URL!
- * 10. Add to your .env: GOOGLE_SHEET_WEBHOOK_URL=https://script.google.com/macros/s/.../exec
+ * FuelTracks Live Google Sheets Auto-Sync Webhook
  */
+
+const SPREADSHEET_ID = '1UN8wBWys0ghMaYnAZd-lhVJSwe026ELIWgxn8oraqZM';
 
 const HEADERS = [
   'IMEI', 'SIM NUMBER', 'DEVICE TYPE', 'STOCK PLACE', 'STOCK PLACE DATE',
@@ -21,10 +11,18 @@ const HEADERS = [
   'PAYMENT STATUS', 'AMOUNT', 'AMOUNT RECEIVED BY', 'TECHNICIAN', 'LAST UPDATED'
 ];
 
+function getSpreadsheet() {
+  try {
+    return SpreadsheetApp.openById(SPREADSHEET_ID);
+  } catch (e) {
+    return SpreadsheetApp.getActiveSpreadsheet();
+  }
+}
+
 function doPost(e) {
   try {
     const data = JSON.parse(e.postData.contents);
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const ss = getSpreadsheet();
 
     if (data.action === 'UPSERT_DEVICE') {
       upsertSingleDevice(ss, data.device);
@@ -39,25 +37,44 @@ function doPost(e) {
       });
     }
 
-    return ContentService.createTextOutput(JSON.stringify({ success: true, message: 'Sync complete' }))
-      .setMimeType(ContentService.MimeType.JSON);
+    return ContentService.createTextOutput(JSON.stringify({ 
+      success: true, 
+      message: 'Sync complete',
+      sheet_url: ss.getUrl()
+    })).setMimeType(ContentService.MimeType.JSON);
   } catch (err) {
-    return ContentService.createTextOutput(JSON.stringify({ success: false, error: err.toString() }))
-      .setMimeType(ContentService.MimeType.JSON);
+    return ContentService.createTextOutput(JSON.stringify({ 
+      success: false, 
+      error: err.toString() 
+    })).setMimeType(ContentService.MimeType.JSON);
   }
 }
 
 function getOrCreateSheet(ss, tabName) {
-  const cleanName = (tabName || 'GENERAL').toUpperCase().trim();
-  let sheet = ss.getSheetByName(cleanName);
+  const target = (tabName || 'GENERAL').toUpperCase().trim();
+  const sheets = ss.getSheets();
+  let sheet = null;
+
+  // Case-insensitive match or match existing tabs
+  for (let s of sheets) {
+    if (s.getName().toUpperCase().trim() === target) {
+      sheet = s;
+      break;
+    }
+  }
+
   if (!sheet) {
-    sheet = ss.insertSheet(cleanName);
+    sheet = ss.insertSheet(target);
+  }
+
+  // Ensure header row exists
+  if (sheet.getLastRow() === 0) {
     sheet.appendRow(HEADERS);
-    // Format header row (Dark Blue background, White bold text)
     const headerRange = sheet.getRange(1, 1, 1, HEADERS.length);
     headerRange.setBackground('#1e3a8a').setFontColor('#ffffff').setFontWeight('bold');
     sheet.setFrozenRows(1);
   }
+
   return sheet;
 }
 
