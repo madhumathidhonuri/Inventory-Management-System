@@ -403,6 +403,13 @@ router.post('/:id/rma-update', (req, res) => {
       );
     } catch (e) {}
 
+    // Auto-sync to Supabase & Google Sheets
+    try {
+      const cloudSync = require('../db/cloudSync');
+      cloudSync.triggerDebouncedSync(1000);
+      googleSheetsSync.syncDeviceUpdate(device.id);
+    } catch (e) {}
+
     res.json({ success: true, message: `RMA status updated to ${rma_status}` });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -432,6 +439,14 @@ router.post('/bulk-sim-update', (req, res) => {
     });
 
     updateMany(imeis);
+
+    // Auto-sync to Supabase & Google Sheets
+    try {
+      const cloudSync = require('../db/cloudSync');
+      cloudSync.triggerDebouncedSync(1000);
+      googleSheetsSync.syncBulkDevices(imeis);
+    } catch (e) {}
+
     res.json({ success: true, message: `Updated SIM details for ${imeis.length} devices.` });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -686,8 +701,8 @@ router.patch('/:id/quick-payment', (req, res) => {
 
     // Record History Audit
     try {
-      const remarks = isPaid
-        ? `Payment marked RECEIVED${payment_mode ? ` via ${payment_mode}` : ''}`
+      const remarks = (isFullyPaid || isPartial)
+        ? `Payment marked ${finalStatus}${payment_mode ? ` via ${payment_mode}` : ''}`
         : 'Payment marked PENDING';
 
       db.prepare(`
@@ -697,6 +712,13 @@ router.patch('/:id/quick-payment', (req, res) => {
     } catch (hErr) {
       console.warn('[QuickPayment] Note writing history audit:', hErr.message);
     }
+
+    // Auto-sync to Supabase & Google Sheets
+    try {
+      const cloudSync = require('../db/cloudSync');
+      cloudSync.triggerDebouncedSync(1000);
+      googleSheetsSync.syncDeviceUpdate(device.id);
+    } catch (e) {}
 
     res.json({
       success: true,
@@ -759,6 +781,13 @@ router.put('/:id/status', (req, res) => {
       INSERT INTO device_history (device_id, imei_number, event_type, event_date, from_holder, to_holder, performed_by, remarks)
       VALUES (?, ?, 'STATUS_CHANGED', datetime('now'), ?, ?, ?, ?)
     `).run(id, device.imei_number, `${oldHolder} (${oldStatus})`, `${newHolderName} (${status})`, performed_by || 'Admin', remarks || `Status changed from ${oldStatus} to ${status}`);
+
+    // Auto-sync to Supabase & Google Sheets
+    try {
+      const cloudSync = require('../db/cloudSync');
+      cloudSync.triggerDebouncedSync(1000);
+      googleSheetsSync.syncDeviceUpdate(id);
+    } catch (e) {}
 
     const updated = db.prepare('SELECT * FROM devices WHERE id = ?').get(id);
     res.json({ success: true, data: updated });
@@ -869,6 +898,12 @@ router.delete('/:id', (req, res) => {
       db.prepare('DELETE FROM reminders WHERE device_id = ? OR imei_number = ?').run(id, device.imei_number);
       db.prepare('DELETE FROM devices WHERE id = ?').run(id);
     })();
+
+    // Auto-sync state to Supabase Cloud Storage
+    try {
+      const cloudSync = require('../db/cloudSync');
+      cloudSync.triggerDebouncedSync(1000);
+    } catch (e) {}
 
     res.json({ success: true, message: `Device '${device.imei_number}' deleted successfully` });
   } catch (err) {
