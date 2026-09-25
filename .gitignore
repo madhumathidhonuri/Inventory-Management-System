@@ -43,3 +43,7 @@ backend/data/*.db
 *.db
 !backend/src/db/initial_seed.db
 
+# Binaries & local tools
+tools/
+*.exe
+

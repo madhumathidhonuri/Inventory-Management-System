@@ -401,6 +401,17 @@ router.post('/bulk', (req, res) => {
     }
   }
 
+  // Auto-sync instantly to Supabase Cloud Storage & Google Sheets
+  try {
+    const cloudSync = require('../db/cloudSync');
+    cloudSync.triggerDebouncedSync(1000);
+    const googleSheetsSync = require('../services/googleSheetsSync');
+    const processedImeis = processed.map(p => p.imei).filter(Boolean);
+    if (processedImeis.length > 0) {
+      googleSheetsSync.syncBulkDevices(processedImeis);
+    }
+  } catch (e) {}
+
   res.json({
     success: true,
     processed_count: processed.length,

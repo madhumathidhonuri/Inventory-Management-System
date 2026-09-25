@@ -1,6 +1,6 @@
 /**
  * FuelTracks Live Google Sheets Auto-Sync Webhook
- * Option B: Top-Feed Mode (Updated / newly added devices always jump to Row 2 at the top!)
+ * Option B: Top-Feed Mode (Updated / newly added devices jump to the top)
  */
 
 const SPREADSHEET_ID = '1IKYZ-x0W4SI_W7NH-8ZqQ_-i_2NwNk9nnxKlRygJNpQ';
@@ -14,8 +14,29 @@ function getSpreadsheet() {
   return SpreadsheetApp.openById(SPREADSHEET_ID);
 }
 
+function doGet(e) {
+  try {
+    const ss = getSpreadsheet();
+    return ContentService.createTextOutput(JSON.stringify({
+      success: true,
+      status: 'active',
+      message: 'FuelTracks Live Google Sheets Webhook is running',
+      sheet_url: ss.getUrl()
+    })).setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({
+      success: false,
+      error: err.toString()
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
 function doPost(e) {
   try {
+    if (!e || !e.postData || !e.postData.contents) {
+      return ContentService.createTextOutput(JSON.stringify({ success: false, error: 'Empty payload' })).setMimeType(ContentService.MimeType.JSON);
+    }
+
     const data = JSON.parse(e.postData.contents);
     const ss = getSpreadsheet();
 
@@ -26,9 +47,15 @@ function doPost(e) {
     } else if (data.action === 'BULK_UPSERT_ROWS') {
       if (Array.isArray(data.batches)) {
         data.batches.forEach(b => {
-          syncTabWithExactHeaders(ss, b.tab_name, b.headers, b.rows);
+          bulkUpsertDeviceRows(ss, b.tab_name, b.headers, b.rows);
         });
+      } else if (data.tab_name && Array.isArray(data.rows)) {
+        bulkUpsertDeviceRows(ss, data.tab_name, data.headers, data.rows);
       }
+    } else if (data.action === 'DELETE_DEVICE_ROW') {
+      deleteDeviceRow(ss, data.tab_name, data.imei);
+    } else if (data.action === 'BULK_DELETE_ROWS') {
+      bulkDeleteDeviceRows(ss, data.tab_name, data.imeis);
     }
 
     return ContentService.createTextOutput(JSON.stringify({ 
@@ -42,6 +69,17 @@ function doPost(e) {
       error: err.toString() 
     })).setMimeType(ContentService.MimeType.JSON);
   }
+}
+
+function findImeiColIndex(headers) {
+  if (!headers || !headers.length) return 0;
+  for (let i = 0; i < headers.length; i++) {
+    const h = String(headers[i] || '').toUpperCase().trim();
+    if (h === 'IMEI' || h === 'IMEI NUMBER' || h === 'DEVICE IMEI' || h === 'DEVICE_IMEI') {
+      return i;
+    }
+  }
+  return 0;
 }
 
 function getOrCreateSheet(ss, tabName, headers) {
@@ -89,15 +127,14 @@ function syncTabWithExactHeaders(ss, tabName, headers, rows) {
 
   // 3. Auto-resize columns
   try {
-    for (let c = 1; c <= headers.length; c++) {
+    for (let c = 1; c <= Math.min(headers.length, 50); c++) {
       sheet.autoResizeColumn(c);
     }
   } catch(e) {}
 }
 
 /**
- * Option B: Top-Feed Implementation
- * Deletes previous row if existing, then inserts at Row 2 (very top)
+ * Single Row Top-Feed Upsert
  */
 function upsertDeviceRow(ss, tabName, headers, row) {
   if (!row || row.length === 0) return;
@@ -111,19 +148,22 @@ function upsertDeviceRow(ss, tabName, headers, row) {
     sheet.setFrozenRows(1);
   }
 
+  const currentHeaders = headers || sheet.getRange(1, 1, 1, sheet.getLastColumn() || 1).getValues()[0];
+  const imeiColIdx = findImeiColIndex(currentHeaders);
+
   const data = sheet.getDataRange().getValues();
-  const imeiStr = String(row[0] || '').replace(/^'/, '').trim();
+  const imeiStr = String(row[imeiColIdx] || row[0] || '').replace(/^'/, '').trim();
 
   let targetRow = -1;
   for (let r = 1; r < data.length; r++) {
-    const rowImei = String(data[r][0] || '').replace(/^'/, '').trim();
+    const rowImei = String(data[r][imeiColIdx] || data[r][0] || '').replace(/^'/, '').trim();
     if (rowImei === imeiStr) {
       targetRow = r + 1;
       break;
     }
   }
 
-  // If already exists, delete old position so it moves to the top
+  // If already exists, delete old position so it moves to top
   if (targetRow !== -1) {
     sheet.deleteRow(targetRow);
   }
@@ -132,3 +172,117 @@ function upsertDeviceRow(ss, tabName, headers, row) {
   sheet.insertRowBefore(2);
   sheet.getRange(2, 1, 1, row.length).setValues([row]);
 }
+
+/**
+ * Bulk Upsert Device Rows without clearing entire sheet
+ */
+function bulkUpsertDeviceRows(ss, tabName, headers, rows) {
+  if (!rows || rows.length === 0) return;
+  const sheet = getOrCreateSheet(ss, tabName, headers);
+
+  if (sheet.getLastRow() === 0 && headers && headers.length > 0) {
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    const headerRange = sheet.getRange(1, 1, 1, headers.length);
+    headerRange.setBackground('#1e3a8a').setFontColor('#ffffff').setFontWeight('bold');
+    sheet.setFrozenRows(1);
+  }
+
+  const currentHeaders = headers || sheet.getRange(1, 1, 1, sheet.getLastColumn() || 1).getValues()[0];
+  const imeiColIdx = findImeiColIndex(currentHeaders);
+
+  const data = sheet.getDataRange().getValues();
+  const existingRows = [];
+  const incomingImeis = new Set();
+
+  for (let i = 0; i < rows.length; i++) {
+    const imei = String(rows[i][imeiColIdx] || rows[i][0] || '').replace(/^'/, '').trim();
+    if (imei) incomingImeis.add(imei);
+  }
+
+  // Keep existing rows that are NOT in the incoming batch
+  for (let r = 1; r < data.length; r++) {
+    const rowImei = String(data[r][imeiColIdx] || data[r][0] || '').replace(/^'/, '').trim();
+    if (!incomingImeis.has(rowImei)) {
+      existingRows.push(data[r]);
+    }
+  }
+
+  // New rows at the top, followed by existing rows
+  const combinedRows = rows.concat(existingRows);
+
+  // Clear data area and write back
+  if (sheet.getLastRow() > 1) {
+    sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).clearContent();
+  }
+
+  if (combinedRows.length > 0) {
+    const numCols = currentHeaders.length;
+    // Normalize rows length to match headers
+    const normalizedRows = combinedRows.map(r => {
+      const rowArr = Array.isArray(r) ? r.slice(0, numCols) : [];
+      while (rowArr.length < numCols) rowArr.push('');
+      return rowArr;
+    });
+    sheet.getRange(2, 1, normalizedRows.length, numCols).setValues(normalizedRows);
+  }
+}
+
+/**
+ * Delete a single row by IMEI
+ */
+function deleteDeviceRow(ss, tabName, imei) {
+  if (!imei) return;
+  const cleanImei = String(imei).replace(/^'/, '').trim();
+  const sheets = tabName ? [getOrCreateSheet(ss, tabName)] : ss.getSheets();
+
+  for (const sheet of sheets) {
+    const data = sheet.getDataRange().getValues();
+    if (data.length <= 1) continue;
+    const imeiColIdx = findImeiColIndex(data[0]);
+
+    for (let r = 1; r < data.length; r++) {
+      const rowImei = String(data[r][imeiColIdx] || data[r][0] || '').replace(/^'/, '').trim();
+      if (rowImei === cleanImei) {
+        sheet.deleteRow(r + 1);
+        return;
+      }
+    }
+  }
+}
+
+/**
+ * Bulk delete rows by IMEIs
+ */
+function bulkDeleteDeviceRows(ss, tabName, imeis) {
+  if (!Array.isArray(imeis) || imeis.length === 0) return;
+  const imeiSet = new Set(imeis.map(i => String(i).replace(/^'/, '').trim()));
+  const sheets = tabName ? [getOrCreateSheet(ss, tabName)] : ss.getSheets();
+
+  for (const sheet of sheets) {
+    const data = sheet.getDataRange().getValues();
+    if (data.length <= 1) continue;
+    const imeiColIdx = findImeiColIndex(data[0]);
+
+    const remainingRows = [];
+    let hadDeletions = false;
+
+    for (let r = 1; r < data.length; r++) {
+      const rowImei = String(data[r][imeiColIdx] || data[r][0] || '').replace(/^'/, '').trim();
+      if (imeiSet.has(rowImei)) {
+        hadDeletions = true;
+      } else {
+        remainingRows.push(data[r]);
+      }
+    }
+
+    if (hadDeletions) {
+      if (sheet.getLastRow() > 1) {
+        sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).clearContent();
+      }
+      if (remainingRows.length > 0) {
+        sheet.getRange(2, 1, remainingRows.length, remainingRows[0].length).setValues(remainingRows);
+      }
+    }
+  }
+}
+

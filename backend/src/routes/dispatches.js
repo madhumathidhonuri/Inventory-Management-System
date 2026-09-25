@@ -342,12 +342,23 @@ router.post('/return', (req, res) => {
         returnedList.push(imei);
       }
     }
-    return { returnedCount: returnedList.length };
+    return { returnedCount: returnedList.length, returnedList };
   });
 
   try {
     const result = transaction();
-    res.json({ success: true, data: result });
+
+    // Auto-sync to Supabase & Google Sheets
+    try {
+      const cloudSync = require('../db/cloudSync');
+      cloudSync.triggerDebouncedSync(1000);
+      const googleSheetsSync = require('../services/googleSheetsSync');
+      if (result.returnedList && result.returnedList.length > 0) {
+        googleSheetsSync.syncBulkDevices(result.returnedList);
+      }
+    } catch (e) {}
+
+    res.json({ success: true, data: { returnedCount: result.returnedCount } });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -357,11 +368,13 @@ router.post('/return', (req, res) => {
 router.delete('/clear-all', (req, res) => {
   try {
     const { revert_stock = true } = req.query;
+    let revertedIds = [];
 
     const transaction = db.transaction(() => {
       // 1. If requested, revert all devices held by dealers back to Central Warehouse
       if (revert_stock === true || revert_stock === 'true') {
         const withDealerDevs = db.prepare(`SELECT id, imei_number, additional_attributes FROM devices WHERE current_status = 'WITH_DEALER'`).all();
+        revertedIds = withDealerDevs.map(d => d.id);
         const updateDev = db.prepare(`
           UPDATE devices
           SET current_status = 'IN_WAREHOUSE',
@@ -387,6 +400,17 @@ router.delete('/clear-all', (req, res) => {
     });
 
     transaction();
+
+    // Auto-sync to Supabase & Google Sheets
+    try {
+      const cloudSync = require('../db/cloudSync');
+      cloudSync.triggerDebouncedSync(1000);
+      const googleSheetsSync = require('../services/googleSheetsSync');
+      if (revertedIds.length > 0) {
+        googleSheetsSync.syncBulkDevices(revertedIds);
+      }
+    } catch (e) {}
+
     res.json({ success: true, message: 'All dispatch records cleared successfully.' });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -401,10 +425,13 @@ router.delete('/:id', (req, res) => {
     const dispatch = db.prepare(`SELECT * FROM dispatches WHERE id = ?`).get(id);
     if (!dispatch) return res.status(404).json({ success: false, error: 'Dispatch not found' });
 
+    let revertedImeis = [];
+
     const transaction = db.transaction(() => {
       // 1. If reverting stock, get items and reset their status back to IN_WAREHOUSE
       if (revert_stock === true || revert_stock === 'true') {
         const items = db.prepare(`SELECT device_id, imei_number FROM dispatch_items WHERE dispatch_id = ?`).all(id);
+        revertedImeis = items.map(it => it.imei_number);
         const updateDev = db.prepare(`
           UPDATE devices
           SET current_status = 'IN_WAREHOUSE',
@@ -424,6 +451,17 @@ router.delete('/:id', (req, res) => {
     });
 
     transaction();
+
+    // Auto-sync to Supabase & Google Sheets
+    try {
+      const cloudSync = require('../db/cloudSync');
+      cloudSync.triggerDebouncedSync(1000);
+      const googleSheetsSync = require('../services/googleSheetsSync');
+      if (revertedImeis.length > 0) {
+        googleSheetsSync.syncBulkDevices(revertedImeis);
+      }
+    } catch (e) {}
+
     res.json({ success: true, message: `Dispatch #${id} deleted successfully.` });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -460,6 +498,17 @@ router.post('/reset-dealer-stock', (req, res) => {
         updateDev.run(JSON.stringify(attrs), dev.id);
       }
     })();
+
+    // Auto-sync to Supabase & Google Sheets
+    try {
+      const cloudSync = require('../db/cloudSync');
+      cloudSync.triggerDebouncedSync(1000);
+      const googleSheetsSync = require('../services/googleSheetsSync');
+      const resetIds = devs.map(d => d.id);
+      if (resetIds.length > 0) {
+        googleSheetsSync.syncBulkDevices(resetIds);
+      }
+    } catch (e) {}
 
     res.json({ success: true, count: devs.length, message: `Reverted ${devs.length} devices from ${dealer_name} back to Central Warehouse.` });
   } catch (err) {

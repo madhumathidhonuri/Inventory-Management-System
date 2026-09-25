@@ -899,10 +899,11 @@ router.delete('/:id', (req, res) => {
       db.prepare('DELETE FROM devices WHERE id = ?').run(id);
     })();
 
-    // Auto-sync state to Supabase Cloud Storage
+    // Auto-sync state to Supabase Cloud Storage & Google Sheets
     try {
       const cloudSync = require('../db/cloudSync');
       cloudSync.triggerDebouncedSync(1000);
+      googleSheetsSync.syncDeviceDelete(device.imei_number);
     } catch (e) {}
 
     res.json({ success: true, message: `Device '${device.imei_number}' deleted successfully` });
@@ -916,10 +917,13 @@ router.post('/bulk-delete', (req, res) => {
   const { device_ids, device_type_id, purchase_batch_id, clear_all } = req.body;
 
   try {
+    let deletedImeis = [];
+
     const transaction = db.transaction(() => {
       let deletedCount = 0;
       if (clear_all) {
-        const allDevs = db.prepare('SELECT id FROM devices').all();
+        const allDevs = db.prepare('SELECT id, imei_number FROM devices').all();
+        deletedImeis = allDevs.map(d => d.imei_number);
         deletedCount = allDevs.length;
         db.prepare('DELETE FROM device_history').run();
         db.prepare('DELETE FROM dispatch_items').run();
@@ -929,6 +933,7 @@ router.post('/bulk-delete', (req, res) => {
         db.prepare('DELETE FROM purchase_batches').run();
       } else if (purchase_batch_id) {
         const batchDevs = db.prepare('SELECT id, imei_number FROM devices WHERE purchase_batch_id = ?').all(purchase_batch_id);
+        deletedImeis = batchDevs.map(d => d.imei_number);
         deletedCount = batchDevs.length;
         for (const dev of batchDevs) {
           db.prepare('DELETE FROM device_history WHERE device_id = ? OR imei_number = ?').run(dev.id, dev.imei_number);
@@ -940,6 +945,7 @@ router.post('/bulk-delete', (req, res) => {
         db.prepare('DELETE FROM purchase_batches WHERE id = ?').run(purchase_batch_id);
       } else if (device_type_id) {
         const typeDevs = db.prepare('SELECT id, imei_number FROM devices WHERE device_type_id = ?').all(device_type_id);
+        deletedImeis = typeDevs.map(d => d.imei_number);
         deletedCount = typeDevs.length;
         for (const dev of typeDevs) {
           db.prepare('DELETE FROM device_history WHERE device_id = ? OR imei_number = ?').run(dev.id, dev.imei_number);
@@ -953,6 +959,7 @@ router.post('/bulk-delete', (req, res) => {
         for (const id of device_ids) {
           const dev = db.prepare('SELECT id, imei_number FROM devices WHERE id = ?').get(id);
           if (dev) {
+            deletedImeis.push(dev.imei_number);
             db.prepare('DELETE FROM device_history WHERE device_id = ? OR imei_number = ?').run(dev.id, dev.imei_number);
             db.prepare('DELETE FROM dispatch_items WHERE device_id = ? OR imei_number = ?').run(dev.id, dev.imei_number);
             db.prepare('DELETE FROM installations WHERE device_id = ? OR imei_number = ?').run(dev.id, dev.imei_number);
@@ -967,10 +974,13 @@ router.post('/bulk-delete', (req, res) => {
 
     const count = transaction();
 
-    // Auto-sync cleared state to Supabase Cloud Storage
+    // Auto-sync cleared state to Supabase Cloud Storage & Google Sheets
     try {
       const cloudSync = require('../db/cloudSync');
       cloudSync.triggerDebouncedSync(1000);
+      if (deletedImeis.length > 0) {
+        googleSheetsSync.syncBulkDelete(deletedImeis);
+      }
     } catch (e) {}
 
     res.json({ success: true, count, message: `Successfully deleted ${count} device record(s)` });

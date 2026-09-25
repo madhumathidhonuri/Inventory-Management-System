@@ -23,11 +23,39 @@ function getTabHeaders(brandName) {
   const headerSet = new Set(['IMEI', 'STATUS', 'CURRENT HOLDER']);
 
   try {
+    const dt = db.prepare(`
+      SELECT custom_fields, template_columns
+      FROM device_types
+      WHERE UPPER(TRIM(name)) = ?
+    `).get(targetBrand);
+
+    if (dt) {
+      try {
+        const tCols = JSON.parse(dt.template_columns || '[]');
+        if (Array.isArray(tCols)) {
+          tCols.forEach(c => {
+            if (c && typeof c === 'string' && !c.startsWith('__empty')) headerSet.add(c.trim());
+          });
+        }
+      } catch {}
+
+      try {
+        const cFields = JSON.parse(dt.custom_fields || '[]');
+        if (Array.isArray(cFields)) {
+          cFields.forEach(f => {
+            if (f && typeof f === 'string') headerSet.add(f.trim());
+          });
+        }
+      } catch {}
+    }
+
     const rows = db.prepare(`
       SELECT d.additional_attributes
       FROM devices d
       JOIN device_types dt ON d.device_type_id = dt.id
       WHERE UPPER(TRIM(dt.name)) = ?
+      ORDER BY d.id DESC
+      LIMIT 500
     `).all(targetBrand);
 
     rows.forEach(r => {
@@ -37,7 +65,7 @@ function getTabHeaders(brandName) {
           : JSON.parse(r.additional_attributes || '{}');
         Object.keys(attrs).forEach(k => {
           if (k && !k.startsWith('__empty') && k !== 'original_row' && k !== '_1' && k !== '_2') {
-            headerSet.add(k);
+            headerSet.add(k.trim());
           }
         });
       } catch {}
@@ -63,13 +91,53 @@ function formatRowForTab(dev, headers) {
     attrs = {};
   }
 
-  return headers.map(h => {
-    if (h === 'IMEI') return "'" + (dev.imei_number || dev.imei || '');
-    if (h === 'STATUS') return dev.current_status || dev.status || 'IN_WAREHOUSE';
-    if (h === 'CURRENT HOLDER') return dev.current_holder_name || dev.stock_place || 'Central Warehouse';
-    if (h === 'LAST UPDATED') return new Date().toISOString();
+  // Normalized key map for case-insensitive and variation lookups
+  const normalizedAttrs = {};
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k) normalizedAttrs[k.toUpperCase().trim()] = v;
+  }
 
-    const val = attrs[h];
+  return headers.map(h => {
+    const hUpper = h.toUpperCase().trim();
+
+    if (hUpper === 'IMEI' || hUpper === 'IMEI NUMBER' || hUpper === 'DEVICE IMEI') {
+      return "'" + (dev.imei_number || dev.imei || '');
+    }
+    if (hUpper === 'STATUS' || hUpper === 'CURRENT STATUS') {
+      return dev.current_status || dev.status || 'IN_WAREHOUSE';
+    }
+    if (hUpper === 'CURRENT HOLDER' || hUpper === 'STOCK PLACE' || hUpper === 'HOLDER') {
+      return dev.current_holder_name || dev.stock_place || 'Central Warehouse';
+    }
+    if (hUpper === 'SIM NUMBER' || hUpper === 'SIM' || hUpper === 'SIM NO' || hUpper === 'PHONE NUMBER') {
+      return dev.sim_number ? "'" + dev.sim_number : (normalizedAttrs[hUpper] !== undefined ? normalizedAttrs[hUpper] : '');
+    }
+    if (hUpper === 'SIM OPERATOR' || hUpper === 'OPERATOR' || hUpper === 'CARRIER') {
+      return dev.sim_operator || normalizedAttrs[hUpper] || '';
+    }
+    if (hUpper === 'SIM EXPIRY DATE' || hUpper === 'SIM EXPIRY') {
+      return dev.sim_expiry_date || normalizedAttrs[hUpper] || '';
+    }
+    if (hUpper === 'VENDOR' || hUpper === 'VENDOR NAME') {
+      return dev.vendor_name || normalizedAttrs[hUpper] || '';
+    }
+    if (hUpper === 'PURCHASE PRICE' || hUpper === 'BUYING PRICE' || hUpper === 'PRICE') {
+      return dev.purchase_price !== null && dev.purchase_price !== undefined ? dev.purchase_price : (normalizedAttrs[hUpper] || '');
+    }
+    if (hUpper === 'PURCHASE DATE') {
+      return dev.purchase_date || normalizedAttrs[hUpper] || '';
+    }
+    if (hUpper === 'RMA STATUS') {
+      return dev.rma_status || normalizedAttrs[hUpper] || 'NONE';
+    }
+    if (hUpper === 'LAST UPDATED') {
+      return new Date().toISOString();
+    }
+
+    let val = attrs[h];
+    if (val === undefined || val === null) {
+      val = normalizedAttrs[hUpper];
+    }
     if (val === undefined || val === null) return '';
 
     // If it's a long number string (Phone, SIM, ICCID, Aadhaar), prefix with ' so Sheets keeps full precision
@@ -139,7 +207,7 @@ function syncDeviceUpdate(deviceIdOrImei) {
           FROM devices d
           JOIN device_types dt ON d.device_type_id = dt.id
           WHERE d.imei_number = ?
-        `).get(String(deviceIdOrImei));
+        `).get(String(deviceIdOrImei).trim());
       }
 
       if (dev) {
@@ -160,42 +228,117 @@ function syncDeviceUpdate(deviceIdOrImei) {
 }
 
 /**
- * Sync multiple devices in bulk
+ * Sync multiple devices in bulk with batched requests
  */
 function syncBulkDevices(deviceIdsOrImeis) {
   if (!isConfigured() || !Array.isArray(deviceIdsOrImeis) || deviceIdsOrImeis.length === 0) return;
 
   setImmediate(async () => {
     try {
-      const placeholders = deviceIdsOrImeis.map(() => '?').join(',');
-      const isIds = typeof deviceIdsOrImeis[0] === 'number';
-      const query = isIds
-        ? `SELECT d.*, dt.name as device_type_name FROM devices d JOIN device_types dt ON d.device_type_id = dt.id WHERE d.id IN (${placeholders})`
-        : `SELECT d.*, dt.name as device_type_name FROM devices d JOIN device_types dt ON d.device_type_id = dt.id WHERE d.imei_number IN (${placeholders})`;
+      const ids = [];
+      const imeis = [];
 
-      const devices = db.prepare(query).all(...deviceIdsOrImeis);
+      for (const item of deviceIdsOrImeis) {
+        if (!item) continue;
+        if (typeof item === 'number' || (/^\d+$/.test(String(item)) && String(item).length < 10)) {
+          ids.push(Number(item));
+        } else {
+          imeis.push(String(item).trim());
+        }
+      }
+
+      const devices = [];
+
+      if (ids.length > 0) {
+        const placeholders = ids.map(() => '?').join(',');
+        const rows = db.prepare(`
+          SELECT d.*, dt.name as device_type_name 
+          FROM devices d 
+          JOIN device_types dt ON d.device_type_id = dt.id 
+          WHERE d.id IN (${placeholders})
+        `).all(...ids);
+        devices.push(...rows);
+      }
+
+      if (imeis.length > 0) {
+        const placeholders = imeis.map(() => '?').join(',');
+        const rows = db.prepare(`
+          SELECT d.*, dt.name as device_type_name 
+          FROM devices d 
+          JOIN device_types dt ON d.device_type_id = dt.id 
+          WHERE d.imei_number IN (${placeholders})
+        `).all(...imeis);
+        devices.push(...rows);
+      }
+
+      // Deduplicate by device id
+      const uniqueDevicesMap = new Map();
+      for (const dev of devices) {
+        if (!uniqueDevicesMap.has(dev.id)) {
+          uniqueDevicesMap.set(dev.id, dev);
+        }
+      }
+      const uniqueDevices = Array.from(uniqueDevicesMap.values());
+      if (uniqueDevices.length === 0) return;
 
       // Group by tab
       const grouped = {};
-      for (const d of devices) {
+      for (const d of uniqueDevices) {
         const tabName = (d.device_type_name || 'GENERAL').toUpperCase().trim();
         if (!grouped[tabName]) grouped[tabName] = [];
         grouped[tabName].push(d);
       }
 
+      // Send 1 batch request per tab instead of individual requests
       for (const [tabName, tabDevices] of Object.entries(grouped)) {
         const headers = getTabHeaders(tabName);
-        for (const dev of tabDevices) {
-          const row = formatRowForTab(dev, headers);
-          await sendToGoogleSheet('UPSERT_DEVICE_ROW', {
-            tab_name: tabName,
-            headers,
-            row
-          });
-        }
+        const rows = tabDevices.map(dev => formatRowForTab(dev, headers));
+
+        await sendToGoogleSheet('BULK_UPSERT_ROWS', {
+          tab_name: tabName,
+          headers,
+          rows
+        }, 60000);
       }
     } catch (e) {
       console.warn('[GoogleSheetSync] Error syncing bulk devices:', e.message);
+    }
+  });
+}
+
+/**
+ * Delete a single device row from Google Sheets
+ */
+function syncDeviceDelete(imeiNumber, tabName) {
+  if (!isConfigured() || !imeiNumber) return;
+
+  setImmediate(async () => {
+    try {
+      await sendToGoogleSheet('DELETE_DEVICE_ROW', {
+        tab_name: tabName ? tabName.toUpperCase().trim() : null,
+        imei: String(imeiNumber).trim()
+      });
+    } catch (e) {
+      console.warn('[GoogleSheetSync] Error deleting device row:', e.message);
+    }
+  });
+}
+
+/**
+ * Bulk delete device rows from Google Sheets
+ */
+function syncBulkDelete(imeis, tabName) {
+  if (!isConfigured() || !Array.isArray(imeis) || imeis.length === 0) return;
+
+  setImmediate(async () => {
+    try {
+      const cleanImeis = imeis.map(i => String(i).trim()).filter(Boolean);
+      await sendToGoogleSheet('BULK_DELETE_ROWS', {
+        tab_name: tabName ? tabName.toUpperCase().trim() : null,
+        imeis: cleanImeis
+      });
+    } catch (e) {
+      console.warn('[GoogleSheetSync] Error bulk deleting device rows:', e.message);
     }
   });
 }
@@ -266,5 +409,8 @@ module.exports = {
   formatRowForTab,
   syncDeviceUpdate,
   syncBulkDevices,
+  syncDeviceDelete,
+  syncBulkDelete,
   syncFullMasterInventory
 };
+
