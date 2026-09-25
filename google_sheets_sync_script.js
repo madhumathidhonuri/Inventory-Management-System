@@ -56,6 +56,8 @@ function doPost(e) {
       deleteDeviceRow(ss, data.tab_name, data.imei);
     } else if (data.action === 'BULK_DELETE_ROWS') {
       bulkDeleteDeviceRows(ss, data.tab_name, data.imeis);
+    } else if (data.action === 'CLEAR_ALL_SHEETS' || data.action === 'RESET_SPREADSHEET') {
+      clearAllSheets(ss);
     }
 
     return ContentService.createTextOutput(JSON.stringify({ 
@@ -308,4 +310,15 @@ function bulkDeleteDeviceRows(ss, tabName, imeis) {
     }
   }
 }
+
+/**
+ * Completely clear all data and tabs in spreadsheet
+ */
+function clearAllSheets(ss) {
+  const sheets = ss.getSheets();
+  for (let i = 0; i < sheets.length; i++) {
+    sheets[i].clear();
+  }
+}
+
 

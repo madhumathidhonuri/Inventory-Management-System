@@ -422,6 +422,16 @@ async function syncFullMasterInventory() {
   };
 }
 
+/**
+ * Completely clear all data and tabs in Google Sheets
+ */
+async function clearAllGoogleSheets() {
+  if (!isConfigured()) {
+    throw new Error('Google Sheets Webhook URL is not configured.');
+  }
+  return await sendToGoogleSheet('CLEAR_ALL_SHEETS', {}, 30000);
+}
+
 module.exports = {
   isConfigured,
   sendToGoogleSheet,
@@ -431,6 +441,8 @@ module.exports = {
   syncBulkDevices,
   syncDeviceDelete,
   syncBulkDelete,
-  syncFullMasterInventory
+  syncFullMasterInventory,
+  clearAllGoogleSheets
 };
+
 
