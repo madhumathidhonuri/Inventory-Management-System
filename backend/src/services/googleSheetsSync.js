@@ -18,9 +18,22 @@ function isConfigured() {
  */
 function getTabHeaders(brandName) {
   const targetBrand = (brandName || 'GENERAL').toUpperCase().trim();
-  
-  // Base columns for tracking
-  const headerSet = new Set(['IMEI', 'STATUS', 'CURRENT HOLDER']);
+  const headerList = [];
+  const seen = new Set();
+
+  function addHeader(h) {
+    if (!h || typeof h !== 'string') return;
+    const clean = h.trim();
+    if (!clean || clean.startsWith('__empty') || clean === 'original_row' || clean === '_1' || clean === '_2') return;
+    
+    // Normalize initial IMEI column names
+    const normalized = (clean.toLowerCase() === 'imeino' || clean.toLowerCase() === 'imei_number') ? 'IMEI' : clean;
+    const key = normalized.toUpperCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      headerList.push(normalized);
+    }
+  }
 
   try {
     const dt = db.prepare(`
@@ -32,30 +45,33 @@ function getTabHeaders(brandName) {
     if (dt) {
       try {
         const tCols = JSON.parse(dt.template_columns || '[]');
-        if (Array.isArray(tCols)) {
-          tCols.forEach(c => {
-            if (c && typeof c === 'string' && !c.startsWith('__empty')) headerSet.add(c.trim());
-          });
+        if (Array.isArray(tCols) && tCols.length > 0) {
+          tCols.forEach(c => addHeader(c));
         }
       } catch {}
 
       try {
         const cFields = JSON.parse(dt.custom_fields || '[]');
-        if (Array.isArray(cFields)) {
-          cFields.forEach(f => {
-            if (f && typeof f === 'string') headerSet.add(f.trim());
-          });
+        if (Array.isArray(cFields) && cFields.length > 0) {
+          cFields.forEach(f => addHeader(f));
         }
       } catch {}
     }
 
+    // Ensure IMEI exists as the first column if not already present
+    if (!seen.has('IMEI')) {
+      headerList.unshift('IMEI');
+      seen.add('IMEI');
+    }
+
+    // Scan sample devices for any extra custom fields
     const rows = db.prepare(`
       SELECT d.additional_attributes
       FROM devices d
       JOIN device_types dt ON d.device_type_id = dt.id
       WHERE UPPER(TRIM(dt.name)) = ?
       ORDER BY d.id DESC
-      LIMIT 500
+      LIMIT 100
     `).all(targetBrand);
 
     rows.forEach(r => {
@@ -63,19 +79,14 @@ function getTabHeaders(brandName) {
         const attrs = typeof r.additional_attributes === 'object' 
           ? r.additional_attributes 
           : JSON.parse(r.additional_attributes || '{}');
-        Object.keys(attrs).forEach(k => {
-          if (k && !k.startsWith('__empty') && k !== 'original_row' && k !== '_1' && k !== '_2') {
-            headerSet.add(k.trim());
-          }
-        });
+        Object.keys(attrs).forEach(k => addHeader(k));
       } catch {}
     });
   } catch (e) {
     console.warn('[GoogleSheetSync] Error fetching tab headers:', e.message);
   }
 
-  headerSet.add('LAST UPDATED');
-  return Array.from(headerSet);
+  return headerList;
 }
 
 /**
@@ -98,54 +109,63 @@ function formatRowForTab(dev, headers) {
   }
 
   return headers.map(h => {
-    const hUpper = h.toUpperCase().trim();
+    const hTrim = h.trim();
+    const hUpper = hTrim.toUpperCase();
 
-    if (hUpper === 'IMEI' || hUpper === 'IMEI NUMBER' || hUpper === 'DEVICE IMEI') {
-      return "'" + (dev.imei_number || dev.imei || '');
+    // 1. Direct attribute match if non-empty
+    if (attrs[hTrim] !== undefined && attrs[hTrim] !== null && String(attrs[hTrim]).trim() !== '') {
+      const sVal = String(attrs[hTrim]).trim();
+      if (/^\d{10,}$/.test(sVal)) return "'" + sVal;
+      return sVal;
+    }
+
+    // 2. Normalized attribute match if non-empty
+    if (normalizedAttrs[hUpper] !== undefined && normalizedAttrs[hUpper] !== null && String(normalizedAttrs[hUpper]).trim() !== '') {
+      const sVal = String(normalizedAttrs[hUpper]).trim();
+      if (/^\d{10,}$/.test(sVal)) return "'" + sVal;
+      return sVal;
+    }
+
+    // 3. Fallbacks to top-level database columns
+    if (hUpper === 'IMEI' || hUpper === 'IMEINO' || hUpper === 'IMEI NUMBER' || hUpper === 'DEVICE IMEI') {
+      const imei = String(dev.imei_number || dev.imei || '').trim();
+      return imei ? "'" + imei : '';
+    }
+    if (hUpper === 'STOCK PLACE' || hUpper === 'CURRENT HOLDER' || hUpper === 'HOLDER') {
+      return dev.current_holder_name || dev.stock_place || attrs['STOCK PLACE'] || 'Central Warehouse';
+    }
+    if (hUpper === 'STOCK PLACE DATE') {
+      return attrs['STOCK PLACE DATE'] || (dev.updated_at ? dev.updated_at.split(' ')[0] : '');
     }
     if (hUpper === 'STATUS' || hUpper === 'CURRENT STATUS') {
-      return dev.current_status || dev.status || 'IN_WAREHOUSE';
+      return dev.current_status || 'IN_WAREHOUSE';
     }
-    if (hUpper === 'CURRENT HOLDER' || hUpper === 'STOCK PLACE' || hUpper === 'HOLDER') {
-      return dev.current_holder_name || dev.stock_place || 'Central Warehouse';
-    }
-    if (hUpper === 'SIM NUMBER' || hUpper === 'SIM' || hUpper === 'SIM NO' || hUpper === 'PHONE NUMBER') {
-      return dev.sim_number ? "'" + dev.sim_number : (normalizedAttrs[hUpper] !== undefined ? normalizedAttrs[hUpper] : '');
+    if (hUpper === 'SIM NUMBER' || hUpper === 'SIM' || hUpper === 'SIM NO' || hUpper === 'SIMNO1' || hUpper === 'SIM 1') {
+      return dev.sim_number ? "'" + dev.sim_number : '';
     }
     if (hUpper === 'SIM OPERATOR' || hUpper === 'OPERATOR' || hUpper === 'CARRIER') {
-      return dev.sim_operator || normalizedAttrs[hUpper] || '';
+      return dev.sim_operator || '';
     }
     if (hUpper === 'SIM EXPIRY DATE' || hUpper === 'SIM EXPIRY') {
-      return dev.sim_expiry_date || normalizedAttrs[hUpper] || '';
+      return dev.sim_expiry_date || '';
     }
     if (hUpper === 'VENDOR' || hUpper === 'VENDOR NAME') {
-      return dev.vendor_name || normalizedAttrs[hUpper] || '';
+      return dev.vendor_name || '';
     }
-    if (hUpper === 'PURCHASE PRICE' || hUpper === 'BUYING PRICE' || hUpper === 'PRICE') {
-      return dev.purchase_price !== null && dev.purchase_price !== undefined ? dev.purchase_price : (normalizedAttrs[hUpper] || '');
+    if (hUpper === 'PURCHASE PRICE' || hUpper === 'BUYING PRICE' || hUpper === 'PRICE' || hUpper === 'COST') {
+      return dev.purchase_price !== null && dev.purchase_price !== undefined ? dev.purchase_price : '';
     }
     if (hUpper === 'PURCHASE DATE') {
-      return dev.purchase_date || normalizedAttrs[hUpper] || '';
+      return dev.purchase_date || '';
     }
     if (hUpper === 'RMA STATUS') {
-      return dev.rma_status || normalizedAttrs[hUpper] || 'NONE';
+      return dev.rma_status || 'NONE';
     }
     if (hUpper === 'LAST UPDATED') {
       return new Date().toISOString();
     }
 
-    let val = attrs[h];
-    if (val === undefined || val === null) {
-      val = normalizedAttrs[hUpper];
-    }
-    if (val === undefined || val === null) return '';
-
-    // If it's a long number string (Phone, SIM, ICCID, Aadhaar), prefix with ' so Sheets keeps full precision
-    const sVal = String(val).trim();
-    if (/^\d{10,}$/.test(sVal)) {
-      return "'" + sVal;
-    }
-    return sVal;
+    return '';
   });
 }
 

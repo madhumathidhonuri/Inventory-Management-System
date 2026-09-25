@@ -133,6 +133,26 @@ function syncTabWithExactHeaders(ss, tabName, headers, rows) {
   } catch(e) {}
 }
 
+function alignRowToSheetHeaders(sheetHeaders, incomingHeaders, row) {
+  if (!sheetHeaders || sheetHeaders.length === 0 || !incomingHeaders || incomingHeaders.length === 0) {
+    return row;
+  }
+  
+  const valMap = {};
+  for (let i = 0; i < incomingHeaders.length; i++) {
+    const key = String(incomingHeaders[i] || '').trim().toUpperCase();
+    valMap[key] = row[i] !== undefined ? row[i] : '';
+  }
+
+  return sheetHeaders.map(sh => {
+    const sKey = String(sh || '').trim().toUpperCase();
+    if (valMap[sKey] !== undefined) return valMap[sKey];
+    if (sKey === 'IMEI' && valMap['IMEINO']) return valMap['IMEINO'];
+    if (sKey === 'IMEINO' && valMap['IMEI']) return valMap['IMEI'];
+    return '';
+  });
+}
+
 /**
  * Single Row Top-Feed Upsert
  */
@@ -148,11 +168,12 @@ function upsertDeviceRow(ss, tabName, headers, row) {
     sheet.setFrozenRows(1);
   }
 
-  const currentHeaders = headers || sheet.getRange(1, 1, 1, sheet.getLastColumn() || 1).getValues()[0];
+  const currentHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn() || 1).getValues()[0];
   const imeiColIdx = findImeiColIndex(currentHeaders);
+  const alignedRow = alignRowToSheetHeaders(currentHeaders, headers, row);
 
   const data = sheet.getDataRange().getValues();
-  const imeiStr = String(row[imeiColIdx] || row[0] || '').replace(/^'/, '').trim();
+  const imeiStr = String(alignedRow[imeiColIdx] || alignedRow[0] || '').replace(/^'/, '').trim();
 
   let targetRow = -1;
   for (let r = 1; r < data.length; r++) {
@@ -170,7 +191,7 @@ function upsertDeviceRow(ss, tabName, headers, row) {
 
   // Insert fresh row at Row 2 (top of table right under header)
   sheet.insertRowBefore(2);
-  sheet.getRange(2, 1, 1, row.length).setValues([row]);
+  sheet.getRange(2, 1, 1, alignedRow.length).setValues([alignedRow]);
 }
 
 /**
@@ -187,15 +208,17 @@ function bulkUpsertDeviceRows(ss, tabName, headers, rows) {
     sheet.setFrozenRows(1);
   }
 
-  const currentHeaders = headers || sheet.getRange(1, 1, 1, sheet.getLastColumn() || 1).getValues()[0];
+  const currentHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn() || 1).getValues()[0];
   const imeiColIdx = findImeiColIndex(currentHeaders);
+
+  const alignedRows = rows.map(r => alignRowToSheetHeaders(currentHeaders, headers, r));
 
   const data = sheet.getDataRange().getValues();
   const existingRows = [];
   const incomingImeis = new Set();
 
-  for (let i = 0; i < rows.length; i++) {
-    const imei = String(rows[i][imeiColIdx] || rows[i][0] || '').replace(/^'/, '').trim();
+  for (let i = 0; i < alignedRows.length; i++) {
+    const imei = String(alignedRows[i][imeiColIdx] || alignedRows[i][0] || '').replace(/^'/, '').trim();
     if (imei) incomingImeis.add(imei);
   }
 
@@ -208,7 +231,7 @@ function bulkUpsertDeviceRows(ss, tabName, headers, rows) {
   }
 
   // New rows at the top, followed by existing rows
-  const combinedRows = rows.concat(existingRows);
+  const combinedRows = alignedRows.concat(existingRows);
 
   // Clear data area and write back
   if (sheet.getLastRow() > 1) {
