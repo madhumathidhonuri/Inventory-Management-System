@@ -912,10 +912,7 @@ function extractDeviceCertificateDate(dev = {}, attrs = {}) {
     'INSTALL DATE', 'Install Date', 'install_date',
     'DATE OF INSTALLATION', 'Date Of Installation', 'Date of Installation',
     'INSTALLED DATE', 'Installed Date', 'installed_date',
-    'ACTIVATION DATE', 'Activation Date', 'activation_date',
-    'SIM ACTIVATED DATE', 'Sim Activated Date', 'SIM ACTIVATION DATE', 'Sim Activation Date',
-    'FITTING DATE', 'Fitting Date',
-    'DATE', 'Date', 'date'
+    'FITTING DATE', 'Fitting Date'
   ];
 
   for (const k of directCertKeys) {
@@ -1008,11 +1005,11 @@ function isVltdDevice(dev = {}, attrs = {}, instRecord = null) {
 function extractTgMiningDate(dev = {}, attrs = {}) {
   const directKeys = [
     'TG MINING DATE', 'TG_MINING_DATE', 'Tg Mining Date', 'tg_mining_date',
-    'INSTALLATION DATE', 'Installation Date', 'installation_date', 'INSTALL DATE', 'Install Date',
     'MINING DATE', 'Mining Date', 'mining_date',
-    'ACTIVATION DATE', 'Activation Date', 'activation_date',
-    'STOCK PLACE DATE', 'Stock Place Date',
-    'SIM ACTIVATED DATE', 'Sim Activated Date', 'SIM ACTIVATION DATE', 'Sim Activation Date'
+    'INSTALLATION DATE', 'Installation Date', 'installation_date',
+    'INSTALL DATE', 'Install Date', 'install_date',
+    'DATE OF INSTALLATION', 'Date Of Installation',
+    'INSTALLED DATE', 'Installed Date'
   ];
 
   for (const k of directKeys) {
@@ -1140,7 +1137,11 @@ function computeDailyDistributionMatrix(requestedDate = null) {
 
     const vehNo = String(attrs['VEHICLE NUMBER'] || attrs['VEHICLE NO'] || attrs['vehicle_number'] || attrs['vehicle_no'] || attrs['MACHINERY NUMBER'] || attrs['EQUIPMENT NUMBER'] || (instRecord ? instRecord.vehicle_number : '') || '').trim();
     const hasVehicle = Boolean(vehNo && vehNo !== '-' && vehNo !== '—' && vehNo !== 'NULL');
-    const isInstalled = dev.current_status === 'INSTALLED' || hasVehicle || Boolean(instRecord);
+    const custNameVal = String(attrs['CUSTOMER NAME'] || attrs['CERTIFICATE ISSUED TO'] || attrs['CUSTOMER'] || (instRecord ? instRecord.customer_name : '') || '').trim();
+    const hasCustomer = Boolean(custNameVal && custNameVal !== '-' && custNameVal !== '—' && custNameVal !== 'NULL');
+
+    // A device is strictly INSTALLED if it has a vehicle attached, is recorded in installations, or marked as INSTALLED
+    const isInstalled = dev.current_status === 'INSTALLED' || hasVehicle || (Boolean(instRecord) && (hasVehicle || hasCustomer));
 
     const isMining = isTgMiningDevice(dev, attrs, instRecord);
     const isFuel = !isMining && isFuelDevice(dev, attrs, instRecord);
@@ -1194,26 +1195,27 @@ function computeDailyDistributionMatrix(requestedDate = null) {
       location: locName
     };
 
-    // Routing into 4 distinct categories:
-    if (isMining && (tgMiningDate === targetDate || (instRecord && instRecord.installation_date && instRecord.installation_date.startsWith(targetDate)))) {
-      matrix[devName].tg_mining_issued_today++;
-      todayTgMiningDevices.push(issuedItem);
-    } else if (isFuel && (certDate === targetDate || tgMiningDate === targetDate || (instRecord && instRecord.installation_date && instRecord.installation_date.startsWith(targetDate)))) {
-      matrix[devName].fuel_issued_today++;
-      todayFuelDevices.push(issuedItem);
-    } else if (isVltd && (certDate === targetDate || (instRecord && instRecord.installation_date && instRecord.installation_date.startsWith(targetDate)))) {
-      matrix[devName].vltd_issued_today++;
-      matrix[devName].certificates_issued_today++;
-      todayIssuedDevices.push(issuedItem);
-    } else if (isGeneral && (certDate === targetDate || tgMiningDate === targetDate || (instRecord && instRecord.installation_date && instRecord.installation_date.startsWith(targetDate)))) {
-      matrix[devName].general_issued_today++;
-      todayGeneralDevices.push(issuedItem);
-    }
-
     if (isInstalled) {
       matrix[devName].total_installed++;
       matrix[devName].total_certificates_issued++;
+
+      // ONLY if isInstalled is true, check if it was issued/installed on targetDate:
+      if (isMining && (tgMiningDate === targetDate || certDate === targetDate || (instRecord && instRecord.installation_date && instRecord.installation_date.startsWith(targetDate)))) {
+        matrix[devName].tg_mining_issued_today++;
+        todayTgMiningDevices.push(issuedItem);
+      } else if (isFuel && (certDate === targetDate || tgMiningDate === targetDate || (instRecord && instRecord.installation_date && instRecord.installation_date.startsWith(targetDate)))) {
+        matrix[devName].fuel_issued_today++;
+        todayFuelDevices.push(issuedItem);
+      } else if (isVltd && (certDate === targetDate || (instRecord && instRecord.installation_date && instRecord.installation_date.startsWith(targetDate)))) {
+        matrix[devName].vltd_issued_today++;
+        matrix[devName].certificates_issued_today++;
+        todayIssuedDevices.push(issuedItem);
+      } else if (isGeneral && (certDate === targetDate || tgMiningDate === targetDate || (instRecord && instRecord.installation_date && instRecord.installation_date.startsWith(targetDate)))) {
+        matrix[devName].general_issued_today++;
+        todayGeneralDevices.push(issuedItem);
+      }
     } else {
+      // In stock!
       let place = attrs['STOCK PLACE'] || attrs['STOCK LOCATION'] || dev.current_holder_name || 'OFFICE';
       place = String(place).trim().toUpperCase();
       if (!place || place === '—' || place === '-' || place === 'NULL') place = 'OFFICE';
@@ -1229,6 +1231,13 @@ function computeDailyDistributionMatrix(requestedDate = null) {
     const imei = String(inst.imei_number || '').trim();
     if (inst.device_id && processedDeviceIds.has(inst.device_id)) return;
     if (imei && processedImeis.has(imei)) return;
+
+    // Must have vehicle or customer to count as installed
+    const vehNo = String(inst.vehicle_number || '').trim();
+    const custNo = String(inst.customer_name || '').trim();
+    if ((!vehNo || vehNo === '-' || vehNo === '—') && (!custNo || custNo === '-' || custNo === '—')) {
+      return;
+    }
 
     let devName = 'AIS140';
     if (inst.device_type_id) {
