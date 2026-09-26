@@ -60,15 +60,15 @@ function doPost(e) {
       clearAllSheets(ss);
     }
 
-    return ContentService.createTextOutput(JSON.stringify({ 
-      success: true, 
+    return ContentService.createTextOutput(JSON.stringify({
+      success: true,
       message: 'Sync complete',
       sheet_url: ss.getUrl()
     })).setMimeType(ContentService.MimeType.JSON);
   } catch (err) {
-    return ContentService.createTextOutput(JSON.stringify({ 
-      success: false, 
-      error: err.toString() 
+    return ContentService.createTextOutput(JSON.stringify({
+      success: false,
+      error: err.toString()
     })).setMimeType(ContentService.MimeType.JSON);
   }
 }
@@ -106,7 +106,7 @@ function getOrCreateSheet(ss, tabName, headers) {
 function syncTabWithExactHeaders(ss, tabName, headers, rows) {
   if (!headers || headers.length === 0) return;
   const sheet = getOrCreateSheet(ss, tabName, headers);
-  
+
   // Clear sheet completely
   sheet.clear();
 
@@ -114,12 +114,12 @@ function syncTabWithExactHeaders(ss, tabName, headers, rows) {
   sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
   const headerRange = sheet.getRange(1, 1, 1, headers.length);
   headerRange.setBackground('#1e3a8a')
-             .setFontColor('#ffffff')
-             .setFontWeight('bold')
-             .setFontFamily('Roboto')
-             .setFontSize(10)
-             .setHorizontalAlignment('center');
-  
+    .setFontColor('#ffffff')
+    .setFontWeight('bold')
+    .setFontFamily('Roboto')
+    .setFontSize(10)
+    .setHorizontalAlignment('center');
+
   sheet.setFrozenRows(1);
 
   // 2. Write rows in bulk
@@ -132,14 +132,14 @@ function syncTabWithExactHeaders(ss, tabName, headers, rows) {
     for (let c = 1; c <= Math.min(headers.length, 50); c++) {
       sheet.autoResizeColumn(c);
     }
-  } catch(e) {}
+  } catch (e) { }
 }
 
 function alignRowToSheetHeaders(sheetHeaders, incomingHeaders, row) {
   if (!sheetHeaders || sheetHeaders.length === 0 || !incomingHeaders || incomingHeaders.length === 0) {
     return row;
   }
-  
+
   const valMap = {};
   for (let i = 0; i < incomingHeaders.length; i++) {
     const key = String(incomingHeaders[i] || '').trim().toUpperCase();
@@ -161,7 +161,7 @@ function alignRowToSheetHeaders(sheetHeaders, incomingHeaders, row) {
 function upsertDeviceRow(ss, tabName, headers, row) {
   if (!row || row.length === 0) return;
   const sheet = getOrCreateSheet(ss, tabName, headers);
-  
+
   // Ensure headers exist
   if (sheet.getLastRow() === 0 && headers && headers.length > 0) {
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);

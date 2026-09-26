@@ -32,7 +32,9 @@ import {
   PieChart,
   DollarSign,
   Wallet,
-  Percent
+  Percent,
+  Fuel,
+  Compass
 } from 'lucide-react';
 import {
   fetchReportOptions,
@@ -1303,13 +1305,19 @@ export default function ReportsPage() {
                           {loc}
                         </th>
                       ))}
-                      <th className="p-3 border-r border-[#1e543e] whitespace-nowrap min-w-[170px] bg-[#0D5C3A] text-emerald-100">
-                        VLTD CERTS TODAY
+                      <th className="p-3 border-r border-[#1e543e] whitespace-nowrap min-w-[130px] bg-[#0D5C3A] text-emerald-100">
+                        VLTD TODAY
                       </th>
-                      <th className="p-3 border-r border-[#92400e] whitespace-nowrap min-w-[170px] bg-[#B45309] text-amber-100">
+                      <th className="p-3 border-r border-[#92400e] whitespace-nowrap min-w-[130px] bg-[#B45309] text-amber-100">
                         TG MINING TODAY
                       </th>
-                      <th className="p-3 border-r border-[#2a4d77] whitespace-nowrap min-w-[100px]">
+                      <th className="p-3 border-r border-[#075985] whitespace-nowrap min-w-[130px] bg-[#0284C7] text-sky-100">
+                        FUEL TODAY
+                      </th>
+                      <th className="p-3 border-r border-[#4c1d95] whitespace-nowrap min-w-[130px] bg-[#6D28D9] text-purple-100">
+                        GENERAL TODAY
+                      </th>
+                      <th className="p-3 border-r border-[#2a4d77] whitespace-nowrap min-w-[90px]">
                         INSTALLED
                       </th>
                       <th className="p-3 border-r border-[#2a4d77] whitespace-nowrap min-w-[80px]">
@@ -1338,10 +1346,16 @@ export default function ReportsPage() {
                           </td>
                         ))}
                         <td className="p-3 font-mono font-bold text-emerald-900 bg-emerald-100/70 border-r border-slate-200">
-                          {r.certificates_issued_today || 0}
+                          {r.vltd_issued_today || r.certificates_issued_today || 0}
                         </td>
                         <td className="p-3 font-mono font-bold text-amber-950 bg-amber-100/70 border-r border-slate-200">
                           {r.tg_mining_issued_today || 0}
+                        </td>
+                        <td className="p-3 font-mono font-bold text-sky-950 bg-sky-100/70 border-r border-slate-200">
+                          {r.fuel_issued_today || 0}
+                        </td>
+                        <td className="p-3 font-mono font-bold text-purple-950 bg-purple-100/70 border-r border-slate-200">
+                          {r.general_issued_today || 0}
                         </td>
                         <td className="p-3 font-mono font-bold text-slate-900 border-r border-slate-200">
                           {r.total_installed || 0}
@@ -1368,10 +1382,16 @@ export default function ReportsPage() {
                         </td>
                       ))}
                       <td className="p-3 border-r border-[#f4b183]/60 font-mono whitespace-nowrap bg-[#c65911]">
-                        TOTAL = {dailyMatrix.columnTotals.certificates_issued_today || 0}
+                        TOTAL = {dailyMatrix.columnTotals.vltd_issued_today || dailyMatrix.columnTotals.certificates_issued_today || 0}
                       </td>
                       <td className="p-3 border-r border-[#f4b183]/60 font-mono whitespace-nowrap bg-[#b45309]">
                         TOTAL = {dailyMatrix.columnTotals.tg_mining_issued_today || 0}
+                      </td>
+                      <td className="p-3 border-r border-[#f4b183]/60 font-mono whitespace-nowrap bg-[#0369a1]">
+                        TOTAL = {dailyMatrix.columnTotals.fuel_issued_today || 0}
+                      </td>
+                      <td className="p-3 border-r border-[#f4b183]/60 font-mono whitespace-nowrap bg-[#5b21b6]">
+                        TOTAL = {dailyMatrix.columnTotals.general_issued_today || 0}
                       </td>
                       <td className="p-3 border-r border-[#f4b183]/60 font-mono whitespace-nowrap">
                         TOTAL = {dailyMatrix.columnTotals.total_installed || 0}
@@ -1403,7 +1423,7 @@ export default function ReportsPage() {
                     </div>
                   </div>
                   <span className="px-3 py-1 rounded-full text-xs font-bold font-mono bg-emerald-700 text-white shadow-2xs">
-                    {dailyMatrix.todayIssuedCount || 0} VLTD Issued Today
+                    {dailyMatrix.todayVltdCount ?? dailyMatrix.todayIssuedCount ?? 0} VLTD Issued Today
                   </span>
                 </div>
 
@@ -1530,12 +1550,150 @@ export default function ReportsPage() {
                 )}
               </div>
 
+              {/* 3. Fuel Tracking Devices Issued Today Itemized Details Table */}
+              <div className="bg-white rounded-2xl border border-sky-300 overflow-hidden shadow-2xs">
+                <div className="p-4 bg-sky-50/80 border-b border-sky-200 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Fuel className="w-5 h-5 text-sky-700" />
+                    <div>
+                      <h4 className="text-xs font-bold text-sky-950 uppercase tracking-wider">
+                        Fuel Devices Issued / Installed Today
+                      </h4>
+                      <p className="text-[11px] text-sky-800">
+                        Fuel monitoring trackers & sensors (FMB910 / Fuel) with Installation Date matching {dailyMatrix.targetDate || 'Today'}
+                      </p>
+                    </div>
+                  </div>
+                  <span className="px-3 py-1 rounded-full text-xs font-bold font-mono bg-sky-600 text-white shadow-2xs">
+                    {dailyMatrix.todayFuelCount || (dailyMatrix.todayFuelDevices ? dailyMatrix.todayFuelDevices.length : 0)} Fuel Issued Today
+                  </span>
+                </div>
+
+                {(!dailyMatrix.todayFuelDevices || dailyMatrix.todayFuelDevices.length === 0) ? (
+                  <div className="p-6 text-center text-xs text-slate-400">
+                    No Fuel tracking devices recorded with date matching {dailyMatrix.targetDate}.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
+                        <tr>
+                          <th className="p-3 font-bold text-center">#</th>
+                          <th className="p-3 font-bold">Installation Date</th>
+                          <th className="p-3 font-bold">IMEI Number</th>
+                          <th className="p-3 font-bold">Device Model</th>
+                          <th className="p-3 font-bold">Vehicle Number</th>
+                          <th className="p-3 font-bold">Customer Name</th>
+                          <th className="p-3 font-bold">TECHNICIAN</th>
+                          <th className="p-3 font-bold">Contact Phone</th>
+                          <th className="p-3 font-bold">Location / Stock Place</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {dailyMatrix.todayFuelDevices.map((item, idx) => (
+                          <tr key={item.id || idx} className="hover:bg-sky-50/40 transition-colors">
+                            <td className="p-3 text-center font-mono text-slate-400">{idx + 1}</td>
+                            <td className="p-3 font-mono font-bold text-sky-800">{item.installation_date || item.certificate_issued_date}</td>
+                            <td className="p-3 font-mono font-bold text-blue-700">{item.imei_number}</td>
+                            <td className="p-3 text-slate-800 font-semibold">{item.device_name}</td>
+                            <td className="p-3 font-mono font-bold text-slate-900">{item.vehicle_number}</td>
+                            <td className="p-3 text-slate-900 font-medium">{item.customer_name}</td>
+                            <td className="p-3 font-medium text-slate-800">
+                              {item.installed_by && item.installed_by !== '-' ? (
+                                <span className="px-2 py-0.5 rounded-md bg-sky-100/70 border border-sky-200 font-semibold text-sky-900">
+                                  {item.installed_by}
+                                </span>
+                              ) : (
+                                <span className="text-slate-400 font-mono">—</span>
+                              )}
+                            </td>
+                            <td className="p-3 font-mono font-medium text-sky-800">
+                              {item.customer_phone && item.customer_phone !== '-' ? item.customer_phone : '-'}
+                            </td>
+                            <td className="p-3 font-mono text-slate-600">{item.location || item.rto_location || 'FUEL'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* 4. General GPS Trackers Issued Today Itemized Details Table */}
+              <div className="bg-white rounded-2xl border border-purple-300 overflow-hidden shadow-2xs">
+                <div className="p-4 bg-purple-50/80 border-b border-purple-200 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Compass className="w-5 h-5 text-purple-700" />
+                    <div>
+                      <h4 className="text-xs font-bold text-purple-950 uppercase tracking-wider">
+                        General GPS Trackers Issued / Installed Today
+                      </h4>
+                      <p className="text-[11px] text-purple-800">
+                        General asset & vehicle trackers with Installation Date matching {dailyMatrix.targetDate || 'Today'}
+                      </p>
+                    </div>
+                  </div>
+                  <span className="px-3 py-1 rounded-full text-xs font-bold font-mono bg-purple-600 text-white shadow-2xs">
+                    {dailyMatrix.todayGeneralCount || (dailyMatrix.todayGeneralDevices ? dailyMatrix.todayGeneralDevices.length : 0)} General Issued Today
+                  </span>
+                </div>
+
+                {(!dailyMatrix.todayGeneralDevices || dailyMatrix.todayGeneralDevices.length === 0) ? (
+                  <div className="p-6 text-center text-xs text-slate-400">
+                    No General GPS trackers recorded with date matching {dailyMatrix.targetDate}.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
+                        <tr>
+                          <th className="p-3 font-bold text-center">#</th>
+                          <th className="p-3 font-bold">Installation Date</th>
+                          <th className="p-3 font-bold">IMEI Number</th>
+                          <th className="p-3 font-bold">Device Model</th>
+                          <th className="p-3 font-bold">Vehicle Number</th>
+                          <th className="p-3 font-bold">Customer Name</th>
+                          <th className="p-3 font-bold">TECHNICIAN</th>
+                          <th className="p-3 font-bold">Contact Phone</th>
+                          <th className="p-3 font-bold">Location / Stock Place</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {dailyMatrix.todayGeneralDevices.map((item, idx) => (
+                          <tr key={item.id || idx} className="hover:bg-purple-50/40 transition-colors">
+                            <td className="p-3 text-center font-mono text-slate-400">{idx + 1}</td>
+                            <td className="p-3 font-mono font-bold text-purple-800">{item.installation_date || item.certificate_issued_date}</td>
+                            <td className="p-3 font-mono font-bold text-blue-700">{item.imei_number}</td>
+                            <td className="p-3 text-slate-800 font-semibold">{item.device_name}</td>
+                            <td className="p-3 font-mono font-bold text-slate-900">{item.vehicle_number}</td>
+                            <td className="p-3 text-slate-900 font-medium">{item.customer_name}</td>
+                            <td className="p-3 font-medium text-slate-800">
+                              {item.installed_by && item.installed_by !== '-' ? (
+                                <span className="px-2 py-0.5 rounded-md bg-purple-100/70 border border-purple-200 font-semibold text-purple-900">
+                                  {item.installed_by}
+                                </span>
+                              ) : (
+                                <span className="text-slate-400 font-mono">—</span>
+                              )}
+                            </td>
+                            <td className="p-3 font-mono font-medium text-purple-800">
+                              {item.customer_phone && item.customer_phone !== '-' ? item.customer_phone : '-'}
+                            </td>
+                            <td className="p-3 font-mono text-slate-600">{item.location || '-'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
               {/* Dynamic Columns Info Note */}
               <div className="p-3 bg-blue-50/70 border border-blue-200 rounded-xl text-xs text-blue-950 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <Sparkles className="w-4 h-4 text-blue-600 shrink-0" />
                   <span>
-                    <strong>100% Dynamic Locations:</strong> As new branches, stock places, or dealer transfers are saved, columns expand and calculate totals automatically.
+                    <strong>100% Dynamic Locations & 4 Categories:</strong> VLTD, TG Mining, Fuel, and General Trackers are tracked in distinct columns and itemized tables.
                   </span>
                 </div>
                 <span className="text-[11px] font-bold text-blue-800 bg-white px-2.5 py-0.5 rounded-lg border border-blue-200 shadow-2xs">

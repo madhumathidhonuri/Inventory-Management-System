@@ -963,11 +963,45 @@ function extractDeviceCertificateDate(dev = {}, attrs = {}) {
 }
 
 // Helper: Check if device belongs to TG MINING category
-function isTgMiningDevice(dev = {}, attrs = {}) {
-  const cat = String(attrs['CATEGORY'] || attrs['DEVICE CATEGORY'] || attrs['PROJECT CATEGORY'] || attrs['PROJECT'] || attrs['Category'] || '').toUpperCase().trim();
-  const typeName = String(dev.device_name || dev.device_type_name || '').toUpperCase().trim();
-  const stockPlace = String(attrs['STOCK PLACE'] || '').toUpperCase().trim();
+function isTgMiningDevice(dev = {}, attrs = {}, instRecord = null) {
+  const cat = String(attrs['CATEGORY'] || attrs['DEVICE CATEGORY'] || attrs['PROJECT CATEGORY'] || attrs['PROJECT'] || attrs['Category'] || (instRecord ? instRecord.category : '') || '').toUpperCase().trim();
+  const typeName = String(dev.device_name || dev.device_type_name || (instRecord ? instRecord.device_type_name : '') || '').toUpperCase().trim();
+  const stockPlace = String(attrs['STOCK PLACE'] || attrs['LOCATION'] || (instRecord ? instRecord.installation_location : '') || '').toUpperCase().trim();
   return cat.includes('TG MINING') || cat.includes('TG_MINING') || (cat.includes('MINING') && !cat.includes('AP MINING')) || typeName.includes('TG MINING') || typeName.includes('TG_MINING') || stockPlace.includes('TG MINING');
+}
+
+// Helper: Check if device belongs to FUEL category
+function isFuelDevice(dev = {}, attrs = {}, instRecord = null) {
+  const cat = String(attrs['CATEGORY'] || attrs['DEVICE CATEGORY'] || attrs['PROJECT CATEGORY'] || attrs['Category'] || (instRecord ? instRecord.category : '') || '').toUpperCase().trim();
+  const typeName = String(dev.device_name || dev.device_type_name || (instRecord ? instRecord.device_type_name : '') || '').toUpperCase().trim();
+  const rtoLoc = String(attrs['RTO LOCATION'] || attrs['RTO Location'] || attrs['rto_location'] || (instRecord ? instRecord.installation_location : '') || '').toUpperCase().trim();
+  const stockPlace = String(attrs['STOCK PLACE'] || attrs['LOCATION'] || '').toUpperCase().trim();
+
+  if (cat.includes('FUEL') || cat.includes('DIESEL') || cat.includes('PETROL') || cat.includes('CALIBRATION')) return true;
+  if (rtoLoc === 'FUEL' || rtoLoc.includes('FUEL TRACK') || rtoLoc.includes('FUEL SENSOR')) return true;
+  if (stockPlace === 'FUEL' || stockPlace.includes('FUEL')) return true;
+  if (typeName.includes('FMB910') || typeName.includes('FMB 910') || typeName.includes('FUEL') || typeName.includes('FMB920') || typeName.includes('FMC130')) {
+    return true;
+  }
+  return false;
+}
+
+// Helper: Check if device belongs to VLTD category
+function isVltdDevice(dev = {}, attrs = {}, instRecord = null) {
+  const cat = String(attrs['CATEGORY'] || attrs['DEVICE CATEGORY'] || attrs['PROJECT CATEGORY'] || attrs['Category'] || (instRecord ? instRecord.category : '') || '').toUpperCase().trim();
+  const typeName = String(dev.device_name || dev.device_type_name || (instRecord ? instRecord.device_type_name : '') || '').toUpperCase().trim();
+  const rtoLoc = String(attrs['RTO LOCATION'] || attrs['RTO Location'] || attrs['rto_location'] || (instRecord ? instRecord.installation_location : '') || '').toUpperCase().trim();
+
+  if (cat.includes('VLTD') || cat.includes('AIS140') || cat.includes('AIS 140') || cat.includes('CERTIFICATE')) return true;
+  if (typeName.includes('VOLTY') || typeName.includes('TRACKNOW') || typeName.includes('AIS140') || typeName.includes('AIS 140') || typeName.includes('V5') || typeName.includes('ROADPOINT') || typeName.includes('SARTHI') || typeName.includes('CERTIFIED')) {
+    return true;
+  }
+  if (rtoLoc && rtoLoc !== '-' && rtoLoc !== '—' && rtoLoc !== 'OFFICE' && rtoLoc !== 'FUEL' && !rtoLoc.includes('FUEL')) {
+    return true;
+  }
+  const certIssuedTo = attrs['CERTIFICATE ISSUED TO'] || attrs['Certificate Issued To'];
+  if (certIssuedTo && String(certIssuedTo).trim() !== '') return true;
+  return false;
 }
 
 // Helper: Extract normalized YYYY-MM-DD TG Mining date from device & attributes
@@ -1008,7 +1042,7 @@ function extractTgMiningDate(dev = {}, attrs = {}) {
   return null;
 }
 
-// Helper: Compute 100% dynamic Daily Master Inventory Distribution Matrix with Today's Issued Certificates & TG Mining Devices & Daily Installations
+// Helper: Compute 100% dynamic Daily Master Inventory Distribution Matrix with 4 Categories: VLTD, TG Mining, Fuel, General
 function computeDailyDistributionMatrix(requestedDate = null) {
   const targetDate = requestedDate || new Date().toISOString().split('T')[0];
 
@@ -1054,6 +1088,8 @@ function computeDailyDistributionMatrix(requestedDate = null) {
   const matrix = {};
   const todayIssuedDevices = [];
   const todayTgMiningDevices = [];
+  const todayFuelDevices = [];
+  const todayGeneralDevices = [];
 
   deviceTypes.forEach(dt => {
     matrix[dt.name] = {
@@ -1061,7 +1097,10 @@ function computeDailyDistributionMatrix(requestedDate = null) {
       device_name: dt.name,
       locations: {},
       certificates_issued_today: 0,
+      vltd_issued_today: 0,
       tg_mining_issued_today: 0,
+      fuel_issued_today: 0,
+      general_issued_today: 0,
       total_installed: 0,
       total_certificates_issued: 0,
       in_stock_total: 0,
@@ -1086,7 +1125,10 @@ function computeDailyDistributionMatrix(requestedDate = null) {
         device_name: devName,
         locations: {},
         certificates_issued_today: 0,
+        vltd_issued_today: 0,
         tg_mining_issued_today: 0,
+        fuel_issued_today: 0,
+        general_issued_today: 0,
         total_installed: 0,
         total_certificates_issued: 0,
         in_stock_total: 0,
@@ -1099,7 +1141,11 @@ function computeDailyDistributionMatrix(requestedDate = null) {
     const vehNo = String(attrs['VEHICLE NUMBER'] || attrs['VEHICLE NO'] || attrs['vehicle_number'] || attrs['vehicle_no'] || attrs['MACHINERY NUMBER'] || attrs['EQUIPMENT NUMBER'] || (instRecord ? instRecord.vehicle_number : '') || '').trim();
     const hasVehicle = Boolean(vehNo && vehNo !== '-' && vehNo !== '—' && vehNo !== 'NULL');
     const isInstalled = dev.current_status === 'INSTALLED' || hasVehicle || Boolean(instRecord);
-    const isMining = isTgMiningDevice(dev, attrs);
+
+    const isMining = isTgMiningDevice(dev, attrs, instRecord);
+    const isFuel = !isMining && isFuelDevice(dev, attrs, instRecord);
+    const isVltd = !isMining && !isFuel && (isVltdDevice(dev, attrs, instRecord) || (attrs['CERTIFICATE ISSUED DATE'] || attrs['Certificate Issued Date']));
+    const isGeneral = !isMining && !isFuel && !isVltd;
 
     let certDate = extractDeviceCertificateDate(dev, attrs);
     if (!certDate && instRecord && instRecord.installation_date) {
@@ -1131,40 +1177,37 @@ function computeDailyDistributionMatrix(requestedDate = null) {
 
     const locName = attrs['RTO LOCATION'] || attrs['RTO Location'] || attrs['rto_location'] || attrs['STOCK PLACE'] || attrs['LOCATION'] || (instRecord ? instRecord.installation_location : '') || dev.current_holder_name || '';
 
-    // TG MINING device issued/installed today
+    const issuedItem = {
+      id: dev.id,
+      imei_number: dev.imei_number,
+      device_name: devName,
+      vehicle_number: vehNo || '-',
+      customer_name: custName,
+      customer_phone: phone,
+      certificate_issued_date: certDate || targetDate,
+      installation_date: certDate || tgMiningDate || targetDate,
+      tg_mining_date: tgMiningDate || targetDate,
+      installed_by: installer,
+      chasis_number: chasis,
+      engine_number: engine,
+      rto_location: locName,
+      location: locName
+    };
+
+    // Routing into 4 distinct categories:
     if (isMining && (tgMiningDate === targetDate || (instRecord && instRecord.installation_date && instRecord.installation_date.startsWith(targetDate)))) {
       matrix[devName].tg_mining_issued_today++;
-      todayTgMiningDevices.push({
-        id: dev.id,
-        imei_number: dev.imei_number,
-        device_name: devName,
-        vehicle_number: vehNo || '-',
-        customer_name: custName,
-        customer_phone: phone,
-        tg_mining_date: tgMiningDate || targetDate,
-        installed_by: installer,
-        chasis_number: chasis,
-        engine_number: engine,
-        location: locName
-      });
-    }
-
-    // VLTD certificate / Device installed today (non-mining or standard device like V5, AIS140)
-    if (!isMining && (certDate === targetDate || (instRecord && instRecord.installation_date && instRecord.installation_date.startsWith(targetDate)))) {
+      todayTgMiningDevices.push(issuedItem);
+    } else if (isFuel && (certDate === targetDate || tgMiningDate === targetDate || (instRecord && instRecord.installation_date && instRecord.installation_date.startsWith(targetDate)))) {
+      matrix[devName].fuel_issued_today++;
+      todayFuelDevices.push(issuedItem);
+    } else if (isVltd && (certDate === targetDate || (instRecord && instRecord.installation_date && instRecord.installation_date.startsWith(targetDate)))) {
+      matrix[devName].vltd_issued_today++;
       matrix[devName].certificates_issued_today++;
-      todayIssuedDevices.push({
-        id: dev.id,
-        imei_number: dev.imei_number,
-        device_name: devName,
-        vehicle_number: vehNo || '-',
-        customer_name: custName,
-        customer_phone: phone,
-        certificate_issued_date: certDate || targetDate,
-        installed_by: installer,
-        chasis_number: chasis,
-        engine_number: engine,
-        rto_location: locName
-      });
+      todayIssuedDevices.push(issuedItem);
+    } else if (isGeneral && (certDate === targetDate || tgMiningDate === targetDate || (instRecord && instRecord.installation_date && instRecord.installation_date.startsWith(targetDate)))) {
+      matrix[devName].general_issued_today++;
+      todayGeneralDevices.push(issuedItem);
     }
 
     if (isInstalled) {
@@ -1202,7 +1245,10 @@ function computeDailyDistributionMatrix(requestedDate = null) {
         device_name: devName,
         locations: {},
         certificates_issued_today: 0,
+        vltd_issued_today: 0,
         tg_mining_issued_today: 0,
+        fuel_issued_today: 0,
+        general_issued_today: 0,
         total_installed: 0,
         total_certificates_issued: 0,
         in_stock_total: 0,
@@ -1212,9 +1258,13 @@ function computeDailyDistributionMatrix(requestedDate = null) {
 
     matrix[devName].total_installed++;
     matrix[devName].total_certificates_issued++;
-    matrix[devName].certificates_issued_today++;
 
-    todayIssuedDevices.push({
+    const isMining = isTgMiningDevice({ device_name: devName }, {}, inst);
+    const isFuel = !isMining && isFuelDevice({ device_name: devName }, {}, inst);
+    const isVltd = !isMining && !isFuel && isVltdDevice({ device_name: devName }, {}, inst);
+    const isGeneral = !isMining && !isFuel && !isVltd;
+
+    const standaloneItem = {
       id: inst.device_id || null,
       imei_number: imei || '-',
       device_name: devName,
@@ -1222,11 +1272,29 @@ function computeDailyDistributionMatrix(requestedDate = null) {
       customer_name: inst.customer_name || '-',
       customer_phone: inst.customer_contact || '-',
       certificate_issued_date: inst.installation_date ? inst.installation_date.split('T')[0] : targetDate,
+      installation_date: inst.installation_date ? inst.installation_date.split('T')[0] : targetDate,
+      tg_mining_date: inst.installation_date ? inst.installation_date.split('T')[0] : targetDate,
       installed_by: inst.installed_by || '-',
       chasis_number: inst.chasis_number || '-',
       engine_number: inst.engine_number || '-',
-      rto_location: inst.installation_location || '-'
-    });
+      rto_location: inst.installation_location || '-',
+      location: inst.installation_location || '-'
+    };
+
+    if (isMining) {
+      matrix[devName].tg_mining_issued_today++;
+      todayTgMiningDevices.push(standaloneItem);
+    } else if (isFuel) {
+      matrix[devName].fuel_issued_today++;
+      todayFuelDevices.push(standaloneItem);
+    } else if (isVltd) {
+      matrix[devName].vltd_issued_today++;
+      matrix[devName].certificates_issued_today++;
+      todayIssuedDevices.push(standaloneItem);
+    } else {
+      matrix[devName].general_issued_today++;
+      todayGeneralDevices.push(standaloneItem);
+    }
   });
 
   // Calculate certificates issued text summary for each device
@@ -1271,7 +1339,7 @@ function computeDailyDistributionMatrix(requestedDate = null) {
 
   // Filter out any device types / sheets that have 0 stock, 0 installed, 0 purchased, and 0 activity (e.g. deleted sheets)
   const validRows = Object.values(matrix).filter(m => 
-    (m.in_stock_total > 0 || m.total_installed > 0 || m.purchased_total > 0 || m.certificates_issued_today > 0 || m.tg_mining_issued_today > 0 || Object.values(m.locations).some(v => v > 0))
+    (m.in_stock_total > 0 || m.total_installed > 0 || m.purchased_total > 0 || m.certificates_issued_today > 0 || m.vltd_issued_today > 0 || m.tg_mining_issued_today > 0 || m.fuel_issued_today > 0 || m.general_issued_today > 0 || Object.values(m.locations).some(v => v > 0))
   );
 
   const finalRows = validRows.length > 0 ? validRows : Object.values(matrix);
@@ -1280,7 +1348,10 @@ function computeDailyDistributionMatrix(requestedDate = null) {
   const columnTotals = {
     locations: {},
     certificates_issued_today: 0,
+    vltd_issued_today: 0,
     tg_mining_issued_today: 0,
+    fuel_issued_today: 0,
+    general_issued_today: 0,
     total_installed: 0,
     total_certificates_issued: 0,
     in_stock_total: 0,
@@ -1295,8 +1366,11 @@ function computeDailyDistributionMatrix(requestedDate = null) {
   });
 
   finalRows.forEach(m => {
-    columnTotals.certificates_issued_today += (m.certificates_issued_today || 0);
+    columnTotals.vltd_issued_today += (m.vltd_issued_today || m.certificates_issued_today || 0);
+    columnTotals.certificates_issued_today += (m.certificates_issued_today || m.vltd_issued_today || 0);
     columnTotals.tg_mining_issued_today += (m.tg_mining_issued_today || 0);
+    columnTotals.fuel_issued_today += (m.fuel_issued_today || 0);
+    columnTotals.general_issued_today += (m.general_issued_today || 0);
     columnTotals.total_installed += (m.total_installed || 0);
     columnTotals.total_certificates_issued += m.total_certificates_issued;
     columnTotals.in_stock_total += m.in_stock_total;
@@ -1311,9 +1385,15 @@ function computeDailyDistributionMatrix(requestedDate = null) {
     rows: finalRows,
     columnTotals,
     todayIssuedDevices,
+    todayVltdDevices: todayIssuedDevices,
     todayTgMiningDevices,
+    todayFuelDevices,
+    todayGeneralDevices,
     todayIssuedCount: todayIssuedDevices.length,
+    todayVltdCount: todayIssuedDevices.length,
     todayTgMiningCount: todayTgMiningDevices.length,
+    todayFuelCount: todayFuelDevices.length,
+    todayGeneralCount: todayGeneralDevices.length,
     targetDate,
     generatedAt: dateStr
   };
@@ -1330,12 +1410,12 @@ router.get('/daily-distribution', (req, res) => {
   }
 });
 
-// GET /api/reports/export-daily-distribution - Excel export (3 DEDICATED SHEETS: Stock Matrix, VLTD Certificates, TG Mining)
+// GET /api/reports/export-daily-distribution - Excel export (5 DEDICATED SHEETS: Stock Matrix, VLTD, TG Mining, Fuel, General)
 router.get('/export-daily-distribution', async (req, res) => {
   try {
     const { date } = req.query;
     const matrixData = computeDailyDistributionMatrix(date);
-    const { locations, rows, columnTotals, todayIssuedDevices, todayTgMiningDevices, targetDate, generatedAt } = matrixData;
+    const { locations, rows, columnTotals, todayIssuedDevices, todayTgMiningDevices, todayFuelDevices, todayGeneralDevices, targetDate, generatedAt } = matrixData;
 
     const wb = new ExcelJS.Workbook();
     wb.creator = 'FuelTracks Technologies IMS';
@@ -1349,7 +1429,7 @@ router.get('/export-daily-distribution', async (req, res) => {
       views: [{ showGridLines: true }]
     });
 
-    const matrixTotalCols = locations.length + 6;
+    const matrixTotalCols = locations.length + 8;
 
     // Super Header Banner
     const mTitleRow = wsMatrix.addRow(['FUELTRACKS TECHNOLOGIES — DAILY INVENTORY STOCK & DISTRIBUTION MATRIX']);
@@ -1366,7 +1446,7 @@ router.get('/export-daily-distribution', async (req, res) => {
 
     // Subtitle Row
     const mSubRow = wsMatrix.addRow([
-      `Report Date: ${targetDate}    |    Generated On: ${generatedAt}    |    Active Locations: ${locations.length}    |    VLTD Issued Today: ${todayIssuedDevices.length}    |    TG Mining Today: ${todayTgMiningDevices.length}`
+      `Report Date: ${targetDate}  |  Generated On: ${generatedAt}  |  Locations: ${locations.length}  |  VLTD: ${todayIssuedDevices.length}  |  TG Mining: ${todayTgMiningDevices.length}  |  Fuel: ${todayFuelDevices.length}  |  General: ${todayGeneralDevices.length}`
     ]);
     mSubRow.height = 22;
     wsMatrix.mergeCells(2, 1, 2, matrixTotalCols);
@@ -1386,8 +1466,10 @@ router.get('/export-daily-distribution', async (req, res) => {
     const matrixHeaders = [
       'DEVICE',
       ...locations,
-      'VLTD CERTS TODAY',
+      'VLTD TODAY',
       'TG MINING TODAY',
+      'FUEL TODAY',
+      'GENERAL TODAY',
       'INSTALLED',
       'TOTAL STOCK',
       'PURCHASED'
@@ -1416,8 +1498,10 @@ router.get('/export-daily-distribution', async (req, res) => {
       const rowValues = [
         r.device_name,
         ...locations.map(loc => r.locations[loc] || ''),
-        r.certificates_issued_today || 0,
+        r.vltd_issued_today || r.certificates_issued_today || 0,
         r.tg_mining_issued_today || 0,
+        r.fuel_issued_today || 0,
+        r.general_issued_today || 0,
         r.total_installed || 0,
         r.in_stock_total || 0,
         r.purchased_total || 0
@@ -1447,10 +1531,14 @@ router.get('/export-daily-distribution', async (req, res) => {
         if (colNumber === 1) {
           cell.font = { bold: true, name: 'Calibri', size: 9.5, color: { argb: 'FF1A202C' } };
         } else if (colNumber === locations.length + 2) {
-          cell.font = { bold: true, color: { argb: 'FF0D5C3A' }, name: 'Calibri' };
+          cell.font = { bold: true, color: { argb: 'FF0D5C3A' }, name: 'Calibri' }; // VLTD (Emerald)
         } else if (colNumber === locations.length + 3) {
-          cell.font = { bold: true, color: { argb: 'FFB45309' }, name: 'Calibri' };
-        } else if (colNumber >= locations.length + 4) {
+          cell.font = { bold: true, color: { argb: 'FFB45309' }, name: 'Calibri' }; // Mining (Amber)
+        } else if (colNumber === locations.length + 4) {
+          cell.font = { bold: true, color: { argb: 'FF0284C7' }, name: 'Calibri' }; // Fuel (Sky Blue)
+        } else if (colNumber === locations.length + 5) {
+          cell.font = { bold: true, color: { argb: 'FF7C3AED' }, name: 'Calibri' }; // General (Purple)
+        } else if (colNumber >= locations.length + 6) {
           cell.font = { bold: true, name: 'Calibri', size: 9.5 };
         }
       });
@@ -1460,8 +1548,10 @@ router.get('/export-daily-distribution', async (req, res) => {
     const totalRowValues = [
       'TOTAL',
       ...locations.map(loc => `TOTAL = ${columnTotals.locations[loc] || 0}`),
-      `TOTAL = ${columnTotals.certificates_issued_today || 0}`,
+      `TOTAL = ${columnTotals.vltd_issued_today || columnTotals.certificates_issued_today || 0}`,
       `TOTAL = ${columnTotals.tg_mining_issued_today || 0}`,
+      `TOTAL = ${columnTotals.fuel_issued_today || 0}`,
+      `TOTAL = ${columnTotals.general_issued_today || 0}`,
       `TOTAL = ${columnTotals.total_installed || 0}`,
       `TOTAL = ${columnTotals.in_stock_total || 0}`,
       `TOTAL = ${columnTotals.purchased_total || 0}`
@@ -1489,8 +1579,10 @@ router.get('/export-daily-distribution', async (req, res) => {
     wsMatrix.columns = [
       { width: 24 },
       ...locations.map(() => ({ width: 16 })),
+      { width: 18 },
       { width: 20 },
-      { width: 20 },
+      { width: 18 },
+      { width: 18 },
       { width: 16 },
       { width: 16 },
       { width: 16 }
@@ -1503,7 +1595,6 @@ router.get('/export-daily-distribution', async (req, res) => {
       views: [{ showGridLines: true }]
     });
 
-    // Super Header Banner
     const vltdTitleRow = wsVltd.addRow(['FUELTRACKS TECHNOLOGIES — VLTD CERTIFICATES ISSUED TODAY']);
     vltdTitleRow.height = 32;
     wsVltd.mergeCells(1, 1, 1, 11);
@@ -1516,7 +1607,6 @@ router.get('/export-daily-distribution', async (req, res) => {
     vltdTitleCell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 13, name: 'Calibri' };
     vltdTitleCell.alignment = { vertical: 'middle', horizontal: 'center' };
 
-    // Subtitle Row
     const vltdSubRow = wsVltd.addRow([
       `Report Date: ${targetDate}    |    Total Certificates Issued: ${todayIssuedDevices.length}    |    Generated On: ${generatedAt}`
     ]);
@@ -1531,10 +1621,8 @@ router.get('/export-daily-distribution', async (req, res) => {
     vltdSubCell.font = { bold: true, color: { argb: 'FFD1FAE5' }, size: 9, name: 'Calibri' };
     vltdSubCell.alignment = { vertical: 'middle', horizontal: 'center' };
 
-    // Blank Gap Row
     wsVltd.addRow([]);
 
-    // Table Header Row
     const vltdHeaders = [
       'Sl No',
       'Certificate Issue Date',
@@ -1624,19 +1712,9 @@ router.get('/export-daily-distribution', async (req, res) => {
       });
     }
 
-    // Column widths for Sheet 2
     wsVltd.columns = [
-      { width: 8 },   // Sl No
-      { width: 22 },  // Issue Date
-      { width: 22 },  // IMEI
-      { width: 18 },  // Model
-      { width: 20 },  // Vehicle No
-      { width: 28 },  // Customer Name
-      { width: 20 },  // TECHNICIAN
-      { width: 18 },  // Contact
-      { width: 22 },  // Chassis
-      { width: 20 },  // Engine
-      { width: 22 }   // RTO Location
+      { width: 8 }, { width: 22 }, { width: 22 }, { width: 18 }, { width: 20 },
+      { width: 28 }, { width: 20 }, { width: 18 }, { width: 22 }, { width: 20 }, { width: 22 }
     ];
 
     // =========================================================================
@@ -1646,7 +1724,6 @@ router.get('/export-daily-distribution', async (req, res) => {
       views: [{ showGridLines: true }]
     });
 
-    // Super Header Banner
     const miningTitleRow = wsMining.addRow(['FUELTRACKS TECHNOLOGIES — TG MINING DEPLOYMENTS / ACTIVATIONS TODAY']);
     miningTitleRow.height = 32;
     wsMining.mergeCells(1, 1, 1, 11);
@@ -1659,7 +1736,6 @@ router.get('/export-daily-distribution', async (req, res) => {
     miningTitleCell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 13, name: 'Calibri' };
     miningTitleCell.alignment = { vertical: 'middle', horizontal: 'center' };
 
-    // Subtitle Row
     const miningSubRow = wsMining.addRow([
       `Report Date: ${targetDate}    |    Total TG Mining Devices: ${todayTgMiningDevices.length}    |    Generated On: ${generatedAt}`
     ]);
@@ -1674,10 +1750,8 @@ router.get('/export-daily-distribution', async (req, res) => {
     miningSubCell.font = { bold: true, color: { argb: 'FFFEF3C7' }, size: 9, name: 'Calibri' };
     miningSubCell.alignment = { vertical: 'middle', horizontal: 'center' };
 
-    // Blank Gap Row
     wsMining.addRow([]);
 
-    // Table Header Row
     const miningHeaders = [
       'Sl No',
       'Installation Date',
@@ -1767,19 +1841,267 @@ router.get('/export-daily-distribution', async (req, res) => {
       });
     }
 
-    // Column widths for Sheet 3
     wsMining.columns = [
-      { width: 8 },   // Sl No
-      { width: 22 },  // Installation Date
-      { width: 22 },  // IMEI
-      { width: 18 },  // Model
-      { width: 24 },  // Vehicle / Equip No
-      { width: 28 },  // Customer / Site
-      { width: 20 },  // TECHNICIAN
-      { width: 18 },  // Contact
-      { width: 22 },  // Chassis
-      { width: 20 },  // Engine
-      { width: 22 }   // Location
+      { width: 8 }, { width: 22 }, { width: 22 }, { width: 18 }, { width: 24 },
+      { width: 28 }, { width: 20 }, { width: 18 }, { width: 22 }, { width: 20 }, { width: 22 }
+    ];
+
+    // =========================================================================
+    // SHEET 4: FUEL TRACKING DEVICES ISSUED
+    // =========================================================================
+    const wsFuel = wb.addWorksheet('Fuel Tracking', {
+      views: [{ showGridLines: true }]
+    });
+
+    const fuelTitleRow = wsFuel.addRow(['FUELTRACKS TECHNOLOGIES — FUEL TRACKING DEVICES ISSUED / INSTALLED TODAY']);
+    fuelTitleRow.height = 32;
+    wsFuel.mergeCells(1, 1, 1, 11);
+    const fuelTitleCell = wsFuel.getCell(1, 1);
+    fuelTitleCell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF075985' } // Deep Ocean Sky Blue 800
+    };
+    fuelTitleCell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 13, name: 'Calibri' };
+    fuelTitleCell.alignment = { vertical: 'middle', horizontal: 'center' };
+
+    const fuelSubRow = wsFuel.addRow([
+      `Report Date: ${targetDate}    |    Total Fuel Devices: ${todayFuelDevices.length}    |    Generated On: ${generatedAt}`
+    ]);
+    fuelSubRow.height = 22;
+    wsFuel.mergeCells(2, 1, 2, 11);
+    const fuelSubCell = wsFuel.getCell(2, 1);
+    fuelSubCell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF0284C7' } // Sky Blue 600
+    };
+    fuelSubCell.font = { bold: true, color: { argb: 'FFE0F2FE' }, size: 9, name: 'Calibri' };
+    fuelSubCell.alignment = { vertical: 'middle', horizontal: 'center' };
+
+    wsFuel.addRow([]);
+
+    const fuelHeaders = [
+      'Sl No',
+      'Installation Date',
+      'IMEI Number',
+      'Device Model',
+      'Vehicle Number',
+      'Customer Name',
+      'TECHNICIAN',
+      'Customer Contact',
+      'Chassis Number',
+      'Engine Number',
+      'Location / Stock Place'
+    ];
+    const fuelHeaderRow = wsFuel.addRow(fuelHeaders);
+    fuelHeaderRow.height = 28;
+
+    fuelHeaderRow.eachCell((cell) => {
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FF0284C7' } // Sky Blue 600
+      };
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 9.5, name: 'Calibri' };
+      cell.alignment = { vertical: 'middle', horizontal: 'center' };
+      cell.border = {
+        top: { style: 'thin', color: { argb: 'FFBAE6FD' } },
+        left: { style: 'thin', color: { argb: 'FFBAE6FD' } },
+        bottom: { style: 'medium', color: { argb: 'FF0369A1' } },
+        right: { style: 'thin', color: { argb: 'FFBAE6FD' } }
+      };
+    });
+
+    if (todayFuelDevices.length === 0) {
+      const emptyRow = wsFuel.addRow(['-', targetDate, 'No Fuel tracking devices issued on this date', '-', '-', '-', '-', '-', '-', '-', '-']);
+      emptyRow.height = 24;
+      emptyRow.eachCell((cell) => {
+        cell.font = { italic: true, size: 9.5, color: { argb: 'FF64748B' } };
+        cell.alignment = { vertical: 'middle', horizontal: 'center' };
+      });
+    } else {
+      todayFuelDevices.forEach((item, idx) => {
+        const r = wsFuel.addRow([
+          idx + 1,
+          item.installation_date || item.certificate_issued_date || targetDate,
+          item.imei_number,
+          item.device_name,
+          item.vehicle_number || '-',
+          item.customer_name || '-',
+          item.installed_by || '-',
+          item.customer_phone || '-',
+          item.chasis_number || '-',
+          item.engine_number || '-',
+          item.location || item.rto_location || 'FUEL'
+        ]);
+        r.height = 22;
+
+        const isEven = idx % 2 === 1;
+        r.eachCell((cell, colNumber) => {
+          cell.font = { size: 9.5, name: 'Calibri' };
+          cell.alignment = {
+            vertical: 'middle',
+            horizontal: [1, 2, 3, 5, 8, 9, 10, 11].includes(colNumber) ? 'center' : 'left'
+          };
+          cell.border = {
+            top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+            left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+            bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+            right: { style: 'thin', color: { argb: 'FFE2E8F0' } }
+          };
+
+          if (isEven) {
+            cell.fill = {
+              type: 'pattern',
+              pattern: 'solid',
+              fgColor: { argb: 'FFF0F9FF' } // Very light cyan zebra
+            };
+          }
+
+          if (colNumber === 2) {
+            cell.font = { bold: true, color: { argb: 'FF0284C7' }, name: 'Calibri' };
+          } else if (colNumber === 3) {
+            cell.font = { bold: true, color: { argb: 'FF1D4ED8' }, name: 'Calibri' };
+          } else if (colNumber === 5 || colNumber === 6) {
+            cell.font = { bold: true, name: 'Calibri', size: 9.5 };
+          }
+        });
+      });
+    }
+
+    wsFuel.columns = [
+      { width: 8 }, { width: 22 }, { width: 22 }, { width: 18 }, { width: 20 },
+      { width: 28 }, { width: 20 }, { width: 18 }, { width: 22 }, { width: 20 }, { width: 22 }
+    ];
+
+    // =========================================================================
+    // SHEET 5: GENERAL GPS TRACKERS ISSUED
+    // =========================================================================
+    const wsGeneral = wb.addWorksheet('General Trackers', {
+      views: [{ showGridLines: true }]
+    });
+
+    const genTitleRow = wsGeneral.addRow(['FUELTRACKS TECHNOLOGIES — GENERAL GPS TRACKERS ISSUED / INSTALLED TODAY']);
+    genTitleRow.height = 32;
+    wsGeneral.mergeCells(1, 1, 1, 11);
+    const genTitleCell = wsGeneral.getCell(1, 1);
+    genTitleCell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF4C1D95' } // Deep Purple 900
+    };
+    genTitleCell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 13, name: 'Calibri' };
+    genTitleCell.alignment = { vertical: 'middle', horizontal: 'center' };
+
+    const genSubRow = wsGeneral.addRow([
+      `Report Date: ${targetDate}    |    Total General Trackers: ${todayGeneralDevices.length}    |    Generated On: ${generatedAt}`
+    ]);
+    genSubRow.height = 22;
+    wsGeneral.mergeCells(2, 1, 2, 11);
+    const genSubCell = wsGeneral.getCell(2, 1);
+    genSubCell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF6D28D9' } // Purple 700
+    };
+    genSubCell.font = { bold: true, color: { argb: 'FFF5F3FF' }, size: 9, name: 'Calibri' };
+    genSubCell.alignment = { vertical: 'middle', horizontal: 'center' };
+
+    wsGeneral.addRow([]);
+
+    const genHeaders = [
+      'Sl No',
+      'Installation Date',
+      'IMEI Number',
+      'Device Model',
+      'Vehicle Number',
+      'Customer Name',
+      'TECHNICIAN',
+      'Customer Contact',
+      'Chassis Number',
+      'Engine Number',
+      'Location / Stock Place'
+    ];
+    const genHeaderRow = wsGeneral.addRow(genHeaders);
+    genHeaderRow.height = 28;
+
+    genHeaderRow.eachCell((cell) => {
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FF7C3AED' } // Purple 600
+      };
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 9.5, name: 'Calibri' };
+      cell.alignment = { vertical: 'middle', horizontal: 'center' };
+      cell.border = {
+        top: { style: 'thin', color: { argb: 'FFDDD6FE' } },
+        left: { style: 'thin', color: { argb: 'FFDDD6FE' } },
+        bottom: { style: 'medium', color: { argb: 'FF5B21B6' } },
+        right: { style: 'thin', color: { argb: 'FFDDD6FE' } }
+      };
+    });
+
+    if (todayGeneralDevices.length === 0) {
+      const emptyRow = wsGeneral.addRow(['-', targetDate, 'No General GPS trackers issued on this date', '-', '-', '-', '-', '-', '-', '-', '-']);
+      emptyRow.height = 24;
+      emptyRow.eachCell((cell) => {
+        cell.font = { italic: true, size: 9.5, color: { argb: 'FF64748B' } };
+        cell.alignment = { vertical: 'middle', horizontal: 'center' };
+      });
+    } else {
+      todayGeneralDevices.forEach((item, idx) => {
+        const r = wsGeneral.addRow([
+          idx + 1,
+          item.installation_date || targetDate,
+          item.imei_number,
+          item.device_name,
+          item.vehicle_number || '-',
+          item.customer_name || '-',
+          item.installed_by || '-',
+          item.customer_phone || '-',
+          item.chasis_number || '-',
+          item.engine_number || '-',
+          item.location || '-'
+        ]);
+        r.height = 22;
+
+        const isEven = idx % 2 === 1;
+        r.eachCell((cell, colNumber) => {
+          cell.font = { size: 9.5, name: 'Calibri' };
+          cell.alignment = {
+            vertical: 'middle',
+            horizontal: [1, 2, 3, 5, 8, 9, 10, 11].includes(colNumber) ? 'center' : 'left'
+          };
+          cell.border = {
+            top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+            left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+            bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+            right: { style: 'thin', color: { argb: 'FFE2E8F0' } }
+          };
+
+          if (isEven) {
+            cell.fill = {
+              type: 'pattern',
+              pattern: 'solid',
+              fgColor: { argb: 'FFFAF5FF' } // Very light purple zebra
+            };
+          }
+
+          if (colNumber === 2) {
+            cell.font = { bold: true, color: { argb: 'FF7C3AED' }, name: 'Calibri' };
+          } else if (colNumber === 3) {
+            cell.font = { bold: true, color: { argb: 'FF1D4ED8' }, name: 'Calibri' };
+          } else if (colNumber === 5 || colNumber === 6) {
+            cell.font = { bold: true, name: 'Calibri', size: 9.5 };
+          }
+        });
+      });
+    }
+
+    wsGeneral.columns = [
+      { width: 8 }, { width: 22 }, { width: 22 }, { width: 18 }, { width: 20 },
+      { width: 28 }, { width: 20 }, { width: 18 }, { width: 22 }, { width: 20 }, { width: 22 }
     ];
 
     const filename = `DAILY_REPORT_${formatDateDDMMYYYY(targetDate)}`;
