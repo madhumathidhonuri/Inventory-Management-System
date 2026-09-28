@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { LayoutDashboard, Boxes, FileSpreadsheet, Truck, Wrench, Users, Settings, FileText, UserCheck, Smartphone, Wallet, CircleDollarSign } from 'lucide-react';
+import { LayoutDashboard, Boxes, FileSpreadsheet, Truck, Wrench, Users, Settings, FileText, UserCheck, Smartphone, Wallet, CircleDollarSign, CalendarDays } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { fetchPendingPaymentAlerts } from '../services/api';
 
@@ -33,6 +33,7 @@ export default function Sidebar({ activeTab, setActiveTab }) {
     { id: 'dispatches', label: isDealer ? 'My Dispatches / Receipts' : 'Stock Dispatches & Assign', icon: Truck, roles: ['SUPER_ADMIN', 'ADMIN_TEAM', 'WAREHOUSE_MANAGER', 'DEALER'] },
     { id: 'upload', label: 'Excel Bulk Upload', icon: FileSpreadsheet, roles: ['SUPER_ADMIN', 'ADMIN_TEAM', 'WAREHOUSE_MANAGER'] },
     { id: 'installations', label: isDealer ? 'My Vehicle Installations' : 'Installations Hub', icon: Wrench, roles: ['SUPER_ADMIN', 'ADMIN_TEAM', 'SALES_TEAM', 'WAREHOUSE_MANAGER', 'SALES_MANAGER', 'INSTALLER', 'DEALER'] },
+    { id: 'daily-reports', label: 'Daily Uploads & Log', icon: CalendarDays, roles: ['SUPER_ADMIN', 'ADMIN_TEAM', 'SALES_TEAM', 'WAREHOUSE_MANAGER', 'SALES_MANAGER', 'INSTALLER', 'DEALER'] },
     { id: 'expenses', label: 'Expenses Hub', icon: Wallet, roles: ['SUPER_ADMIN'] },
     { id: 'types', label: 'Device Catalog', icon: Settings, roles: ['SUPER_ADMIN', 'ADMIN_TEAM', 'WAREHOUSE_MANAGER'] },
     { id: 'reports', label: 'Reports & Exports', icon: FileText, roles: ['SUPER_ADMIN'] },

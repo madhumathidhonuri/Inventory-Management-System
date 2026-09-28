@@ -19,6 +19,7 @@ import ExpensesPage from './pages/ExpensesPage';
 import StaffPerformancePage from './pages/StaffPerformancePage';
 import MobileAppView from './pages/MobileAppView';
 import PendingPaymentsPage from './pages/PendingPaymentsPage';
+import DailyReportsPage from './pages/DailyReportsPage';
 
 function MainLayout() {
   const { user, isMobileMode } = useAuth();
@@ -91,6 +92,8 @@ function MainLayout() {
         return <DispatchPage onOpenScannerWithCallback={openScannerWithCallback} onOpenTraceDrawer={openTraceDrawer} />;
       case 'installations':
         return <InstallationPage onOpenScannerWithCallback={openScannerWithCallback} onOpenTraceDrawer={openTraceDrawer} onNavigateTab={setActiveTab} />;
+      case 'daily-reports':
+        return <DailyReportsPage onOpenTraceDrawer={openTraceDrawer} />;
       case 'expenses':
         return isSuperAdmin ? <ExpensesPage /> : <DashboardPage onOpenTraceDrawer={openTraceDrawer} onNavigateTab={setActiveTab} />;
       case 'types':

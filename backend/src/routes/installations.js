@@ -1017,8 +1017,158 @@ function extractInstCategory(inst) {
       ? JSON.parse(inst.device_additional_attributes || '{}')
       : (inst.device_additional_attributes || {});
   } catch {}
-  return (devAttrs['CATEGORY'] || devAttrs['DEVICE CATEGORY'] || inst.vehicle_type || 'VLTD').toString().toUpperCase().trim();
-}
+// GET /api/installations/daily-log - Date-wise installation grouping, daily summaries and record ledger
+router.get('/daily-log', (req, res) => {
+  try {
+    const { syncFitmentsToInstallations, standardizeDate, extractInstallationDate } = require('../db/syncFitments');
+    try {
+      syncFitmentsToInstallations();
+    } catch (sErr) {
+      console.warn('[DailyLog] Sync fitments notice:', sErr.message);
+    }
+
+    const today = new Date().toISOString().split('T')[0];
+    const requestedDate = req.query.date ? standardizeDate(req.query.date) : null;
+
+    // Fetch all installations
+    const allRows = db.prepare(`
+      SELECT i.*, d.sim_number, d.additional_attributes as device_additional_attributes, dt.name as device_type_name
+      FROM installations i
+      LEFT JOIN devices d ON i.device_id = d.id
+      LEFT JOIN device_types dt ON d.device_type_id = dt.id
+      ORDER BY i.installation_date DESC, i.id DESC
+    `).all();
+
+    const dateMap = {};
+
+    for (const item of allRows) {
+      let attrs = {};
+      try {
+        attrs = typeof item.device_additional_attributes === 'string'
+          ? JSON.parse(item.device_additional_attributes || '{}')
+          : (item.device_additional_attributes || {});
+      } catch {}
+
+      const attrDate = extractInstallationDate(item, attrs);
+      const rawInstDate = attrDate || item.installation_date;
+      const instDate = (rawInstDate && String(rawInstDate).trim()) ? standardizeDate(rawInstDate) : today;
+      
+      let displayDate = instDate;
+      if (/^\d{4}-\d{2}-\d{2}$/.test(instDate)) {
+        const [y, m, d] = instDate.split('-');
+        displayDate = `${d}-${m}-${y}`;
+      }
+
+      const cat = (attrs['CATEGORY'] || attrs['DEVICE CATEGORY'] || item.vehicle_type || 'VLTD').toString().toUpperCase().trim();
+      const payStatus = (item.payment_status || 'RECEIVED').toUpperCase();
+      const isPaid = payStatus.includes('REC') || payStatus.includes('PAID');
+      const price = parseFloat(item.sale_price) || 0;
+
+      if (!dateMap[instDate]) {
+        dateMap[instDate] = {
+          date: instDate,
+          display_date: displayDate,
+          total_count: 0,
+          categories: { 'VLTD': 0, 'TG MINING': 0, 'AP MINING': 0, 'GENERAL': 0, 'OTHER': 0 },
+          technicians: new Set(),
+          paid_count: 0,
+          pending_count: 0,
+          total_revenue: 0,
+          pending_amount: 0,
+          items: []
+        };
+      }
+
+      dateMap[instDate].total_count++;
+      if (cat.includes('TG MINING') || (cat.includes('TG') && cat.includes('MINING'))) {
+        dateMap[instDate].categories['TG MINING']++;
+      } else if (cat.includes('AP MINING') || (cat.includes('AP') && cat.includes('MINING'))) {
+        dateMap[instDate].categories['AP MINING']++;
+      } else if (cat.includes('VLTD')) {
+        dateMap[instDate].categories['VLTD']++;
+      } else if (cat.includes('GENERAL')) {
+        dateMap[instDate].categories['GENERAL']++;
+      } else {
+        dateMap[instDate].categories['OTHER']++;
+      }
+
+      if (item.installed_by && item.installed_by.trim() && item.installed_by !== 'Technician') {
+        dateMap[instDate].technicians.add(item.installed_by.trim());
+      }
+
+      if (isPaid) {
+        dateMap[instDate].paid_count++;
+        dateMap[instDate].total_revenue += price;
+      } else {
+        dateMap[instDate].pending_count++;
+        dateMap[instDate].pending_amount += price;
+      }
+
+      dateMap[instDate].items.push({
+        ...item,
+        category: cat,
+        extracted_date: instDate,
+        display_date: displayDate
+      });
+    }
+
+    // Sort available dates DESC
+    const availableDates = Object.keys(dateMap)
+      .sort((a, b) => b.localeCompare(a))
+      .map(dateKey => {
+        const entry = dateMap[dateKey];
+        return {
+          date: entry.date,
+          display_date: entry.display_date,
+          total_count: entry.total_count,
+          categories: entry.categories,
+          technician_count: entry.technicians.size,
+          technicians: Array.from(entry.technicians),
+          paid_count: entry.paid_count,
+          pending_count: entry.pending_count,
+          total_revenue: entry.total_revenue,
+          pending_amount: entry.pending_amount
+        };
+      });
+
+    const activeDate = requestedDate || (availableDates.length > 0 ? availableDates[0].date : today);
+    const activeDateData = dateMap[activeDate] || {
+      date: activeDate,
+      display_date: activeDate,
+      total_count: 0,
+      categories: { 'VLTD': 0, 'TG MINING': 0, 'AP MINING': 0, 'GENERAL': 0, 'OTHER': 0 },
+      technicians: [],
+      paid_count: 0,
+      pending_count: 0,
+      total_revenue: 0,
+      pending_amount: 0,
+      items: []
+    };
+
+    res.json({
+      success: true,
+      server_today: today,
+      active_date: activeDate,
+      available_dates: availableDates,
+      date_summary: {
+        date: activeDateData.date,
+        display_date: activeDateData.display_date,
+        total_count: activeDateData.total_count,
+        categories: activeDateData.categories,
+        technicians: Array.isArray(activeDateData.technicians) ? activeDateData.technicians : Array.from(activeDateData.technicians),
+        paid_count: activeDateData.paid_count,
+        pending_count: activeDateData.pending_count,
+        total_revenue: activeDateData.total_revenue,
+        pending_amount: activeDateData.pending_amount
+      },
+      records: activeDateData.items
+    });
+
+  } catch (err) {
+    console.error('[DailyLog Error]', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 
 // GET /api/installations/pending-alerts - Return date-wise and month-wise grouped pending payment alerts with aging and reminders
 router.get('/pending-alerts', (req, res) => {

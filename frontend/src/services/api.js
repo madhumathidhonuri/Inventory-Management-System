@@ -297,6 +297,13 @@ export async function uploadDailyInstallationExcel(formDataOrPayload) {
   return data;
 }
 
+export async function fetchDailyInstallationLog(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  const res = await fetch(`${API_BASE}/installations/daily-log${query ? `?${query}` : ''}`);
+  if (!res.ok) throw new Error('Failed to fetch daily installation log');
+  return res.json();
+}
+
 export async function fetchInstallations(params = {}) {
   const query = new URLSearchParams(params).toString();
   const res = await fetch(`${API_BASE}/installations?${query}`);
