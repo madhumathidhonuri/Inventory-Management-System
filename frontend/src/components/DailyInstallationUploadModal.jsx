@@ -103,7 +103,7 @@ export default function DailyInstallationUploadModal({ isOpen, onClose, onUpload
       const imeiVal = String(raw[imeiKey] || '').trim();
       const vehicleVal = String(vehicleKey && raw[vehicleKey] ? raw[vehicleKey] : '').trim().toUpperCase();
       const custVal = String(custKey && raw[custKey] ? raw[custKey] : '').trim();
-      const phoneVal = String(phoneKey && raw[phoneKey] ? raw[phoneKey] : '').trim();
+      const phoneVal = cleanPhoneString(phoneKey && raw[phoneKey] ? raw[phoneKey] : '');
       const techVal = String(techKey && raw[techKey] ? raw[techKey] : (defaultTechnician || '')).trim();
       const dateVal = String(dateKey && raw[dateKey] ? raw[dateKey] : row.detected_date || '').trim();
 
@@ -114,9 +114,8 @@ export default function DailyInstallationUploadModal({ isOpen, onClose, onUpload
       let status = 'VALID';
       if (!imeiVal || !vehicleVal) {
         status = 'ERROR';
-      } else if (row.status === 'WARNING' || !phoneVal) {
+      } else if (row.status === 'WARNING') {
         status = 'WARNING';
-        if (!phoneVal) issues.push('No Phone (will use default)');
       }
 
       return {
@@ -125,7 +124,7 @@ export default function DailyInstallationUploadModal({ isOpen, onClose, onUpload
         detected_vehicle: vehicleVal,
         detected_customer_name: custVal,
         detected_phone: phoneVal,
-        detected_tech: techVal || 'Technician',
+        detected_tech: techVal,
         detected_date: dateVal,
         status,
         issues: issues.length > 0 ? issues : (row.issues || [])
@@ -611,10 +610,10 @@ export default function DailyInstallationUploadModal({ isOpen, onClose, onUpload
                                   {row.detected_vehicle || <span className="text-red-500 italic">Missing</span>}
                                 </td>
                                 <td className="py-2 px-3 text-slate-600">
-                                  {row.detected_customer_name || 'Customer'}
+                                  {row.detected_customer_name || <span className="text-slate-400 italic">—</span>}
                                 </td>
                                 <td className="py-2 px-3 text-slate-600">
-                                  {row.detected_tech || 'Technician'}
+                                  {row.detected_tech || <span className="text-slate-400 italic">—</span>}
                                 </td>
                                 <td className="py-2 px-3 text-slate-500 font-mono text-[11px]">
                                   {row.detected_date}

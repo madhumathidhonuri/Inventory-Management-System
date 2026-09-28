@@ -84,12 +84,12 @@ function extractCustomerName(attrs = {}) {
   for (const k of keys) {
     if (attrs[k] && String(attrs[k]).trim()) {
       const val = String(attrs[k]).trim();
-      if (val.toLowerCase() !== 'fuelview' && val !== '-' && val !== '—') {
+      if (val.toLowerCase() !== 'fuelview' && val.toLowerCase() !== 'customer' && val !== '-' && val !== '—') {
         return val;
       }
     }
   }
-  return 'Customer';
+  return '';
 }
 
 /**
@@ -100,10 +100,10 @@ function extractCustomerPhone(attrs = {}) {
   for (const k of keys) {
     if (attrs[k] && String(attrs[k]).trim()) {
       const clean = String(attrs[k]).replace(/[^0-9]/g, '');
-      if (clean.length >= 10) return clean;
+      if (clean.length >= 10 && clean !== '9999999999') return clean;
     }
   }
-  return '9999999999';
+  return '';
 }
 
 /**
@@ -251,30 +251,34 @@ function syncFitmentsToInstallations(dbParam) {
         const paymentStatus = extractPaymentStatus(attrs);
         const instDate = extractInstallationDate(dev, attrs);
         const category = (attrs['CATEGORY'] || attrs['DEVICE CATEGORY'] || attrs['PROJECT CATEGORY'] || 'VLTD').toString().trim().toUpperCase();
-        const location = attrs['RTO LOCATION'] || attrs['STOCK PLACE'] || attrs['LOCATION'] || 'Vijayawada';
-        const technician = attrs['TECHNICIAN'] || attrs['INSTALLED BY'] || attrs['FITTER'] || attrs['SALES PERSON NAME'] || 'Technician';
+        const location = attrs['RTO LOCATION'] || attrs['STOCK PLACE'] || attrs['LOCATION'] || '';
+        const technician = attrs['TECHNICIAN'] || attrs['INSTALLED BY'] || attrs['FITTER'] || attrs['SALES PERSON NAME'] || '';
         const salesManager = attrs['SALES MANAGER'] || null;
         const salesPerson = attrs['SALES PERSON NAME'] || attrs['SALES PERSON'] || null;
         const softwareUser = attrs['USERNAME'] || attrs['SOFTWARE USER ID'] || attrs['GPS USER ID'] || null;
-        const softwarePass = attrs['PASSWORD'] || attrs['SOFTWARE PASSWORD'] || attrs['GPS PASSWORD'] || '123456';
+        const softwarePass = attrs['PASSWORD'] || attrs['SOFTWARE PASSWORD'] || attrs['GPS PASSWORD'] || null;
 
-        // 1. Customer Lookup / Creation
-        let customer = findCustomerByPhoneStmt.get(customerPhone);
-        let customerId;
-        if (customer) {
-          customerId = customer.id;
-        } else {
-          const custRes = insertCustomerStmt.run(
-            customerName,
-            customerPhone,
-            attrs['EMAIL ID'] || null,
-            location,
-            attrs['AADHAR NUMBER'] || null,
-            attrs['PAN CARD'] || attrs['PAN NUMBER'] || null,
-            softwareUser,
-            softwarePass
-          );
-          customerId = custRes.lastInsertRowid;
+        // 1. Customer Lookup / Creation (only if valid phone exists)
+        let customerId = null;
+        if (customerPhone && customerPhone !== '9999999999') {
+          let customer = findCustomerByPhoneStmt.get(customerPhone);
+          if (customer) {
+            customerId = customer.id;
+          } else {
+            try {
+              const custRes = insertCustomerStmt.run(
+                customerName || 'Customer',
+                customerPhone,
+                attrs['EMAIL ID'] || null,
+                location || null,
+                attrs['AADHAR NUMBER'] || null,
+                attrs['PAN CARD'] || attrs['PAN NUMBER'] || null,
+                softwareUser,
+                softwarePass
+              );
+              customerId = custRes.lastInsertRowid;
+            } catch (e) {}
+          }
         }
 
         // 2. Check if installation exists
@@ -285,15 +289,15 @@ function syncFitmentsToInstallations(dbParam) {
             dev.imei_number,
             customerId,
             instDate,
-            technician,
+            technician || null,
             salesManager,
             salesPerson,
-            customerName,
-            customerPhone,
+            customerName || null,
+            customerPhone || null,
             effectiveVehicle,
             category,
             salePrice,
-            location,
+            location || null,
             paymentStatus,
             attrs['AADHAR NUMBER'] || null,
             attrs['PAN CARD'] || attrs['PAN NUMBER'] || null,
@@ -302,7 +306,7 @@ function syncFitmentsToInstallations(dbParam) {
             softwareUser,
             softwarePass,
             paymentStatus === 'RECEIVED' ? instDate : null,
-            `Auto-synced fitment - Location: ${location}`
+            location ? `Location: ${location}` : 'Fitment Synced'
           );
           createdCount++;
         } else {
@@ -311,14 +315,14 @@ function syncFitmentsToInstallations(dbParam) {
             dev.id,
             customerId,
             instDate,
-            customerName,
-            customerPhone,
+            customerName || null,
+            customerPhone || null,
             effectiveVehicle,
             salePrice,
             paymentStatus,
             softwareUser,
             softwarePass,
-            location,
+            location || null,
             existing.id
           );
           updatedCount++;
@@ -326,7 +330,8 @@ function syncFitmentsToInstallations(dbParam) {
 
         // Ensure device status is marked INSTALLED
         if (dev.current_status !== 'INSTALLED' || !dev.current_holder_name || dev.current_holder_name.includes('Warehouse')) {
-          updateDeviceStmt.run(customerId, `${customerName} (${effectiveVehicle})`, dev.id);
+          const holderName = customerName ? `${customerName} (${effectiveVehicle})` : effectiveVehicle;
+          updateDeviceStmt.run(customerId, holderName, dev.id);
         }
       }
     });

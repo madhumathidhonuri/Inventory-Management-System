@@ -782,8 +782,15 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
 
                       {/* Customer Info */}
                       <td className="p-3.5">
-                        <div className="font-bold text-slate-900">{inst.customer_name}</div>
-                        <div className="text-[11px] font-mono text-slate-500">{inst.customer_contact}</div>
+                        {inst.customer_name && inst.customer_name !== 'Customer' ? (
+                          <div className="font-bold text-slate-900">{inst.customer_name}</div>
+                        ) : null}
+                        {inst.customer_contact && inst.customer_contact !== '9999999999' ? (
+                          <div className="text-[11px] font-mono text-slate-500">{inst.customer_contact}</div>
+                        ) : null}
+                        {(!inst.customer_name || inst.customer_name === 'Customer') && (!inst.customer_contact || inst.customer_contact === '9999999999') && (
+                          <span className="text-slate-400 italic text-[11px]">—</span>
+                        )}
                       </td>
 
                       {/* GPS Software Login Credentials */}
@@ -800,7 +807,7 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
                                 <Copy className="w-2.5 h-2.5" />
                               </button>
                             </div>
-                            {inst.software_password && (
+                            {inst.software_password && inst.software_password !== '123456' && (
                               <div className="text-[10px] text-indigo-700">
                                 Pass: <span className="bg-indigo-100/80 px-1 py-0.2 rounded font-semibold">{inst.software_password}</span>
                               </div>
@@ -813,8 +820,15 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
 
                       {/* Installer & Location */}
                       <td className="p-3.5 text-slate-600">
-                        <div>{inst.installed_by || 'Technician'}</div>
-                        <div className="text-[10px] text-slate-400">{inst.installation_location || 'Field Site'}</div>
+                        {inst.installed_by && inst.installed_by !== 'Technician' ? (
+                          <div className="font-semibold text-slate-800">{inst.installed_by}</div>
+                        ) : null}
+                        {inst.installation_location && inst.installation_location !== 'Field Site' && inst.installation_location !== 'Vijayawada' ? (
+                          <div className="text-[10px] text-slate-400">{inst.installation_location}</div>
+                        ) : null}
+                        {(!inst.installed_by || inst.installed_by === 'Technician') && (!inst.installation_location || inst.installation_location === 'Field Site' || inst.installation_location === 'Vijayawada') && (
+                          <span className="text-slate-400 italic text-[11px]">—</span>
+                        )}
                       </td>
 
                       {/* Price & Payment */}

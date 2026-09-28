@@ -25,6 +25,7 @@ function cleanImeiString(raw) {
 function cleanPhoneString(raw) {
   if (raw === undefined || raw === null) return '';
   let str = String(raw).trim().replace(/\.0+$/, '').replace(/[^\d+]/g, '');
+  if (str === '9999999999' || str === '0000000000') return '';
   if (str.length > 10) {
     const digitsOnly = str.replace(/\D/g, '');
     if (digitsOnly.length === 12 && digitsOnly.startsWith('91')) {
@@ -605,12 +606,12 @@ router.post('/excel-upload', upload.single('file'), (req, res) => {
         const rowNum = item.row_number;
         const cleanImei = item.imei;
         const cleanVehicle = item.vehicle_number;
-        const cleanName = item.customer_name || 'Customer';
-        const cleanPhone = item.customer_phone || '9999999999';
-        const instDate = item.installation_date;
-        const cleanCategory = item.category || defaultCategory;
-        const cleanTech = item.installed_by || defaultTech;
-        const cleanLocation = item.installation_location || 'Field Site';
+        const cleanName = item.customer_name ? String(item.customer_name).trim() : '';
+        const cleanPhone = item.customer_phone ? cleanPhoneString(item.customer_phone) : '';
+        const instDate = item.installation_date || new Date().toISOString().split('T')[0];
+        const cleanCategory = item.category || defaultCategory || 'VLTD';
+        const cleanTech = item.installed_by ? String(item.installed_by).trim() : '';
+        const cleanLocation = item.installation_location ? String(item.installation_location).trim() : '';
         const cleanPrice = item.sale_price || 0;
         const cleanPayStatus = item.payment_status || (cleanPrice > 0 ? 'RECEIVED' : 'NOT RECEIVED');
         const cleanChasis = item.chasis_number || '';
@@ -668,24 +669,26 @@ router.post('/excel-upload', upload.single('file'), (req, res) => {
               'CATEGORY': cleanCategory,
               'DEVICE CATEGORY': cleanCategory,
               'VEHICLE NUMBER': cleanVehicle,
-              'CUSTOMER NAME': cleanName,
-              'CUSTOMER PHONE NUMBER': cleanPhone,
-              'INSTALLATION DATE': instDate,
-              'TECHNICIAN': cleanTech,
-              'RTO LOCATION': cleanLocation,
-              'AMOUNT RECEIVED': cleanPayStatus,
-              'COST': cleanPrice
+              'INSTALLATION DATE': instDate
             };
+            if (cleanName) attrs['CUSTOMER NAME'] = cleanName;
+            if (cleanPhone) attrs['CUSTOMER PHONE NUMBER'] = cleanPhone;
+            if (cleanTech) attrs['TECHNICIAN'] = cleanTech;
+            if (cleanLocation) attrs['RTO LOCATION'] = cleanLocation;
+            if (cleanPayStatus) attrs['AMOUNT RECEIVED'] = cleanPayStatus;
+            if (cleanPrice) attrs['COST'] = cleanPrice;
+
             if (item.raw && typeof item.raw === 'object') {
               Object.keys(item.raw).forEach(k => {
                 if (!k.startsWith('__EMPTY')) attrs[k] = item.raw[k];
               });
             }
 
+            const holderName = cleanName ? `${cleanName} (${cleanVehicle})` : cleanVehicle;
             const info = db.prepare(`
               INSERT INTO devices (imei_number, device_type_id, purchase_date, vendor_name, current_status, current_holder_type, current_holder_name, additional_attributes)
               VALUES (?, ?, ?, 'Direct Entry', 'INSTALLED', 'CUSTOMER', ?, ?)
-            `).run(cleanImei, defaultType.id, instDate, `${cleanName} (${cleanVehicle})`, JSON.stringify(attrs));
+            `).run(cleanImei, defaultType.id, instDate, holderName, JSON.stringify(attrs));
 
             dev = db.prepare('SELECT * FROM devices WHERE id = ?').get(info.lastInsertRowid);
           } else {
@@ -698,12 +701,12 @@ router.post('/excel-upload', upload.single('file'), (req, res) => {
             attrs['CATEGORY'] = cleanCategory;
             attrs['DEVICE CATEGORY'] = cleanCategory;
             attrs['VEHICLE NUMBER'] = cleanVehicle;
-            attrs['CUSTOMER NAME'] = cleanName;
-            attrs['CUSTOMER PHONE NUMBER'] = cleanPhone;
             attrs['INSTALLATION DATE'] = instDate;
-            attrs['TECHNICIAN'] = cleanTech;
-            attrs['RTO LOCATION'] = cleanLocation;
-            attrs['AMOUNT RECEIVED'] = cleanPayStatus;
+            if (cleanName) attrs['CUSTOMER NAME'] = cleanName;
+            if (cleanPhone) attrs['CUSTOMER PHONE NUMBER'] = cleanPhone;
+            if (cleanTech) attrs['TECHNICIAN'] = cleanTech;
+            if (cleanLocation) attrs['RTO LOCATION'] = cleanLocation;
+            if (cleanPayStatus) attrs['AMOUNT RECEIVED'] = cleanPayStatus;
             if (cleanPrice) attrs['COST'] = cleanPrice;
           }
 
@@ -714,27 +717,28 @@ router.post('/excel-upload', upload.single('file'), (req, res) => {
           if (cleanSoftwareUser) attrs['USERNAME'] = cleanSoftwareUser;
           if (cleanSoftwarePass) attrs['PASSWORD'] = cleanSoftwarePass;
 
-          // 2. Customer Lookup / Deduplication
-          let customer = db.prepare('SELECT * FROM customers WHERE phone_number = ?').get(cleanPhone);
-          let customerId;
-
-          if (customer) {
-            customerId = customer.id;
-            db.prepare(`
-              UPDATE customers
-              SET name = COALESCE(?, name),
-                  aadhar_number = COALESCE(NULLIF(?, ''), aadhar_number),
-                  pan_number = COALESCE(NULLIF(?, ''), pan_number),
-                  software_user_id = COALESCE(NULLIF(?, ''), software_user_id),
-                  software_password = COALESCE(NULLIF(?, ''), software_password)
-              WHERE id = ?
-            `).run(cleanName, cleanAadhar, cleanPan, cleanSoftwareUser, cleanSoftwarePass, customerId);
-          } else {
-            const custResult = db.prepare(`
-              INSERT INTO customers (name, phone_number, customer_type, source, aadhar_number, pan_number, software_user_id, software_password)
-              VALUES (?, ?, 'Individual', 'Daily Excel Import', ?, ?, ?, ?)
-            `).run(cleanName, cleanPhone, cleanAadhar || null, cleanPan || null, cleanSoftwareUser || null, cleanSoftwarePass || null);
-            customerId = custResult.lastInsertRowid;
+          // 2. Customer Lookup / Deduplication (only if name or phone exists)
+          let customerId = null;
+          if (cleanPhone || (cleanName && cleanName !== 'Customer')) {
+            let customer = cleanPhone ? db.prepare('SELECT * FROM customers WHERE phone_number = ?').get(cleanPhone) : null;
+            if (customer) {
+              customerId = customer.id;
+              db.prepare(`
+                UPDATE customers
+                SET name = COALESCE(NULLIF(?, ''), name),
+                    aadhar_number = COALESCE(NULLIF(?, ''), aadhar_number),
+                    pan_number = COALESCE(NULLIF(?, ''), pan_number),
+                    software_user_id = COALESCE(NULLIF(?, ''), software_user_id),
+                    software_password = COALESCE(NULLIF(?, ''), software_password)
+                WHERE id = ?
+              `).run(cleanName || '', cleanAadhar, cleanPan, cleanSoftwareUser, cleanSoftwarePass, customerId);
+            } else {
+              const custResult = db.prepare(`
+                INSERT INTO customers (name, phone_number, customer_type, source, aadhar_number, pan_number, software_user_id, software_password)
+                VALUES (?, ?, 'Individual', 'Daily Excel Import', ?, ?, ?, ?)
+              `).run(cleanName || null, cleanPhone || null, cleanAadhar || null, cleanPan || null, cleanSoftwareUser || null, cleanSoftwarePass || null);
+              customerId = custResult.lastInsertRowid;
+            }
           }
 
           // 3. Create Installation Record
@@ -751,11 +755,11 @@ router.post('/excel-upload', upload.single('file'), (req, res) => {
             cleanImei,
             customerId,
             instDate,
-            cleanTech,
-            'Sales Team',
-            cleanTech,
-            cleanName,
-            cleanPhone,
+            cleanTech || null,
+            null,
+            cleanTech || null,
+            cleanName || null,
+            cleanPhone || null,
             cleanVehicle,
             cleanCategory,
             cleanAadhar || null,
@@ -764,13 +768,14 @@ router.post('/excel-upload', upload.single('file'), (req, res) => {
             cleanEngine || null,
             cleanPrice,
             cleanPayStatus,
-            cleanLocation,
-            cleanRemarks || 'Imported via Daily Excel Report',
+            cleanLocation || null,
+            cleanRemarks || null,
             cleanSoftwareUser || null,
             cleanSoftwarePass || null
           );
 
           // 4. Update Device
+          const finalHolder = cleanName ? `${cleanName} (${cleanVehicle})` : cleanVehicle;
           db.prepare(`
             UPDATE devices
             SET current_status = 'INSTALLED',
@@ -780,7 +785,7 @@ router.post('/excel-upload', upload.single('file'), (req, res) => {
                 additional_attributes = ?,
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
-          `).run(customerId, `${cleanName} (${cleanVehicle})`, JSON.stringify(attrs), dev.id);
+          `).run(customerId, finalHolder, JSON.stringify(attrs), dev.id);
 
           // 5. Update Dispatches
           db.prepare(`UPDATE dispatch_items SET status = 'INSTALLED' WHERE imei_number = ?`).run(cleanImei);
