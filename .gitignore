@@ -42,6 +42,10 @@ backend/data/backups/
 backend/data/*.db
 *.db
 !backend/src/db/initial_seed.db
+*.sql
+*_BACKUP.*
+*BACKUP*
+
 
 # Binaries & local tools
 tools/

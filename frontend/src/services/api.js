@@ -275,6 +275,28 @@ export async function recordBulkInstallations(payload) {
   return data;
 }
 
+export async function previewDailyInstallationExcel(formData) {
+  const res = await fetch(`${API_BASE}/installations/excel-preview`, {
+    method: 'POST',
+    body: formData
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) throw new Error(data.error || 'Failed to preview installation excel');
+  return data;
+}
+
+export async function uploadDailyInstallationExcel(formDataOrPayload) {
+  const isFormData = formDataOrPayload instanceof FormData;
+  const res = await fetch(`${API_BASE}/installations/excel-upload`, {
+    method: 'POST',
+    headers: isFormData ? undefined : { 'Content-Type': 'application/json' },
+    body: isFormData ? formDataOrPayload : JSON.stringify(formDataOrPayload)
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) throw new Error(data.error || 'Failed to process daily report upload');
+  return data;
+}
+
 export async function fetchInstallations(params = {}) {
   const query = new URLSearchParams(params).toString();
   const res = await fetch(`${API_BASE}/installations?${query}`);

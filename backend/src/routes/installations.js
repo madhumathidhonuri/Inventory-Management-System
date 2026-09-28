@@ -1,6 +1,93 @@
 const express = require('express');
 const router = express.Router();
+const multer = require('multer');
+const xlsx = require('xlsx');
 const db = require('../db/database');
+const { standardizeDate } = require('../db/syncFitments');
+
+const upload = multer({ storage: multer.memoryStorage() });
+
+function cleanImeiString(raw) {
+  if (raw === undefined || raw === null) return '';
+  let str = String(raw).trim();
+  if (typeof raw === 'number' || (str.includes('e+') || str.includes('E+'))) {
+    try {
+      const num = Number(raw);
+      if (!isNaN(num)) {
+        str = BigInt(Math.round(num)).toString();
+      }
+    } catch {}
+  }
+  str = str.replace(/\.0+$/, '').replace(/\s+/g, '');
+  return str;
+}
+
+function cleanPhoneString(raw) {
+  if (raw === undefined || raw === null) return '';
+  let str = String(raw).trim().replace(/\.0+$/, '').replace(/[^\d+]/g, '');
+  if (str.length > 10) {
+    const digitsOnly = str.replace(/\D/g, '');
+    if (digitsOnly.length === 12 && digitsOnly.startsWith('91')) {
+      str = digitsOnly.substring(2);
+    } else if (digitsOnly.length >= 10) {
+      str = digitsOnly.slice(-10);
+    }
+  }
+  return str;
+}
+
+function detectInstallationColumns(headers = []) {
+  const mapping = {
+    imei: '',
+    vehicle_number: '',
+    customer_name: '',
+    customer_phone: '',
+    installed_by: '',
+    installation_date: '',
+    category: '',
+    installation_location: '',
+    sale_price: '',
+    payment_status: '',
+    chasis_number: '',
+    engine_number: '',
+    aadhar_number: '',
+    pan_number: '',
+    software_user_id: '',
+    software_password: '',
+    remarks: ''
+  };
+
+  const findCol = (patterns) => {
+    return headers.find(h => {
+      const cleanH = String(h || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (!cleanH) return false;
+      return patterns.some(p => {
+        const cleanP = p.toLowerCase().replace(/[^a-z0-9]/g, '');
+        return cleanH === cleanP || cleanH.includes(cleanP);
+      });
+    }) || '';
+  };
+
+  mapping.imei = findCol(['imei', 'device_id', 'imei_number', 'imei_no', 'device_imei', 'serial_number', 'serial_no', 'vltd_sno', 'vltdsno', 'tracker_id']) || headers[0] || '';
+  mapping.vehicle_number = findCol(['vehicle_number', 'vehicle_no', 'vehicleno', 'vehicle', 'reg_no', 'registration_no', 'reg_number', 'plate_no', 'machinery_number']) || '';
+  mapping.customer_name = findCol(['customer_name', 'client_name', 'party_name', 'owner_name', 'customer', 'client', 'party', 'name']) || '';
+  mapping.customer_phone = findCol(['customer_phone', 'customer_mobile', 'phone_number', 'mobile_number', 'phone', 'mobile', 'contact_number', 'contact', 'customer_contact']) || '';
+  mapping.installed_by = findCol(['installed_by', 'technician', 'technician_name', 'installer', 'fitter', 'staff_name', 'staff', 'engineer']) || '';
+  mapping.installation_date = findCol(['installation_date', 'installed_on', 'install_date', 'cert_date', 'certificate_issued_date', 'date', 'fitting_date']) || '';
+  mapping.category = findCol(['category', 'device_category', 'project_category', 'service_category', 'project', 'type']) || '';
+  mapping.installation_location = findCol(['installation_location', 'rto_location', 'rto', 'location', 'city', 'site_name', 'site', 'area', 'place']) || '';
+  mapping.sale_price = findCol(['sale_price', 'price', 'amount', 'cost', 'total_cost', 'fitting_charges']) || '';
+  mapping.payment_status = findCol(['payment_status', 'payment', 'paid_status', 'amount_received', 'status']) || '';
+  mapping.chasis_number = findCol(['chasis_number', 'chassis_number', 'chasis_no', 'chassis_no', 'chassis', 'chasis']) || '';
+  mapping.engine_number = findCol(['engine_number', 'engine_no', 'engine']) || '';
+  mapping.aadhar_number = findCol(['aadhar_number', 'aadhaar_number', 'aadhar_no', 'aadhaar_no', 'aadhar', 'aadhaar']) || '';
+  mapping.pan_number = findCol(['pan_number', 'pan_no', 'pan_card', 'pan']) || '';
+  mapping.software_user_id = findCol(['software_user_id', 'software_id', 'software_username', 'login_id', 'username', 'user_id']) || '';
+  mapping.software_password = findCol(['software_password', 'software_pass', 'password', 'pwd']) || '';
+  mapping.remarks = findCol(['remarks', 'notes', 'comment', 'description']) || '';
+
+  return mapping;
+}
 
 // POST /api/installations - Single Action Installation + Auto Customer CRM lookup/creation
 router.post('/', (req, res) => {
@@ -276,6 +363,501 @@ router.post('/', (req, res) => {
 
   } catch (err) {
     res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/installations/excel-preview - Upload & parse daily installation report Excel/CSV
+router.post('/excel-preview', upload.single('file'), (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: 'No Excel file uploaded' });
+    }
+
+    const workbook = xlsx.read(req.file.buffer, { type: 'buffer' });
+    const sheetName = workbook.SheetNames[0];
+    if (!sheetName || !workbook.Sheets[sheetName]) {
+      return res.status(400).json({ success: false, error: 'The uploaded Excel file has no readable sheets' });
+    }
+
+    const worksheet = workbook.Sheets[sheetName];
+    const rawData = xlsx.utils.sheet_to_json(worksheet, { header: 1 });
+
+    if (!rawData || rawData.length === 0) {
+      return res.status(400).json({ success: false, error: 'Uploaded sheet is empty' });
+    }
+
+    // Determine range and headers
+    const range = xlsx.utils.decode_range(worksheet['!ref'] || 'A1:A1');
+    const headers = [];
+    let emptyIdx = 0;
+
+    for (let c = range.s.c; c <= range.e.c; c++) {
+      const cellAddress = xlsx.utils.encode_cell({ r: range.s.r, c });
+      const cell = worksheet[cellAddress];
+      const val = cell && cell.v !== undefined && cell.v !== null ? String(cell.v).trim() : '';
+      if (val) {
+        headers.push(val);
+      } else {
+        const emptyKey = emptyIdx === 0 ? '__EMPTY' : `__EMPTY_${emptyIdx}`;
+        headers.push(emptyKey);
+        emptyIdx++;
+      }
+    }
+
+    const rowObjects = xlsx.utils.sheet_to_json(worksheet, { header: headers, range: range.s.r + 1, defval: '' });
+    const autoMapping = detectInstallationColumns(headers);
+
+    let validCount = 0;
+    let warningCount = 0;
+    let errorCount = 0;
+
+    const previewRows = rowObjects.map((row, idx) => {
+      const rowNum = idx + 2; // 1-based header + data row
+      const imeiKey = autoMapping.imei || Object.keys(row)[0];
+      const vehicleKey = autoMapping.vehicle_number;
+      const custNameKey = autoMapping.customer_name;
+      const phoneKey = autoMapping.customer_phone;
+      const techKey = autoMapping.installed_by;
+      const dateKey = autoMapping.installation_date;
+      const catKey = autoMapping.category;
+      const locKey = autoMapping.installation_location;
+      const priceKey = autoMapping.sale_price;
+      const payKey = autoMapping.payment_status;
+
+      const imeiVal = cleanImeiString(row[imeiKey]);
+      const vehicleVal = String(vehicleKey && row[vehicleKey] ? row[vehicleKey] : '').trim().toUpperCase();
+      const custNameVal = String(custNameKey && row[custNameKey] ? row[custNameKey] : '').trim();
+      const phoneVal = cleanPhoneString(phoneKey && row[phoneKey] ? row[phoneKey] : '');
+      const techVal = String(techKey && row[techKey] ? row[techKey] : '').trim();
+      const dateVal = standardizeDate(dateKey && row[dateKey] ? row[dateKey] : '') || new Date().toISOString().split('T')[0];
+      const catVal = String(catKey && row[catKey] ? row[catKey] : '').trim().toUpperCase() || 'VLTD';
+      const locVal = String(locKey && row[locKey] ? row[locKey] : '').trim();
+      const priceVal = priceKey && row[priceKey] ? parseFloat(String(row[priceKey]).replace(/[^0-9.]/g, '')) || 0 : 0;
+      const payVal = String(payKey && row[payKey] ? row[payKey] : '').trim().toUpperCase() || (priceVal > 0 ? 'RECEIVED' : 'NOT RECEIVED');
+
+      const issues = [];
+      if (!imeiVal) {
+        issues.push('Missing IMEI');
+      } else if (imeiVal.length < 8) {
+        issues.push('Invalid IMEI format');
+      }
+
+      if (!vehicleVal) {
+        issues.push('Missing Vehicle Number');
+      }
+
+      let deviceStatus = 'NEW';
+      let existingHolder = '';
+      if (imeiVal) {
+        const existingDev = db.prepare('SELECT id, current_status, current_holder_name FROM devices WHERE imei_number = ?').get(imeiVal);
+        if (existingDev) {
+          deviceStatus = existingDev.current_status || 'IN_STOCK';
+          existingHolder = existingDev.current_holder_name || '';
+          if (existingDev.current_status === 'INSTALLED') {
+            issues.push(`Already Installed (${existingDev.current_holder_name || 'Customer'})`);
+          }
+        }
+      }
+
+      let rowStatus = 'VALID';
+      if (!imeiVal || !vehicleVal || imeiVal.length < 8) {
+        rowStatus = 'ERROR';
+        errorCount++;
+      } else if (issues.length > 0) {
+        rowStatus = 'WARNING';
+        warningCount++;
+      } else {
+        validCount++;
+      }
+
+      return {
+        row_number: rowNum,
+        raw: row,
+        detected_imei: imeiVal,
+        detected_vehicle: vehicleVal,
+        detected_customer_name: custNameVal,
+        detected_phone: phoneVal,
+        detected_tech: techVal,
+        detected_date: dateVal,
+        detected_category: catVal,
+        detected_location: locVal,
+        detected_price: priceVal,
+        detected_payment_status: payVal,
+        device_status: deviceStatus,
+        existing_holder: existingHolder,
+        status: rowStatus,
+        issues
+      };
+    });
+
+    res.json({
+      success: true,
+      total_rows: rowObjects.length,
+      valid_count: validCount,
+      warning_count: warningCount,
+      error_count: errorCount,
+      headers: headers.filter(h => !h.startsWith('__EMPTY')),
+      all_headers: headers,
+      autoMapping,
+      previewRows: previewRows.slice(0, 500)
+    });
+
+  } catch (err) {
+    console.error('[Excel Preview Error]', err);
+    res.status(500).json({ success: false, error: err.message || 'Failed to parse Excel file' });
+  }
+});
+
+// POST /api/installations/excel-upload - Process and commit daily installation report
+router.post('/excel-upload', upload.single('file'), (req, res) => {
+  try {
+    let rowsToProcess = [];
+    let customMapping = null;
+    let defaultCategory = req.body.default_category || 'VLTD';
+    let defaultTech = req.body.default_technician || 'Technician';
+
+    if (req.body.mapping) {
+      try {
+        customMapping = typeof req.body.mapping === 'string' ? JSON.parse(req.body.mapping) : req.body.mapping;
+      } catch (e) {}
+    }
+
+    if (req.file) {
+      const workbook = xlsx.read(req.file.buffer, { type: 'buffer' });
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+      
+      const range = xlsx.utils.decode_range(worksheet['!ref'] || 'A1:A1');
+      const headers = [];
+      let emptyIdx = 0;
+
+      for (let c = range.s.c; c <= range.e.c; c++) {
+        const cellAddress = xlsx.utils.encode_cell({ r: range.s.r, c });
+        const cell = worksheet[cellAddress];
+        const val = cell && cell.v !== undefined && cell.v !== null ? String(cell.v).trim() : '';
+        if (val) {
+          headers.push(val);
+        } else {
+          headers.push(emptyIdx === 0 ? '__EMPTY' : `__EMPTY_${emptyIdx}`);
+          emptyIdx++;
+        }
+      }
+
+      const rawRows = xlsx.utils.sheet_to_json(worksheet, { header: headers, range: range.s.r + 1, defval: '' });
+      const mapping = customMapping || detectInstallationColumns(headers);
+
+      rowsToProcess = rawRows.map((r, idx) => ({
+        row_number: idx + 2,
+        raw: r,
+        imei: cleanImeiString(r[mapping.imei]),
+        vehicle_number: String(mapping.vehicle_number && r[mapping.vehicle_number] ? r[mapping.vehicle_number] : '').trim().toUpperCase(),
+        customer_name: String(mapping.customer_name && r[mapping.customer_name] ? r[mapping.customer_name] : '').trim(),
+        customer_phone: cleanPhoneString(mapping.customer_phone && r[mapping.customer_phone] ? r[mapping.customer_phone] : ''),
+        installed_by: String(mapping.installed_by && r[mapping.installed_by] ? r[mapping.installed_by] : defaultTech).trim(),
+        installation_date: standardizeDate(mapping.installation_date && r[mapping.installation_date] ? r[mapping.installation_date] : '') || new Date().toISOString().split('T')[0],
+        category: String(mapping.category && r[mapping.category] ? r[mapping.category] : defaultCategory).trim().toUpperCase() || 'VLTD',
+        installation_location: String(mapping.installation_location && r[mapping.installation_location] ? r[mapping.installation_location] : '').trim(),
+        sale_price: mapping.sale_price && r[mapping.sale_price] ? parseFloat(String(r[mapping.sale_price]).replace(/[^0-9.]/g, '')) || 0 : 0,
+        payment_status: String(mapping.payment_status && r[mapping.payment_status] ? r[mapping.payment_status] : '').trim().toUpperCase(),
+        chasis_number: String(mapping.chasis_number && r[mapping.chasis_number] ? r[mapping.chasis_number] : '').trim().toUpperCase(),
+        engine_number: String(mapping.engine_number && r[mapping.engine_number] ? r[mapping.engine_number] : '').trim().toUpperCase(),
+        aadhar_number: String(mapping.aadhar_number && r[mapping.aadhar_number] ? r[mapping.aadhar_number] : '').trim(),
+        pan_number: String(mapping.pan_number && r[mapping.pan_number] ? r[mapping.pan_number] : '').trim().toUpperCase(),
+        software_user_id: String(mapping.software_user_id && r[mapping.software_user_id] ? r[mapping.software_user_id] : '').trim(),
+        software_password: String(mapping.software_password && r[mapping.software_password] ? r[mapping.software_password] : '').trim(),
+        remarks: String(mapping.remarks && r[mapping.remarks] ? r[mapping.remarks] : '').trim()
+      }));
+    } else if (req.body.rows) {
+      const parsedRows = typeof req.body.rows === 'string' ? JSON.parse(req.body.rows) : req.body.rows;
+      rowsToProcess = parsedRows.map((r, idx) => ({
+        row_number: r.row_number || idx + 2,
+        raw: r.raw || r,
+        imei: cleanImeiString(r.detected_imei || r.imei || r.imei_number),
+        vehicle_number: String(r.detected_vehicle || r.vehicle_number || r.vehicle || '').trim().toUpperCase(),
+        customer_name: String(r.detected_customer_name || r.customer_name || '').trim(),
+        customer_phone: cleanPhoneString(r.detected_phone || r.customer_phone || r.phone),
+        installed_by: String(r.detected_tech || r.installed_by || defaultTech).trim(),
+        installation_date: standardizeDate(r.detected_date || r.installation_date) || new Date().toISOString().split('T')[0],
+        category: String(r.detected_category || r.category || defaultCategory).trim().toUpperCase() || 'VLTD',
+        installation_location: String(r.detected_location || r.installation_location || '').trim(),
+        sale_price: r.detected_price !== undefined ? parseFloat(r.detected_price) || 0 : (r.sale_price ? parseFloat(r.sale_price) || 0 : 0),
+        payment_status: String(r.detected_payment_status || r.payment_status || '').trim().toUpperCase(),
+        chasis_number: String(r.chasis_number || '').trim().toUpperCase(),
+        engine_number: String(r.engine_number || '').trim().toUpperCase(),
+        aadhar_number: String(r.aadhar_number || '').trim(),
+        pan_number: String(r.pan_number || '').trim().toUpperCase(),
+        software_user_id: String(r.software_user_id || '').trim(),
+        software_password: String(r.software_password || '').trim(),
+        remarks: String(r.remarks || '').trim()
+      }));
+    }
+
+    if (rowsToProcess.length === 0) {
+      return res.status(400).json({ success: false, error: 'No records to process' });
+    }
+
+    const defaultType = db.prepare('SELECT id FROM device_types LIMIT 1').get() || { id: 1 };
+    const successful = [];
+    const failed = [];
+
+    const processTransaction = db.transaction(() => {
+      for (const item of rowsToProcess) {
+        const rowNum = item.row_number;
+        const cleanImei = item.imei;
+        const cleanVehicle = item.vehicle_number;
+        const cleanName = item.customer_name || 'Customer';
+        const cleanPhone = item.customer_phone || '9999999999';
+        const instDate = item.installation_date;
+        const cleanCategory = item.category || defaultCategory;
+        const cleanTech = item.installed_by || defaultTech;
+        const cleanLocation = item.installation_location || 'Field Site';
+        const cleanPrice = item.sale_price || 0;
+        const cleanPayStatus = item.payment_status || (cleanPrice > 0 ? 'RECEIVED' : 'NOT RECEIVED');
+        const cleanChasis = item.chasis_number || '';
+        const cleanEngine = item.engine_number || '';
+        const cleanAadhar = item.aadhar_number || '';
+        const cleanPan = item.pan_number || '';
+        const cleanSoftwareUser = item.software_user_id || '';
+        const cleanSoftwarePass = item.software_password || '';
+        const cleanRemarks = item.remarks || '';
+
+        // Validation Checks
+        if (!cleanImei) {
+          failed.push({
+            row_number: rowNum,
+            imei: '',
+            vehicle_number: cleanVehicle,
+            customer_name: cleanName,
+            phone: cleanPhone,
+            reason: 'IMEI number is missing in this row'
+          });
+          continue;
+        }
+
+        if (cleanImei.length < 8) {
+          failed.push({
+            row_number: rowNum,
+            imei: cleanImei,
+            vehicle_number: cleanVehicle,
+            customer_name: cleanName,
+            phone: cleanPhone,
+            reason: `Invalid IMEI length (${cleanImei})`
+          });
+          continue;
+        }
+
+        if (!cleanVehicle) {
+          failed.push({
+            row_number: rowNum,
+            imei: cleanImei,
+            vehicle_number: '',
+            customer_name: cleanName,
+            phone: cleanPhone,
+            reason: 'Vehicle number is missing in this row'
+          });
+          continue;
+        }
+
+        try {
+          // 1. Device Auto-lookup or Create
+          let dev = db.prepare('SELECT * FROM devices WHERE imei_number = ?').get(cleanImei);
+          let attrs = {};
+
+          if (!dev) {
+            attrs = {
+              'CATEGORY': cleanCategory,
+              'DEVICE CATEGORY': cleanCategory,
+              'VEHICLE NUMBER': cleanVehicle,
+              'CUSTOMER NAME': cleanName,
+              'CUSTOMER PHONE NUMBER': cleanPhone,
+              'INSTALLATION DATE': instDate,
+              'TECHNICIAN': cleanTech,
+              'RTO LOCATION': cleanLocation,
+              'AMOUNT RECEIVED': cleanPayStatus,
+              'COST': cleanPrice
+            };
+            if (item.raw && typeof item.raw === 'object') {
+              Object.keys(item.raw).forEach(k => {
+                if (!k.startsWith('__EMPTY')) attrs[k] = item.raw[k];
+              });
+            }
+
+            const info = db.prepare(`
+              INSERT INTO devices (imei_number, device_type_id, purchase_date, vendor_name, current_status, current_holder_type, current_holder_name, additional_attributes)
+              VALUES (?, ?, ?, 'Direct Entry', 'INSTALLED', 'CUSTOMER', ?, ?)
+            `).run(cleanImei, defaultType.id, instDate, `${cleanName} (${cleanVehicle})`, JSON.stringify(attrs));
+
+            dev = db.prepare('SELECT * FROM devices WHERE id = ?').get(info.lastInsertRowid);
+          } else {
+            try { attrs = JSON.parse(dev.additional_attributes || '{}'); } catch {}
+            if (item.raw && typeof item.raw === 'object') {
+              Object.keys(item.raw).forEach(k => {
+                if (!k.startsWith('__EMPTY')) attrs[k] = item.raw[k];
+              });
+            }
+            attrs['CATEGORY'] = cleanCategory;
+            attrs['DEVICE CATEGORY'] = cleanCategory;
+            attrs['VEHICLE NUMBER'] = cleanVehicle;
+            attrs['CUSTOMER NAME'] = cleanName;
+            attrs['CUSTOMER PHONE NUMBER'] = cleanPhone;
+            attrs['INSTALLATION DATE'] = instDate;
+            attrs['TECHNICIAN'] = cleanTech;
+            attrs['RTO LOCATION'] = cleanLocation;
+            attrs['AMOUNT RECEIVED'] = cleanPayStatus;
+            if (cleanPrice) attrs['COST'] = cleanPrice;
+          }
+
+          if (cleanChasis) attrs['CHASIS NUMBER'] = cleanChasis;
+          if (cleanEngine) attrs['ENGINE NUMBER'] = cleanEngine;
+          if (cleanAadhar) attrs['AADHAAR NUMBER'] = cleanAadhar;
+          if (cleanPan) attrs['PAN NUMBER'] = cleanPan;
+          if (cleanSoftwareUser) attrs['USERNAME'] = cleanSoftwareUser;
+          if (cleanSoftwarePass) attrs['PASSWORD'] = cleanSoftwarePass;
+
+          // 2. Customer Lookup / Deduplication
+          let customer = db.prepare('SELECT * FROM customers WHERE phone_number = ?').get(cleanPhone);
+          let customerId;
+
+          if (customer) {
+            customerId = customer.id;
+            db.prepare(`
+              UPDATE customers
+              SET name = COALESCE(?, name),
+                  aadhar_number = COALESCE(NULLIF(?, ''), aadhar_number),
+                  pan_number = COALESCE(NULLIF(?, ''), pan_number),
+                  software_user_id = COALESCE(NULLIF(?, ''), software_user_id),
+                  software_password = COALESCE(NULLIF(?, ''), software_password)
+              WHERE id = ?
+            `).run(cleanName, cleanAadhar, cleanPan, cleanSoftwareUser, cleanSoftwarePass, customerId);
+          } else {
+            const custResult = db.prepare(`
+              INSERT INTO customers (name, phone_number, customer_type, source, aadhar_number, pan_number, software_user_id, software_password)
+              VALUES (?, ?, 'Individual', 'Daily Excel Import', ?, ?, ?, ?)
+            `).run(cleanName, cleanPhone, cleanAadhar || null, cleanPan || null, cleanSoftwareUser || null, cleanSoftwarePass || null);
+            customerId = custResult.lastInsertRowid;
+          }
+
+          // 3. Create Installation Record
+          db.prepare(`
+            INSERT INTO installations (
+              device_id, imei_number, customer_id, installation_date, installed_by,
+              sales_manager, sales_person, customer_name, customer_contact, vehicle_number,
+              vehicle_type, aadhar_number, pan_number, chasis_number, engine_number,
+              sale_price, payment_status, installation_location, remarks,
+              software_user_id, software_password
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(
+            dev.id,
+            cleanImei,
+            customerId,
+            instDate,
+            cleanTech,
+            'Sales Team',
+            cleanTech,
+            cleanName,
+            cleanPhone,
+            cleanVehicle,
+            cleanCategory,
+            cleanAadhar || null,
+            cleanPan || null,
+            cleanChasis || null,
+            cleanEngine || null,
+            cleanPrice,
+            cleanPayStatus,
+            cleanLocation,
+            cleanRemarks || 'Imported via Daily Excel Report',
+            cleanSoftwareUser || null,
+            cleanSoftwarePass || null
+          );
+
+          // 4. Update Device
+          db.prepare(`
+            UPDATE devices
+            SET current_status = 'INSTALLED',
+                current_holder_type = 'CUSTOMER',
+                current_holder_id = ?,
+                current_holder_name = ?,
+                additional_attributes = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+          `).run(customerId, `${cleanName} (${cleanVehicle})`, JSON.stringify(attrs), dev.id);
+
+          // 5. Update Dispatches
+          db.prepare(`UPDATE dispatch_items SET status = 'INSTALLED' WHERE imei_number = ?`).run(cleanImei);
+
+          // 6. Audit History
+          db.prepare(`
+            INSERT INTO device_history (device_id, imei_number, event_type, event_date, from_holder, to_holder, performed_by, remarks)
+            VALUES (?, ?, 'INSTALLED', datetime('now'), ?, ?, ?, ?)
+          `).run(
+            dev.id,
+            cleanImei,
+            dev.current_holder_name || 'Central Warehouse',
+            `Customer: ${cleanName} (${cleanVehicle})`,
+            cleanTech || 'Admin',
+            `Daily Report Install: ${cleanVehicle} (Cat: ${cleanCategory})`
+          );
+
+          // 7. 1-Year Warranty Reminder
+          const warrantyDue = new Date(new Date(instDate).setFullYear(new Date(instDate).getFullYear() + 1)).toISOString().split('T')[0];
+          db.prepare(`
+            INSERT INTO reminders (customer_id, device_id, imei_number, type, due_date, status, remarks)
+            VALUES (?, ?, ?, 'WARRANTY_EXPIRY', ?, 'PENDING', ?)
+          `).run(customerId, dev.id, cleanImei, warrantyDue, `1-Year Warranty & Renewal due for vehicle ${cleanVehicle}`);
+
+          successful.push({
+            row_number: rowNum,
+            imei: cleanImei,
+            vehicle_number: cleanVehicle,
+            customer_name: cleanName,
+            phone: cleanPhone,
+            technician: cleanTech,
+            category: cleanCategory,
+            date: instDate,
+            payment_status: cleanPayStatus
+          });
+
+        } catch (rowErr) {
+          failed.push({
+            row_number: rowNum,
+            imei: cleanImei,
+            vehicle_number: cleanVehicle,
+            customer_name: cleanName,
+            phone: cleanPhone,
+            reason: rowErr.message || 'Database error during record insertion'
+          });
+        }
+      }
+    });
+
+    processTransaction();
+
+    // Auto-sync successfully processed IMEIs to Supabase and Google Sheets
+    try {
+      const cloudSync = require('../db/cloudSync');
+      cloudSync.triggerDebouncedSync(1000);
+      const googleSheetsSync = require('../services/googleSheetsSync');
+      const successfulImeis = successful.map(s => s.imei).filter(Boolean);
+      if (successfulImeis.length > 0) {
+        googleSheetsSync.syncBulkDevices(successfulImeis);
+      }
+    } catch (syncErr) {
+      console.warn('[Sync Warning after Excel Upload]', syncErr.message);
+    }
+
+    res.json({
+      success: true,
+      total_count: rowsToProcess.length,
+      success_count: successful.length,
+      failed_count: failed.length,
+      successful,
+      failed,
+      message: `Processed ${successful.length} of ${rowsToProcess.length} installation(s) successfully.${failed.length > 0 ? ` ${failed.length} record(s) failed.` : ''}`
+    });
+
+  } catch (err) {
+    console.error('[Excel Upload Error]', err);
+    res.status(500).json({ success: false, error: err.message || 'Failed to process daily report upload' });
   }
 });
 

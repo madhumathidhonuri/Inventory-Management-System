@@ -1305,4 +1305,119 @@ export async function exportAllTechniciansSummaryToExcel(technicians = [], optio
   window.URL.revokeObjectURL(url);
 }
 
+/**
+ * Downloads a pre-formatted Daily Installation Report Excel Template
+ */
+export async function downloadDailyInstallationTemplate() {
+  const columns = [
+    'IMEI Number',
+    'Vehicle Number',
+    'Customer Name',
+    'Customer Phone',
+    'Technician Name',
+    'Installation Date',
+    'Category',
+    'Location / RTO',
+    'Chassis Number',
+    'Engine Number',
+    'Aadhaar Number',
+    'PAN Number',
+    'Sale Price',
+    'Payment Status',
+    'Software User ID',
+    'Software Password',
+    'Remarks'
+  ];
+
+  await downloadStyledTemplate(
+    `Daily_Installation_Report_Template_${new Date().toISOString().split('T')[0]}`,
+    'Daily Installations',
+    columns,
+    '059669' // Emerald green header
+  );
+}
+
+/**
+ * Exports failed installation records to Excel for rapid correction and re-upload
+ */
+export async function downloadFailedInstallationsExcel(failedRows = []) {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'FuelTracks IMS';
+  workbook.created = new Date();
+
+  const worksheet = workbook.addWorksheet('Failed Installations', {
+    views: [{ showGridLines: true }]
+  });
+
+  const columns = [
+    { header: 'Excel Row #', key: 'row_number', width: 14 },
+    { header: 'Error / Issue Reason', key: 'reason', width: 36 },
+    { header: 'IMEI Number', key: 'imei', width: 22 },
+    { header: 'Vehicle Number', key: 'vehicle_number', width: 20 },
+    { header: 'Customer Name', key: 'customer_name', width: 24 },
+    { header: 'Customer Phone', key: 'phone', width: 18 }
+  ];
+
+  worksheet.columns = columns;
+
+  // Style Header Row
+  const headerRow = worksheet.getRow(1);
+  headerRow.height = 28;
+  headerRow.eachCell((cell) => {
+    cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFE11D48' } // Crimson / Rose
+    };
+    cell.font = {
+      name: 'Segoe UI',
+      size: 11,
+      bold: true,
+      color: { argb: 'FFFFFFFF' }
+    };
+    cell.alignment = { vertical: 'middle', horizontal: 'center' };
+  });
+
+  // Populate data
+  failedRows.forEach((item, idx) => {
+    const row = worksheet.addRow({
+      row_number: item.row_number || idx + 2,
+      reason: item.reason || 'Validation error',
+      imei: item.imei || '',
+      vehicle_number: item.vehicle_number || '',
+      customer_name: item.customer_name || '',
+      phone: item.phone || ''
+    });
+
+    row.height = 22;
+    row.eachCell((cell, colNumber) => {
+      cell.font = { name: 'Segoe UI', size: 10 };
+      cell.border = {
+        top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+        bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+        left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+        right: { style: 'thin', color: { argb: 'FFE2E8F0' } }
+      };
+
+      if (colNumber === 2) {
+        // Reason column: highlight in light red text
+        cell.font = { name: 'Segoe UI', size: 10, bold: true, color: { argb: 'FFBE123C' } };
+      }
+    });
+  });
+
+  const filename = `Failed_Installations_${new Date().toISOString().split('T')[0]}.xlsx`;
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  window.URL.revokeObjectURL(url);
+}
+
+
 

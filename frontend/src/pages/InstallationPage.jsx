@@ -32,6 +32,7 @@ import { buildCustomerCredentialsWhatsAppMessage, buildPaymentQrWhatsAppMessage,
 import { exportInstallationsToExcel } from '../utils/excelExport';
 import PaymentQrModal from '../components/PaymentQrModal';
 import PendingPaymentNotificationModal from '../components/PendingPaymentNotificationModal';
+import DailyInstallationUploadModal from '../components/DailyInstallationUploadModal';
 import { useAuth } from '../context/AuthContext';
 
 export default function InstallationPage({ onOpenScannerWithCallback, onOpenTraceDrawer, onNavigateTab }) {
@@ -44,6 +45,7 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
   const [exportingExcel, setExportingExcel] = useState(false);
   const [pendingSummary, setPendingSummary] = useState(null);
   const [isPendingAlertsOpen, setIsPendingAlertsOpen] = useState(false);
+  const [showDailyExcelModal, setShowDailyExcelModal] = useState(false);
 
   // Payment QR Modal State
   const [paymentQrData, setPaymentQrData] = useState(null);
@@ -397,6 +399,15 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
           )}
 
           <button
+            onClick={() => setShowDailyExcelModal(true)}
+            className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+            title="Upload End-of-Day Daily Installation Report (.xlsx, .csv)"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5" />
+            <span>📊 Upload Daily Report (Excel)</span>
+          </button>
+
+          <button
             onClick={() => { setShowBulkModal(true); setBulkResult(null); }}
             className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer"
           >
@@ -405,7 +416,7 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
 
           <button
             onClick={() => setShowModal(true)}
-            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-xs flex items-center gap-1.5 transition-colors cursor-pointer"
           >
             <Plus className="w-4 h-4" /> + New Installation Entry
           </button>
@@ -1432,6 +1443,16 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
         onNavigateToPendingPayments={() => {
           setIsPendingAlertsOpen(false);
           if (onNavigateTab) onNavigateTab('pending-payments');
+        }}
+      />
+
+      {/* Daily Installation Excel Report Upload Modal */}
+      <DailyInstallationUploadModal
+        isOpen={showDailyExcelModal}
+        onClose={() => setShowDailyExcelModal(false)}
+        onUploadSuccess={() => {
+          loadData();
+          loadPendingAlerts();
         }}
       />
 
