@@ -1011,12 +1011,33 @@ router.post('/bulk', (req, res) => {
 
 // Helper: Extract clean Category from installation record
 function extractInstCategory(inst) {
+  if (!inst) return 'VLTD';
   let devAttrs = {};
   try {
     devAttrs = typeof inst.device_additional_attributes === 'string'
       ? JSON.parse(inst.device_additional_attributes || '{}')
       : (inst.device_additional_attributes || {});
   } catch {}
+
+  const rawCat = (
+    inst.category ||
+    devAttrs['CATEGORY'] ||
+    devAttrs['DEVICE CATEGORY'] ||
+    devAttrs['PROJECT CATEGORY'] ||
+    devAttrs['SERVICE CATEGORY'] ||
+    devAttrs['Category'] ||
+    inst.device_type_category ||
+    inst.device_type_name ||
+    'VLTD'
+  ).toString().toUpperCase().trim();
+
+  if (rawCat.includes('TG MINING') || (rawCat.includes('TG') && rawCat.includes('MINING'))) return 'TG MINING';
+  if (rawCat.includes('AP MINING') || (rawCat.includes('AP') && rawCat.includes('MINING'))) return 'AP MINING';
+  if (rawCat.includes('VLTD') || rawCat.includes('VLT')) return 'VLTD';
+  if (rawCat.includes('GENERAL') || rawCat.includes('BASIC') || rawCat.includes('GPS')) return 'GENERAL';
+  return rawCat || 'VLTD';
+}
+
 // GET /api/installations/daily-log - Date-wise installation grouping, daily summaries and record ledger
 router.get('/daily-log', (req, res) => {
   try {
