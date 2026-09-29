@@ -63,6 +63,14 @@ export default function DailyInstallationUploadModal({ isOpen, onClose, onUpload
       const selected = e.target.files[0];
       setFile(selected);
       setError(null);
+      const nameLower = selected.name.toLowerCase();
+      if (nameLower.includes('tg') && nameLower.includes('mining')) {
+        setDefaultCategory('TG MINING');
+      } else if (nameLower.includes('mining')) {
+        setDefaultCategory('TG MINING');
+      } else if (nameLower.includes('ap') && nameLower.includes('mining')) {
+        setDefaultCategory('AP MINING');
+      }
       handleParseFile(selected);
     }
   };
@@ -73,6 +81,14 @@ export default function DailyInstallationUploadModal({ isOpen, onClose, onUpload
       const selected = e.dataTransfer.files[0];
       setFile(selected);
       setError(null);
+      const nameLower = selected.name.toLowerCase();
+      if (nameLower.includes('tg') && nameLower.includes('mining')) {
+        setDefaultCategory('TG MINING');
+      } else if (nameLower.includes('mining')) {
+        setDefaultCategory('TG MINING');
+      } else if (nameLower.includes('ap') && nameLower.includes('mining')) {
+        setDefaultCategory('AP MINING');
+      }
       handleParseFile(selected);
     }
   };
@@ -114,6 +130,7 @@ export default function DailyInstallationUploadModal({ isOpen, onClose, onUpload
       const phoneKey = columnMapping.customer_phone;
       const techKey = columnMapping.installed_by;
       const dateKey = columnMapping.installation_date;
+      const catKey = columnMapping.category;
 
       const imeiVal = String(raw[imeiKey] || '').trim();
       const vehicleVal = String(vehicleKey && raw[vehicleKey] ? raw[vehicleKey] : '').trim().toUpperCase();
@@ -121,6 +138,8 @@ export default function DailyInstallationUploadModal({ isOpen, onClose, onUpload
       const phoneVal = cleanPhoneString(phoneKey && raw[phoneKey] ? raw[phoneKey] : '');
       const techVal = String(techKey && raw[techKey] ? raw[techKey] : (defaultTechnician || '')).trim();
       const dateVal = String(dateKey && raw[dateKey] ? raw[dateKey] : row.detected_date || '').trim();
+      const effectiveCategory = (defaultCategory === 'CUSTOM' ? (customCategoryInput.trim() || 'CUSTOM') : defaultCategory);
+      const catVal = String(catKey && raw[catKey] ? raw[catKey] : effectiveCategory).trim().toUpperCase() || 'VLTD';
 
       const issues = [];
       if (!imeiVal) issues.push('Missing IMEI');
@@ -141,11 +160,12 @@ export default function DailyInstallationUploadModal({ isOpen, onClose, onUpload
         detected_phone: phoneVal,
         detected_tech: techVal,
         detected_date: dateVal,
+        detected_category: catVal,
         status,
         issues: issues.length > 0 ? issues : (row.issues || [])
       };
     });
-  }, [previewData, columnMapping, defaultTechnician]);
+  }, [previewData, columnMapping, defaultTechnician, defaultCategory, customCategoryInput]);
 
   const previewCounts = useMemo(() => {
     const total = computedRows.length;

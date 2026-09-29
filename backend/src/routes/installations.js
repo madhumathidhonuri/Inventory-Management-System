@@ -9,17 +9,53 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 function cleanImeiString(raw) {
   if (raw === undefined || raw === null) return '';
-  let str = String(raw).trim();
-  if (typeof raw === 'number' || (str.includes('e+') || str.includes('E+'))) {
+  let str = String(raw).trim().replace(/^['"\s]+|['"\s]+$/g, '');
+  if (!str) return '';
+
+  // Handle scientific notation numbers like 8.64925e+14 or 8.64925E14
+  if (typeof raw === 'number' || /[eE][+-]?\d+/.test(str)) {
     try {
-      const num = Number(raw);
-      if (!isNaN(num)) {
+      const num = Number(str);
+      if (!isNaN(num) && num > 0) {
         str = BigInt(Math.round(num)).toString();
       }
     } catch {}
   }
-  str = str.replace(/\.0+$/, '').replace(/\s+/g, '');
+
+  // Remove trailing decimal zeroes like .0, .00
+  str = str.replace(/\.0+$/, '').replace(/[^a-zA-Z0-9]/g, '').trim();
   return str;
+}
+
+/**
+ * Robust device lookup by IMEI - matches exact, normalized, or embedded IMEI
+ */
+function findDeviceByImei(imei) {
+  if (!imei) return null;
+  const clean = cleanImeiString(imei);
+  if (!clean) return null;
+
+  // 1. Exact match
+  let dev = db.prepare('SELECT * FROM devices WHERE imei_number = ?').get(clean);
+  if (dev) return dev;
+
+  // 2. Normalized match (stripping spaces, quotes, hyphens)
+  dev = db.prepare(`
+    SELECT * FROM devices 
+    WHERE REPLACE(REPLACE(REPLACE(imei_number, ' ', ''), '-', ''), '''', '') = ?
+    LIMIT 1
+  `).get(clean);
+  if (dev) return dev;
+
+  // 3. Substring match for 10+ digits (safe for standard 15-digit IMEIs)
+  if (clean.length >= 10) {
+    dev = db.prepare(`SELECT * FROM devices WHERE imei_number LIKE ? LIMIT 1`).get(`%${clean}%`);
+    if (dev) return dev;
+  }
+
+  // 4. Match within additional_attributes JSON
+  dev = db.prepare(`SELECT * FROM devices WHERE additional_attributes LIKE ? LIMIT 1`).get(`%${clean}%`);
+  return dev || null;
 }
 
 function cleanPhoneString(raw) {
@@ -70,21 +106,21 @@ function detectInstallationColumns(headers = []) {
   };
 
   mapping.imei = findCol(['imei', 'device_id', 'imei_number', 'imei_no', 'device_imei', 'serial_number', 'serial_no', 'vltd_sno', 'vltdsno', 'tracker_id']) || headers[0] || '';
-  mapping.vehicle_number = findCol(['vehicle_number', 'vehicle_no', 'vehicleno', 'vehicle', 'reg_no', 'registration_no', 'reg_number', 'plate_no', 'machinery_number']) || '';
-  mapping.customer_name = findCol(['customer_name', 'client_name', 'party_name', 'owner_name', 'customer', 'client', 'party', 'name']) || '';
+  mapping.vehicle_number = findCol(['vehicle_number', 'vehicle_no', 'vehicleno', 'vehicle', 'reg_no', 'registration_no', 'reg_number', 'plate_no', 'machinery_number', 'equipment_number', 'tipper_no', 'truck_no']) || '';
+  mapping.customer_name = findCol(['customer_name', 'client_name', 'party_name', 'owner_name', 'customer', 'client', 'party', 'name', 'mining_site', 'site_name']) || '';
   mapping.customer_phone = findCol(['customer_phone', 'customer_mobile', 'phone_number', 'mobile_number', 'phone', 'mobile', 'contact_number', 'contact', 'customer_contact']) || '';
   mapping.installed_by = findCol(['installed_by', 'technician', 'technician_name', 'installer', 'fitter', 'staff_name', 'staff', 'engineer']) || '';
-  mapping.installation_date = findCol(['installation_date', 'installed_on', 'install_date', 'cert_date', 'certificate_issued_date', 'date', 'fitting_date']) || '';
-  mapping.category = findCol(['category', 'device_category', 'project_category', 'service_category', 'project', 'type']) || '';
-  mapping.installation_location = findCol(['installation_location', 'rto_location', 'rto', 'location', 'city', 'site_name', 'site', 'area', 'place']) || '';
+  mapping.installation_date = findCol(['installation_date', 'installed_on', 'install_date', 'cert_date', 'certificate_issued_date', 'tg_mining_date', 'tgminingdate', 'mining_date', 'date', 'fitting_date']) || '';
+  mapping.category = findCol(['category', 'device_category', 'project_category', 'service_category', 'project', 'type', 'scheme', 'mining']) || '';
+  mapping.installation_location = findCol(['installation_location', 'rto_location', 'rto', 'location', 'city', 'site_name', 'site', 'area', 'place', 'mining_location']) || '';
   mapping.sale_price = findCol(['sale_price', 'price', 'amount', 'cost', 'total_cost', 'fitting_charges']) || '';
   mapping.payment_status = findCol(['payment_status', 'payment', 'paid_status', 'amount_received', 'status']) || '';
   mapping.chasis_number = findCol(['chasis_number', 'chassis_number', 'chasis_no', 'chassis_no', 'chassis', 'chasis']) || '';
   mapping.engine_number = findCol(['engine_number', 'engine_no', 'engine']) || '';
   mapping.aadhar_number = findCol(['aadhar_number', 'aadhaar_number', 'aadhar_no', 'aadhaar_no', 'aadhar', 'aadhaar']) || '';
   mapping.pan_number = findCol(['pan_number', 'pan_no', 'pan_card', 'pan']) || '';
-  mapping.software_user_id = findCol(['software_user_id', 'software_id', 'software_username', 'login_id', 'username', 'user_id']) || '';
-  mapping.software_password = findCol(['software_password', 'software_pass', 'password', 'pwd']) || '';
+  mapping.software_user_id = findCol(['software_user_id', 'software_id', 'software_username', 'login_id', 'username', 'user_id', 'gps_user_id']) || '';
+  mapping.software_password = findCol(['software_password', 'software_pass', 'password', 'pwd', 'gps_password']) || '';
   mapping.remarks = findCol(['remarks', 'notes', 'comment', 'description']) || '';
 
   return mapping;
@@ -450,12 +486,12 @@ router.post('/excel-preview', upload.single('file'), (req, res) => {
       let deviceStatus = 'NEW';
       let existingHolder = '';
       if (imeiVal) {
-        const existingDev = db.prepare('SELECT id, current_status, current_holder_name FROM devices WHERE imei_number = ?').get(imeiVal);
+        const existingDev = findDeviceByImei(imeiVal);
         if (existingDev) {
           deviceStatus = existingDev.current_status || 'IN_STOCK';
           existingHolder = existingDev.current_holder_name || '';
           if (existingDev.current_status === 'INSTALLED') {
-            issues.push(`Already Installed (${existingDev.current_holder_name || 'Customer'})`);
+            issues.push(`Will update installation (${existingDev.current_holder_name || 'Installed'})`);
           }
         }
       }
@@ -660,14 +696,15 @@ router.post('/excel-upload', upload.single('file'), (req, res) => {
         }
 
         try {
-          // 1. Device Auto-lookup or Create
-          let dev = db.prepare('SELECT * FROM devices WHERE imei_number = ?').get(cleanImei);
+          // 1. Device Auto-lookup or Create (In-place match with fuzzy/normalized lookup)
+          let dev = findDeviceByImei(cleanImei);
           let attrs = {};
 
           if (!dev) {
             attrs = {
               'CATEGORY': cleanCategory,
               'DEVICE CATEGORY': cleanCategory,
+              'PROJECT CATEGORY': cleanCategory,
               'VEHICLE NUMBER': cleanVehicle,
               'INSTALLATION DATE': instDate
             };
@@ -692,6 +729,7 @@ router.post('/excel-upload', upload.single('file'), (req, res) => {
 
             dev = db.prepare('SELECT * FROM devices WHERE id = ?').get(info.lastInsertRowid);
           } else {
+            // Existing Device: In-place update preserving master batch/vendor info
             try { attrs = JSON.parse(dev.additional_attributes || '{}'); } catch {}
             if (item.raw && typeof item.raw === 'object') {
               Object.keys(item.raw).forEach(k => {
@@ -700,8 +738,13 @@ router.post('/excel-upload', upload.single('file'), (req, res) => {
             }
             attrs['CATEGORY'] = cleanCategory;
             attrs['DEVICE CATEGORY'] = cleanCategory;
+            attrs['PROJECT CATEGORY'] = cleanCategory;
             attrs['VEHICLE NUMBER'] = cleanVehicle;
             attrs['INSTALLATION DATE'] = instDate;
+            if (cleanCategory.includes('TG MINING') || cleanCategory.includes('MINING')) {
+              attrs['TG MINING DATE'] = instDate;
+              attrs['MINING DATE'] = instDate;
+            }
             if (cleanName) attrs['CUSTOMER NAME'] = cleanName;
             if (cleanPhone) attrs['CUSTOMER PHONE NUMBER'] = cleanPhone;
             if (cleanTech) attrs['TECHNICIAN'] = cleanTech;
@@ -741,40 +784,88 @@ router.post('/excel-upload', upload.single('file'), (req, res) => {
             }
           }
 
-          // 3. Create Installation Record
-          db.prepare(`
-            INSERT INTO installations (
-              device_id, imei_number, customer_id, installation_date, installed_by,
-              sales_manager, sales_person, customer_name, customer_contact, vehicle_number,
-              vehicle_type, aadhar_number, pan_number, chasis_number, engine_number,
-              sale_price, payment_status, installation_location, remarks,
-              software_user_id, software_password
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          `).run(
-            dev.id,
-            cleanImei,
-            customerId,
-            instDate,
-            cleanTech || null,
-            null,
-            cleanTech || null,
-            cleanName || null,
-            cleanPhone || null,
-            cleanVehicle,
-            cleanCategory,
-            cleanAadhar || null,
-            cleanPan || null,
-            cleanChasis || null,
-            cleanEngine || null,
-            cleanPrice,
-            cleanPayStatus,
-            cleanLocation || null,
-            cleanRemarks || null,
-            cleanSoftwareUser || null,
-            cleanSoftwarePass || null
-          );
+          // 3. Upsert Installation Record (Update if exists for this device/IMEI, Insert if new)
+          const existingInst = db.prepare('SELECT id FROM installations WHERE device_id = ? OR imei_number = ?').get(dev.id, cleanImei);
+          if (existingInst) {
+            db.prepare(`
+              UPDATE installations
+              SET device_id = ?,
+                  customer_id = COALESCE(?, customer_id),
+                  installation_date = ?,
+                  installed_by = COALESCE(?, installed_by),
+                  sales_person = COALESCE(?, sales_person),
+                  customer_name = COALESCE(?, customer_name),
+                  customer_contact = COALESCE(?, customer_contact),
+                  vehicle_number = ?,
+                  vehicle_type = ?,
+                  aadhar_number = COALESCE(?, aadhar_number),
+                  pan_number = COALESCE(?, pan_number),
+                  chasis_number = COALESCE(?, chasis_number),
+                  engine_number = COALESCE(?, engine_number),
+                  sale_price = ?,
+                  payment_status = ?,
+                  installation_location = COALESCE(?, installation_location),
+                  remarks = COALESCE(?, remarks),
+                  software_user_id = COALESCE(?, software_user_id),
+                  software_password = COALESCE(?, software_password)
+              WHERE id = ?
+            `).run(
+              dev.id,
+              customerId,
+              instDate,
+              cleanTech || null,
+              cleanTech || null,
+              cleanName || null,
+              cleanPhone || null,
+              cleanVehicle,
+              cleanCategory,
+              cleanAadhar || null,
+              cleanPan || null,
+              cleanChasis || null,
+              cleanEngine || null,
+              cleanPrice,
+              cleanPayStatus,
+              cleanLocation || null,
+              cleanRemarks || null,
+              cleanSoftwareUser || null,
+              cleanSoftwarePass || null,
+              existingInst.id
+            );
+          } else {
+            db.prepare(`
+              INSERT INTO installations (
+                device_id, imei_number, customer_id, installation_date, installed_by,
+                sales_manager, sales_person, customer_name, customer_contact, vehicle_number,
+                vehicle_type, aadhar_number, pan_number, chasis_number, engine_number,
+                sale_price, payment_status, installation_location, remarks,
+                software_user_id, software_password
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `).run(
+              dev.id,
+              cleanImei,
+              customerId,
+              instDate,
+              cleanTech || null,
+              null,
+              cleanTech || null,
+              cleanName || null,
+              cleanPhone || null,
+              cleanVehicle,
+              cleanCategory,
+              cleanAadhar || null,
+              cleanPan || null,
+              cleanChasis || null,
+              cleanEngine || null,
+              cleanPrice,
+              cleanPayStatus,
+              cleanLocation || null,
+              cleanRemarks || null,
+              cleanSoftwareUser || null,
+              cleanSoftwarePass || null
+            );
+          }
 
-          // 4. Update Device
+          // 4. Update Device in place
           const finalHolder = cleanName ? `${cleanName} (${cleanVehicle})` : cleanVehicle;
           db.prepare(`
             UPDATE devices

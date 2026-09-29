@@ -146,6 +146,30 @@ function extractPaymentStatus(attrs = {}) {
 }
 
 /**
+ * Extract clean category (TG MINING, AP MINING, VLTD, GENERAL)
+ */
+function extractCategory(attrs = {}, dev = {}) {
+  const direct = (attrs['CATEGORY'] || attrs['DEVICE CATEGORY'] || attrs['PROJECT CATEGORY'] || attrs['SERVICE CATEGORY'] || attrs['SCHEME'] || '').toString().trim().toUpperCase();
+  if (direct) {
+    if (direct.includes('TG') && direct.includes('MINING')) return 'TG MINING';
+    if (direct.includes('AP') && direct.includes('MINING')) return 'AP MINING';
+    if (direct.includes('VLTD') || direct.includes('AIS')) return 'VLTD';
+    if (direct.includes('GENERAL') || direct.includes('COMMERCIAL')) return 'GENERAL';
+    return direct;
+  }
+  if (attrs['TG MINING DATE'] || attrs['TG_MINING_DATE'] || attrs['Tg Mining Date'] || attrs['tg_mining_date']) {
+    return 'TG MINING';
+  }
+  if (attrs['AP MINING DATE'] || attrs['AP_MINING_DATE'] || attrs['Ap Mining Date']) {
+    return 'AP MINING';
+  }
+  if (attrs['MINING SITE'] || (attrs['CUSTOMER NAME'] && String(attrs['CUSTOMER NAME']).toUpperCase().includes('MINING'))) {
+    return 'TG MINING';
+  }
+  return dev.vehicle_type || 'VLTD';
+}
+
+/**
  * Extract installation/effective date
  */
 function extractInstallationDate(dev = {}, attrs = {}) {
@@ -214,6 +238,7 @@ function syncFitmentsToInstallations(dbParam) {
           customer_name = COALESCE(?, customer_name),
           customer_contact = COALESCE(?, customer_contact),
           vehicle_number = COALESCE(?, vehicle_number),
+          vehicle_type = ?,
           sale_price = ?,
           payment_status = ?,
           software_user_id = COALESCE(?, software_user_id),
@@ -250,7 +275,7 @@ function syncFitmentsToInstallations(dbParam) {
         const salePrice = extractSalePrice(attrs, dev);
         const paymentStatus = extractPaymentStatus(attrs);
         const instDate = extractInstallationDate(dev, attrs);
-        const category = (attrs['CATEGORY'] || attrs['DEVICE CATEGORY'] || attrs['PROJECT CATEGORY'] || 'VLTD').toString().trim().toUpperCase();
+        const category = extractCategory(attrs, dev);
         const location = attrs['RTO LOCATION'] || attrs['STOCK PLACE'] || attrs['LOCATION'] || '';
         const technician = attrs['TECHNICIAN'] || attrs['INSTALLED BY'] || attrs['FITTER'] || attrs['SALES PERSON NAME'] || '';
         const salesManager = attrs['SALES MANAGER'] || null;
