@@ -20,6 +20,21 @@ import {
 import { previewDailyInstallationExcel, uploadDailyInstallationExcel } from '../services/api';
 import { downloadDailyInstallationTemplate, downloadFailedInstallationsExcel } from '../utils/excelExport';
 
+function cleanPhoneString(raw) {
+  if (raw === undefined || raw === null) return '';
+  let str = String(raw).trim().replace(/\.0+$/, '').replace(/[^\d+]/g, '');
+  if (str === '9999999999' || str === '0000000000') return '';
+  if (str.length > 10) {
+    const digitsOnly = str.replace(/\D/g, '');
+    if (digitsOnly.length === 12 && digitsOnly.startsWith('91')) {
+      str = digitsOnly.substring(2);
+    } else if (digitsOnly.length >= 10) {
+      str = digitsOnly.slice(-10);
+    }
+  }
+  return str;
+}
+
 export default function DailyInstallationUploadModal({ isOpen, onClose, onUploadSuccess }) {
   if (!isOpen) return null;
 
