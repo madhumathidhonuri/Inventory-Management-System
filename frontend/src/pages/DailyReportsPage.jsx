@@ -24,9 +24,22 @@ import {
   QrCode,
   Wrench,
   Layers,
-  ArrowUpRight
+  ArrowUpRight,
+  Trash2,
+  AlertTriangle,
+  CheckSquare,
+  Square,
+  X,
+  ShieldAlert,
+  Check
 } from 'lucide-react';
-import { fetchDailyInstallationLog } from '../services/api';
+import {
+  fetchDailyInstallationLog,
+  deleteInstallationsByDate,
+  clearAllInstallations,
+  deleteInstallation,
+  bulkDeleteInstallations
+} from '../services/api';
 import { exportInstallationsToExcel } from '../utils/excelExport';
 import DailyInstallationUploadModal from '../components/DailyInstallationUploadModal';
 import PaymentQrModal from '../components/PaymentQrModal';
@@ -43,6 +56,18 @@ export default function DailyReportsPage({ onOpenTraceDrawer }) {
   const [paymentFilter, setPaymentFilter] = useState('ALL'); // ALL, RECEIVED, PENDING
   const [exporting, setExporting] = useState(false);
 
+  // Selection state for multi-delete
+  const [selectedIds, setSelectedIds] = useState(new Set());
+
+  // Delete modal states
+  const [showDeleteDateModal, setShowDeleteDateModal] = useState(false);
+  const [showDeleteAllModal, setShowDeleteAllModal] = useState(false);
+  const [confirmDeleteText, setConfirmDeleteText] = useState('');
+  const [deletingItem, setDeletingItem] = useState(null);
+  const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
+  const [actionLoading, setActionLoading] = useState(false);
+  const [statusMessage, setStatusMessage] = useState(null);
+
   // Upload modal state
   const [showUploadModal, setShowUploadModal] = useState(false);
 
@@ -52,6 +77,7 @@ export default function DailyReportsPage({ onOpenTraceDrawer }) {
 
   useEffect(() => {
     loadDailyLog(selectedDate);
+    setSelectedIds(new Set());
   }, [selectedDate]);
 
   const loadDailyLog = async (date) => {
@@ -109,6 +135,100 @@ export default function DailyReportsPage({ onOpenTraceDrawer }) {
     });
   }, [records, categoryFilter, paymentFilter, search]);
 
+  // Selection handlers
+  const handleToggleSelectAll = () => {
+    if (selectedIds.size === filteredRecords.length && filteredRecords.length > 0) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filteredRecords.map(r => r.id).filter(Boolean)));
+    }
+  };
+
+  const handleToggleSelectRow = (id) => {
+    if (!id) return;
+    const next = new Set(selectedIds);
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      next.add(id);
+    }
+    setSelectedIds(next);
+  };
+
+  // 1. Delete Particular Date
+  const handleDeleteDateConfirm = async () => {
+    setActionLoading(true);
+    try {
+      const res = await deleteInstallationsByDate(selectedDate);
+      setShowDeleteDateModal(false);
+      setSelectedIds(new Set());
+      setStatusMessage({ type: 'success', text: res.message || `Deleted records for ${selectedDate}` });
+      await loadDailyLog(selectedDate);
+    } catch (err) {
+      alert('Failed to delete date records: ' + err.message);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // 2. Delete All Records Across All Dates
+  const handleDeleteAllConfirm = async () => {
+    if (confirmDeleteText.trim().toUpperCase() !== 'DELETE') {
+      alert('Please type DELETE in capital letters to confirm.');
+      return;
+    }
+    setActionLoading(true);
+    try {
+      const res = await clearAllInstallations();
+      setShowDeleteAllModal(false);
+      setConfirmDeleteText('');
+      setSelectedIds(new Set());
+      setStatusMessage({ type: 'success', text: res.message || 'All daily installation records cleared successfully.' });
+      await loadDailyLog(todayStr);
+    } catch (err) {
+      alert('Failed to clear all reports: ' + err.message);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // 3. Delete Single Record
+  const handleDeleteSingleConfirm = async () => {
+    if (!deletingItem) return;
+    setActionLoading(true);
+    try {
+      await deleteInstallation(deletingItem.id);
+      setDeletingItem(null);
+      const nextSelected = new Set(selectedIds);
+      nextSelected.delete(deletingItem.id);
+      setSelectedIds(nextSelected);
+      setStatusMessage({ type: 'success', text: `Deleted installation for vehicle ${deletingItem.vehicle_number || deletingItem.imei_number}` });
+      await loadDailyLog(selectedDate);
+    } catch (err) {
+      alert('Failed to delete installation: ' + err.message);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // 4. Bulk Delete Selected Rows
+  const handleBulkDeleteConfirm = async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    setActionLoading(true);
+    try {
+      const res = await bulkDeleteInstallations({ ids });
+      setShowBulkDeleteModal(false);
+      setSelectedIds(new Set());
+      setStatusMessage({ type: 'success', text: res.message || `Deleted ${ids.length} selected installations` });
+      await loadDailyLog(selectedDate);
+    } catch (err) {
+      alert('Failed to delete selected records: ' + err.message);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   // Export Selected Date Excel
   const handleExportDateExcel = async () => {
     try {
@@ -131,6 +251,21 @@ export default function DailyReportsPage({ onOpenTraceDrawer }) {
 
   return (
     <div className="space-y-5">
+      {/* Toast Notification Banner */}
+      {statusMessage && (
+        <div className={`p-3 rounded-xl border flex items-center justify-between text-xs font-semibold animate-fadeIn ${
+          statusMessage.type === 'success' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-red-50 text-red-800 border-red-200'
+        }`}>
+          <div className="flex items-center gap-2">
+            {statusMessage.type === 'success' ? <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" /> : <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />}
+            <span>{statusMessage.text}</span>
+          </div>
+          <button onClick={() => setStatusMessage(null)} className="p-1 hover:bg-black/5 rounded cursor-pointer">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* Top Header & Main Action Buttons */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
@@ -143,6 +278,7 @@ export default function DailyReportsPage({ onOpenTraceDrawer }) {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {/* Export Excel Button */}
           <button
             onClick={handleExportDateExcel}
             disabled={exporting || filteredRecords.length === 0}
@@ -153,12 +289,37 @@ export default function DailyReportsPage({ onOpenTraceDrawer }) {
             <span>📥 Export Date Excel ({filteredRecords.length})</span>
           </button>
 
+          {/* Upload Button */}
           <button
             onClick={() => setShowUploadModal(true)}
             className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-xs flex items-center gap-1.5 transition-colors cursor-pointer"
           >
             <Upload className="w-4 h-4" />
             <span>📊 Upload Daily Report (Excel)</span>
+          </button>
+
+          {/* Delete Particular Date Button */}
+          <button
+            onClick={() => setShowDeleteDateModal(true)}
+            disabled={records.length === 0}
+            className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold rounded-xl shadow-2xs flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+            title={`Delete all records for date ${dateSummary?.display_date || selectedDate}`}
+          >
+            <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+            <span>Delete Date ({records.length})</span>
+          </button>
+
+          {/* Delete All Button */}
+          <button
+            onClick={() => {
+              setConfirmDeleteText('');
+              setShowDeleteAllModal(true);
+            }}
+            className="px-3.5 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-xl shadow-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+            title="Clear all daily reports across all dates"
+          >
+            <ShieldAlert className="w-3.5 h-3.5" />
+            <span>Delete All</span>
           </button>
         </div>
       </div>
@@ -214,7 +375,7 @@ export default function DailyReportsPage({ onOpenTraceDrawer }) {
           ))}
         </div>
 
-        {/* Custom Date Input */}
+        {/* Custom Date Input & Refresh */}
         <div className="flex items-center gap-2">
           <div className="relative">
             <input
@@ -372,6 +533,33 @@ export default function DailyReportsPage({ onOpenTraceDrawer }) {
         </div>
       </div>
 
+      {/* Multi-Select Floating Action Bar */}
+      {selectedIds.size > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3.5 flex items-center justify-between gap-3 animate-fadeIn shadow-xs">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+            <span className="text-xs font-bold text-amber-900">
+              {selectedIds.size} {selectedIds.size === 1 ? 'record' : 'records'} selected
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSelectedIds(new Set())}
+              className="px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 text-xs font-semibold rounded-xl cursor-pointer"
+            >
+              Deselect All
+            </button>
+            <button
+              onClick={() => setShowBulkDeleteModal(true)}
+              className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-xl shadow-xs flex items-center gap-1.5 cursor-pointer"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Delete Selected ({selectedIds.size})</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Installations Table for Selected Date */}
       <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-2xs">
         {loading ? (
@@ -402,7 +590,16 @@ export default function DailyReportsPage({ onOpenTraceDrawer }) {
             <table className="w-full text-left border-collapse text-xs whitespace-nowrap">
               <thead className="bg-slate-50 text-slate-700 border-b border-slate-200 font-bold">
                 <tr>
-                  <th className="py-3 px-3.5 w-12 text-center">#</th>
+                  <th className="py-3 px-3 w-10 text-center">
+                    <input
+                      type="checkbox"
+                      checked={filteredRecords.length > 0 && selectedIds.size === filteredRecords.length}
+                      onChange={handleToggleSelectAll}
+                      className="rounded text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                      title="Select all"
+                    />
+                  </th>
+                  <th className="py-3 px-3 w-10 text-center">#</th>
                   <th className="py-3 px-3.5">Category</th>
                   <th className="py-3 px-3.5 font-mono">Vehicle Number</th>
                   <th className="py-3 px-3.5 font-mono">Device IMEI</th>
@@ -422,6 +619,7 @@ export default function DailyReportsPage({ onOpenTraceDrawer }) {
                   const payStatus = (inst.payment_status || 'RECEIVED').toUpperCase();
                   const isPaid = payStatus.includes('REC') || payStatus.includes('PAID');
                   const cat = (inst.category || 'VLTD').toUpperCase();
+                  const isSelected = selectedIds.has(inst.id);
 
                   let badgeClass = 'bg-blue-100 text-blue-800 border-blue-200';
                   if (cat.includes('TG MINING')) badgeClass = 'bg-amber-100 text-amber-900 border-amber-300';
@@ -429,8 +627,22 @@ export default function DailyReportsPage({ onOpenTraceDrawer }) {
                   else if (cat.includes('GENERAL')) badgeClass = 'bg-emerald-100 text-emerald-800 border-emerald-300';
 
                   return (
-                    <tr key={inst.id || idx} className="hover:bg-slate-50 transition-colors">
-                      <td className="py-3 px-3.5 text-center text-slate-400 font-mono text-[11px]">
+                    <tr
+                      key={inst.id || idx}
+                      className={`transition-colors ${isSelected ? 'bg-amber-50/60' : 'hover:bg-slate-50'}`}
+                    >
+                      {/* Checkbox */}
+                      <td className="py-3 px-3 text-center">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => handleToggleSelectRow(inst.id)}
+                          className="rounded text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                        />
+                      </td>
+
+                      {/* Index */}
+                      <td className="py-3 px-3 text-center text-slate-400 font-mono text-[11px]">
                         {idx + 1}
                       </td>
 
@@ -460,7 +672,7 @@ export default function DailyReportsPage({ onOpenTraceDrawer }) {
                         </button>
                       </td>
 
-                      {/* Customer Info (blank if not provided) */}
+                      {/* Customer Info */}
                       <td className="py-3 px-3.5">
                         {inst.customer_name && inst.customer_name !== 'Customer' ? (
                           <div className="font-bold text-slate-900">{inst.customer_name}</div>
@@ -526,7 +738,7 @@ export default function DailyReportsPage({ onOpenTraceDrawer }) {
                         )}
                       </td>
 
-                      {/* Customer Actions */}
+                      {/* Customer Actions & Delete */}
                       <td className="py-3 px-3.5 text-right sticky right-0 bg-white border-l border-slate-100">
                         <div className="flex items-center justify-end gap-1.5">
                           {inst.customer_contact && inst.customer_contact !== '9999999999' && (
@@ -550,10 +762,17 @@ export default function DailyReportsPage({ onOpenTraceDrawer }) {
                               setPaymentQrData(inst);
                               setIsPaymentQrOpen(true);
                             }}
-                            className="p-1 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                            className="p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
                             title="Open UPI Payment QR"
                           >
                             <QrCode className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => setDeletingItem(inst)}
+                            className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                            title={`Delete record for ${inst.vehicle_number || inst.imei_number}`}
+                          >
+                            <Trash2 className="w-4 h-4" />
                           </button>
                         </div>
                       </td>
@@ -565,6 +784,211 @@ export default function DailyReportsPage({ onOpenTraceDrawer }) {
           </div>
         )}
       </div>
+
+      {/* MODAL 1: Delete Particular Date Confirmation */}
+      {showDeleteDateModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fadeIn">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4">
+            <div className="flex items-center gap-3 text-rose-600">
+              <div className="p-3 bg-rose-100 rounded-xl">
+                <Trash2 className="w-6 h-6 text-rose-600" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Delete Date Records</h3>
+                <p className="text-xs text-slate-500">Date: {dateSummary?.display_date || selectedDate}</p>
+              </div>
+            </div>
+
+            <div className="p-4 bg-rose-50/70 border border-rose-200 rounded-xl space-y-2 text-xs text-rose-950">
+              <p className="font-semibold">
+                Are you sure you want to delete all <span className="underline font-black">{records.length} records</span> on {dateSummary?.display_date || selectedDate}?
+              </p>
+              <p className="text-[11px] text-rose-800/80 leading-relaxed">
+                This will remove the installation reports for this date. Linked direct entry devices will be cleared and warehouse stock will be reverted.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowDeleteDateModal(false)}
+                disabled={actionLoading}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-colors cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteDateConfirm}
+                disabled={actionLoading}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold shadow-xs flex items-center gap-2 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {actionLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                <span>Delete {records.length} Records</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 2: Delete All (Safety Confirmed Wipe) */}
+      {showDeleteAllModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-xs animate-fadeIn">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-red-200 space-y-4">
+            <div className="flex items-center gap-3 text-red-600">
+              <div className="p-3 bg-red-100 rounded-xl">
+                <AlertTriangle className="w-6 h-6 text-red-600" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Delete ALL Daily Reports</h3>
+                <p className="text-xs text-red-600 font-semibold">Danger: Master Clear Action</p>
+              </div>
+            </div>
+
+            <div className="p-4 bg-red-50 border border-red-200 rounded-xl space-y-2 text-xs text-red-950">
+              <p className="font-bold">
+                ⚠️ This will permanently delete ALL daily installation reports across ALL dates in the entire database.
+              </p>
+              <p className="text-[11px] text-red-800 leading-relaxed">
+                All daily upload logs and installation entries will be wiped. Inventory stock devices will be reverted to Central Warehouse.
+              </p>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-700 block">
+                Type <span className="font-mono text-red-600 bg-red-50 px-1.5 py-0.5 rounded border border-red-200">DELETE</span> below to confirm:
+              </label>
+              <input
+                type="text"
+                placeholder="DELETE"
+                value={confirmDeleteText}
+                onChange={(e) => setConfirmDeleteText(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-mono font-bold text-slate-900 focus:outline-hidden focus:border-red-500 uppercase"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowDeleteAllModal(false);
+                  setConfirmDeleteText('');
+                }}
+                disabled={actionLoading}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-colors cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteAllConfirm}
+                disabled={actionLoading || confirmDeleteText.trim().toUpperCase() !== 'DELETE'}
+                className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold shadow-xs flex items-center gap-2 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {actionLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <ShieldAlert className="w-4 h-4" />}
+                <span>Clear All Installation Reports</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 3: Delete Single Item Confirmation */}
+      {deletingItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fadeIn">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl border border-slate-200 space-y-4">
+            <div className="flex items-center gap-3 text-rose-600">
+              <div className="p-2.5 bg-rose-100 rounded-xl">
+                <Trash2 className="w-5 h-5 text-rose-600" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">Delete Installation</h3>
+                <p className="text-[11px] font-mono text-slate-500">{deletingItem.vehicle_number || deletingItem.imei_number}</p>
+              </div>
+            </div>
+
+            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-1">
+              <div className="flex justify-between">
+                <span className="text-slate-500">Vehicle:</span>
+                <span className="font-mono font-bold text-slate-800">{deletingItem.vehicle_number || '—'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">IMEI:</span>
+                <span className="font-mono font-bold text-blue-600">{deletingItem.imei_number}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Customer:</span>
+                <span className="font-bold text-slate-800">{deletingItem.customer_name || '—'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Category:</span>
+                <span className="font-bold text-slate-700">{deletingItem.category || 'VLTD'}</span>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setDeletingItem(null)}
+                disabled={actionLoading}
+                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteSingleConfirm}
+                disabled={actionLoading}
+                className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50"
+              >
+                {actionLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                <span>Delete Record</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 4: Bulk Delete Selected Rows Confirmation */}
+      {showBulkDeleteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fadeIn">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4">
+            <div className="flex items-center gap-3 text-rose-600">
+              <div className="p-3 bg-rose-100 rounded-xl">
+                <Trash2 className="w-6 h-6 text-rose-600" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Delete Selected Records</h3>
+                <p className="text-xs text-slate-500">{selectedIds.size} records selected</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Are you sure you want to permanently delete the <span className="font-bold text-slate-900">{selectedIds.size} selected installation records</span>?
+            </p>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowBulkDeleteModal(false)}
+                disabled={actionLoading}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleBulkDeleteConfirm}
+                disabled={actionLoading}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold shadow-xs flex items-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                {actionLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                <span>Delete {selectedIds.size} Records</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Daily Installation Upload Modal */}
       <DailyInstallationUploadModal

@@ -1701,4 +1701,292 @@ router.get('/export', async (req, res) => {
   }
 });
 
+/**
+ * Helper to clean or delete device after installation is removed
+ */
+function cleanDeviceAfterInstallationDelete(devId, imei) {
+  if (!devId && !imei) return;
+  try {
+    const dev = devId 
+      ? db.prepare('SELECT id, vendor_name, purchase_batch_id, additional_attributes FROM devices WHERE id = ?').get(devId)
+      : db.prepare('SELECT id, vendor_name, purchase_batch_id, additional_attributes FROM devices WHERE imei_number = ?').get(imei);
+    
+    if (!dev) return;
+
+    const inDispatch = db.prepare('SELECT id FROM dispatch_items WHERE device_id = ? LIMIT 1').get(dev.id);
+
+    // If it was created solely as a Direct Entry via daily upload and never had a purchase batch or dispatch
+    if (dev.vendor_name === 'Direct Entry' && !dev.purchase_batch_id && !inDispatch) {
+      db.prepare('DELETE FROM device_history WHERE device_id = ?').run(dev.id);
+      db.prepare('DELETE FROM devices WHERE id = ?').run(dev.id);
+    } else {
+      const keysToClean = [
+        'VEHICLE NUMBER', 'Vehicle Number', 'Vehicle ID', 'Vehicle No', 'VEHICLE NO', 'Reg No', 'vehicle_number', 'vehicle_no',
+        'MACHINERY NUMBER', 'EQUIPMENT NUMBER',
+        'CERTIFICATE ISSUED DATE', 'Certificate Issued Date', 'certificate_issued_date',
+        'CERTIFICATE DATE', 'Certificate Date', 'certificate_date',
+        'INSTALLATION DATE', 'Installation Date', 'installation_date',
+        'TG MINING DATE', 'TG_MINING_DATE', 'Tg Mining Date', 'tg_mining_date',
+        'MINING DATE', 'Mining Date', 'mining_date',
+        'CUSTOMER NAME', 'Customer Name', 'CERTIFICATE ISSUED TO', 'Certificate Issued To',
+        'CUSTOMER PHONE NUMBER', 'Customer Phone Number', 'CUSTOMER PHONE', 'Customer Phone',
+        'TECHNICIAN', 'INSTALLED BY', 'FITTER', 'SALES PERSON NAME',
+        'TOTAL COST', 'Total Cost', 'COST', 'Cost', 'SALE PRICE', 'Sale Price', 'PRICE', 'Price', 'INSTALLATION CHARGES',
+        'AMOUNT RECEIVED', 'Amount Received', 'PAYMENT STATUS', 'Payment Status', 'AMOUNT RECEIVED STATUS', 'AMOUNT RECEIVED BY',
+        'USERNAME', 'SOFTWARE USER ID', 'GPS USER ID', 'PASSWORD', 'SOFTWARE PASSWORD', 'GPS PASSWORD'
+      ];
+      let attrs = {};
+      try { attrs = JSON.parse(dev.additional_attributes || '{}'); } catch {}
+      for (const k of keysToClean) {
+        delete attrs[k];
+      }
+      attrs['STOCK PLACE'] = attrs['STOCK PLACE'] || 'Central Warehouse';
+      db.prepare(`
+        UPDATE devices 
+        SET current_status = 'IN_WAREHOUSE', 
+            current_holder_type = 'WAREHOUSE', 
+            current_holder_name = 'Central Warehouse', 
+            additional_attributes = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(JSON.stringify(attrs), dev.id);
+    }
+  } catch (err) {
+    console.warn('[cleanDeviceAfterInstallationDelete error]', err.message);
+  }
+}
+
+// DELETE /api/installations/clear-all - Delete ALL daily installation reports & records
+router.delete('/clear-all', (req, res) => {
+  try {
+    const { extractInstallationDate } = require('../db/syncFitments');
+
+    const transaction = db.transaction(() => {
+      // 1. Get all installations and linked devices
+      const allInsts = db.prepare('SELECT id, device_id, imei_number FROM installations').all();
+      const devIds = allInsts.map(i => i.device_id).filter(Boolean);
+      const imeis = allInsts.map(i => i.imei_number).filter(Boolean);
+
+      // 2. Delete all records from installations table
+      const deleteResult = db.prepare('DELETE FROM installations').run();
+
+      // 3. Find all devices that are marked INSTALLED or Direct Entry
+      const devices = db.prepare(`
+        SELECT id, imei_number, vendor_name, purchase_batch_id, additional_attributes 
+        FROM devices 
+        WHERE current_status = 'INSTALLED' 
+           OR vendor_name = 'Direct Entry'
+      `).all();
+
+      for (const dev of devices) {
+        cleanDeviceAfterInstallationDelete(dev.id, dev.imei_number);
+      }
+
+      for (const id of devIds) {
+        cleanDeviceAfterInstallationDelete(id, null);
+      }
+
+      for (const imei of imeis) {
+        cleanDeviceAfterInstallationDelete(null, imei);
+      }
+
+      return deleteResult.changes;
+    });
+
+    const deletedCount = transaction();
+
+    try {
+      const cloudSync = require('../db/cloudSync');
+      cloudSync.triggerDebouncedSync(1000);
+    } catch (e) {}
+
+    res.json({
+      success: true,
+      deleted_count: deletedCount,
+      message: `Successfully cleared all ${deletedCount} installation reports.`
+    });
+  } catch (err) {
+    console.error('[ClearAllInstallations Error]', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// DELETE /api/installations/by-date - Delete installation records for a specific date
+router.delete('/by-date', (req, res) => {
+  try {
+    const rawDate = req.query.date || req.body.date;
+    if (!rawDate) {
+      return res.status(400).json({ success: false, error: 'Date is required to delete daily records' });
+    }
+
+    const { standardizeDate, extractInstallationDate } = require('../db/syncFitments');
+    const targetDate = standardizeDate(rawDate);
+    
+    // Also support dd-mm-yyyy matching
+    let altDate = targetDate;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(targetDate)) {
+      const [y, m, d] = targetDate.split('-');
+      altDate = `${d}-${m}-${y}`;
+    } else if (/^\d{2}-\d{2}-\d{4}$/.test(targetDate)) {
+      const [d, m, y] = targetDate.split('-');
+      altDate = `${y}-${m}-${d}`;
+    }
+
+    const transaction = db.transaction(() => {
+      // Find all installations with this installation_date or matching date
+      const matchingInsts = db.prepare(`
+        SELECT i.id, i.device_id, i.imei_number, i.installation_date, d.additional_attributes, d.vendor_name, d.purchase_batch_id
+        FROM installations i
+        LEFT JOIN devices d ON i.device_id = d.id
+        WHERE i.installation_date = ? 
+           OR i.installation_date = ?
+           OR i.installation_date LIKE ?
+      `).all(targetDate, altDate, `%${targetDate}%`);
+
+      // Also find all devices whose extracted date matches targetDate
+      const allDevs = db.prepare('SELECT id, imei_number, vendor_name, purchase_batch_id, additional_attributes, current_status FROM devices').all();
+      const extraDevs = [];
+
+      for (const dev of allDevs) {
+        let attrs = {};
+        try { attrs = JSON.parse(dev.additional_attributes || '{}'); } catch {}
+        const devDate = extractInstallationDate(dev, attrs);
+        if (devDate === targetDate || devDate === altDate) {
+          extraDevs.push(dev);
+        }
+      }
+
+      const instIdsToDelete = new Set(matchingInsts.map(i => i.id));
+      
+      // Also match installations that have device_id in extraDevs
+      for (const ed of extraDevs) {
+        const found = db.prepare('SELECT id FROM installations WHERE device_id = ? OR imei_number = ?').all(ed.id, ed.imei_number);
+        for (const f of found) {
+          instIdsToDelete.add(f.id);
+        }
+      }
+
+      const deleteInstStmt = db.prepare('DELETE FROM installations WHERE id = ?');
+      for (const id of instIdsToDelete) {
+        deleteInstStmt.run(id);
+      }
+
+      // Clean up linked devices
+      const processedDevIds = new Set();
+      const allTargetDevs = [
+        ...matchingInsts.map(i => ({ id: i.device_id, imei_number: i.imei_number })),
+        ...extraDevs.map(d => ({ id: d.id, imei_number: d.imei_number }))
+      ].filter(d => d && (d.id || d.imei_number));
+
+      for (const dev of allTargetDevs) {
+        const key = dev.id ? `id_${dev.id}` : `imei_${dev.imei_number}`;
+        if (processedDevIds.has(key)) continue;
+        processedDevIds.add(key);
+        cleanDeviceAfterInstallationDelete(dev.id, dev.imei_number);
+      }
+
+      return instIdsToDelete.size;
+    });
+
+    const deletedCount = transaction();
+
+    try {
+      const cloudSync = require('../db/cloudSync');
+      cloudSync.triggerDebouncedSync(1000);
+    } catch (e) {}
+
+    res.json({
+      success: true,
+      deleted_count: deletedCount,
+      date: targetDate,
+      message: `Successfully deleted ${deletedCount} installation records for ${targetDate}.`
+    });
+  } catch (err) {
+    console.error('[DeleteByDate Error]', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/installations/bulk-delete - Delete multiple installations by IDs or IMEIs
+router.post('/bulk-delete', (req, res) => {
+  try {
+    const { ids = [], imeis = [] } = req.body;
+    if ((!ids || ids.length === 0) && (!imeis || imeis.length === 0)) {
+      return res.status(400).json({ success: false, error: 'No installations specified for deletion' });
+    }
+
+    const transaction = db.transaction(() => {
+      let insts = [];
+      if (ids && ids.length > 0) {
+        const placeholders = ids.map(() => '?').join(',');
+        insts = db.prepare(`SELECT i.id, i.device_id, i.imei_number FROM installations i WHERE i.id IN (${placeholders})`).all(...ids);
+      } else if (imeis && imeis.length > 0) {
+        const placeholders = imeis.map(() => '?').join(',');
+        insts = db.prepare(`SELECT i.id, i.device_id, i.imei_number FROM installations i WHERE i.imei_number IN (${placeholders})`).all(...imeis);
+      }
+
+      const deleteInstStmt = db.prepare('DELETE FROM installations WHERE id = ?');
+      let count = 0;
+
+      for (const inst of insts) {
+        deleteInstStmt.run(inst.id);
+        count++;
+        cleanDeviceAfterInstallationDelete(inst.device_id, inst.imei_number);
+      }
+
+      return count;
+    });
+
+    const deletedCount = transaction();
+
+    try {
+      const cloudSync = require('../db/cloudSync');
+      cloudSync.triggerDebouncedSync(1000);
+    } catch (e) {}
+
+    res.json({
+      success: true,
+      deleted_count: deletedCount,
+      message: `Deleted ${deletedCount} installations successfully.`
+    });
+  } catch (err) {
+    console.error('[BulkDeleteInstallations Error]', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// DELETE /api/installations/:id - Delete single installation
+router.delete('/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+    const inst = db.prepare(`
+      SELECT i.*, d.vendor_name, d.purchase_batch_id, d.additional_attributes
+      FROM installations i
+      LEFT JOIN devices d ON i.device_id = d.id
+      WHERE i.id = ?
+    `).get(id);
+
+    if (!inst) {
+      return res.status(404).json({ success: false, error: 'Installation record not found' });
+    }
+
+    const transaction = db.transaction(() => {
+      db.prepare('DELETE FROM installations WHERE id = ?').run(id);
+      cleanDeviceAfterInstallationDelete(inst.device_id, inst.imei_number);
+    });
+
+    transaction();
+
+    try {
+      const cloudSync = require('../db/cloudSync');
+      cloudSync.triggerDebouncedSync(1000);
+    } catch (e) {}
+
+    res.json({ success: true, message: 'Installation record deleted successfully.' });
+  } catch (err) {
+    console.error('[DeleteInstallation Error]', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;

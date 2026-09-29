@@ -25,9 +25,18 @@ import {
   ShieldCheck,
   HardHat,
   Truck,
-  Bell
+  Bell,
+  Trash2
 } from 'lucide-react';
-import { recordInstallation, recordBulkInstallations, fetchInstallations, lookupCustomerByPhone, getCustomerDirectoryExportUrl, fetchPendingPaymentAlerts } from '../services/api';
+import {
+  recordInstallation,
+  recordBulkInstallations,
+  fetchInstallations,
+  lookupCustomerByPhone,
+  getCustomerDirectoryExportUrl,
+  fetchPendingPaymentAlerts,
+  deleteInstallation
+} from '../services/api';
 import { buildCustomerCredentialsWhatsAppMessage, buildPaymentQrWhatsAppMessage, buildPaymentReceivedWhatsAppMessage } from '../utils/whatsapp';
 import { exportInstallationsToExcel } from '../utils/excelExport';
 import PaymentQrModal from '../components/PaymentQrModal';
@@ -104,6 +113,21 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
       console.error(err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDeleteRecord = async (inst) => {
+    const vName = inst.vehicle_number || inst.imei_number;
+    if (!window.confirm(`Are you sure you want to delete installation for ${vName}?`)) {
+      return;
+    }
+    try {
+      await deleteInstallation(inst.id);
+      setSuccessToast(`Installation for ${vName} deleted successfully`);
+      loadData();
+      loadPendingAlerts();
+    } catch (err) {
+      alert('Failed to delete installation: ' + err.message);
     }
   };
 
@@ -935,6 +959,15 @@ export default function InstallationPage({ onOpenScannerWithCallback, onOpenTrac
                             title="Generate & View UPI Payment QR Code"
                           >
                             <QrCode className="w-3.5 h-3.5 text-emerald-400" />
+                          </button>
+
+                          {/* Delete Installation Record */}
+                          <button
+                            onClick={() => handleDeleteRecord(inst)}
+                            className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl text-[11px] font-bold inline-flex items-center shadow-2xs transition-colors cursor-pointer border border-rose-200"
+                            title="Delete this installation record"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </div>
                       </td>

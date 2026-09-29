@@ -304,6 +304,44 @@ export async function fetchDailyInstallationLog(params = {}) {
   return res.json();
 }
 
+export async function deleteInstallationsByDate(date) {
+  const res = await fetch(`${API_BASE}/installations/by-date?date=${encodeURIComponent(date)}`, {
+    method: 'DELETE'
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) throw new Error(data.error || 'Failed to delete records for date');
+  return data;
+}
+
+export async function clearAllInstallations() {
+  const res = await fetch(`${API_BASE}/installations/clear-all`, {
+    method: 'DELETE'
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) throw new Error(data.error || 'Failed to clear all installation reports');
+  return data;
+}
+
+export async function bulkDeleteInstallations(payload = {}) {
+  const res = await fetch(`${API_BASE}/installations/bulk-delete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) throw new Error(data.error || 'Failed to delete selected installations');
+  return data;
+}
+
+export async function deleteInstallation(id) {
+  const res = await fetch(`${API_BASE}/installations/${id}`, {
+    method: 'DELETE'
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) throw new Error(data.error || 'Failed to delete installation');
+  return data;
+}
+
 export async function fetchInstallations(params = {}) {
   const query = new URLSearchParams(params).toString();
   const res = await fetch(`${API_BASE}/installations?${query}`);
