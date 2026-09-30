@@ -1540,16 +1540,16 @@ export default function InventoryPage({ onOpenTraceDrawer, initialFilter, onClea
     }
 
     // 4. Customer Name
-    let custName = dev.customer_name && dev.customer_name !== '-' && !/fuelview/i.test(dev.customer_name) ? String(dev.customer_name).trim() : '';
+    let custName = dev.customer_name && dev.customer_name !== '-' && !/fuelview|customer/i.test(dev.customer_name) ? String(dev.customer_name).trim() : '';
     if (!custName) {
       for (const k of keys) {
-        if (/customer.*name|cert.*issued.*to|party.*name/i.test(k.trim()) && attrs[k] && !/fuelview/i.test(String(attrs[k]))) {
+        if (/customer.*name|cert.*issued.*to|party.*name/i.test(k.trim()) && attrs[k] && !/fuelview|customer/i.test(String(attrs[k]))) {
           custName = String(attrs[k]).trim();
           break;
         }
       }
     }
-    if (!custName) custName = 'Customer';
+    if (/^(customer|valued customer|client|party|-|—|na|n\/a)$/i.test(custName)) custName = '';
 
     // 5. Cost, GST & Total Cost
     let baseCost = 0;

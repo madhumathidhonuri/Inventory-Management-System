@@ -10,11 +10,35 @@ export function formatINR(val) {
   return `₹${Math.round(num).toLocaleString('en-IN')}`;
 }
 
-// Helper to format Excel serial numbers or standard date strings into clean DD-MM-YYYY
+// Helper to format Excel serial numbers, dates, or suppress dummy placeholder values like Customer, 9999999999, Field Site
 export function formatDisplayCellValue(headerName, rawVal) {
   if (rawVal === undefined || rawVal === null) return '-';
   const str = String(rawVal).trim();
-  if (!str || str === '-') return '-';
+  if (!str || str === '-' || str === '—' || str.toLowerCase() === 'null' || str.toLowerCase() === 'undefined') return '-';
+
+  const cleanHeader = String(headerName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+  // Filter out dummy/placeholder customer names
+  if (cleanHeader.includes('customer') || cleanHeader.includes('party') || cleanHeader.includes('client') || cleanHeader.includes('owner') || cleanHeader.includes('name')) {
+    if (/^(customer|valued customer|client|party|na|n\/a)$/i.test(str)) {
+      return '-';
+    }
+  }
+
+  // Filter out dummy/placeholder phone numbers
+  if (cleanHeader.includes('phone') || cleanHeader.includes('mobile') || cleanHeader.includes('contact')) {
+    const cleanDigits = str.replace(/\D/g, '');
+    if (cleanDigits === '9999999999' || cleanDigits === '0000000000' || cleanDigits === '1234567890' || str.toLowerCase() === 'customer') {
+      return '-';
+    }
+  }
+
+  // Filter out dummy location placeholders
+  if (cleanHeader.includes('location') || cleanHeader.includes('rto') || cleanHeader.includes('site')) {
+    if (str.toLowerCase() === 'field site') {
+      return '-';
+    }
+  }
 
   // Check if header is related to date / timestamp / validity
   if (/date|month|validity|timestamp|time/i.test(headerName)) {

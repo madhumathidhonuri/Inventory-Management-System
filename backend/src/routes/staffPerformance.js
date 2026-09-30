@@ -178,12 +178,12 @@ function getUnifiedStaffRecords(startDate, endDate) {
       installed_by: tech,
       sales_manager: (item.sales_manager || '').trim() || 'Direct / Unassigned',
       sales_person: (item.sales_person || '').trim() || 'Unassigned',
-      customer_name: item.customer_name || 'Customer',
-      customer_contact: item.customer_contact || '',
+      customer_name: (item.customer_name && !/^(customer|valued customer|client|party|-|—|na|n\/a)$/i.test(item.customer_name.trim())) ? item.customer_name.trim() : '—',
+      customer_contact: (item.customer_contact && !/^(9999999999|0000000000|1234567890)$/.test(item.customer_contact.replace(/\D/g, ''))) ? item.customer_contact.trim() : '',
       vehicle_number: item.vehicle_number || '—',
       vehicle_type: item.vehicle_type || 'Vehicle',
       sale_price: parseFloat(item.sale_price) || 0,
-      installation_location: item.installation_location || 'Field',
+      installation_location: (item.installation_location && !/^(field site|field|-|—|na|n\/a)$/i.test(item.installation_location.trim())) ? item.installation_location.trim() : '',
       remarks: item.remarks || '',
       created_at: item.created_at,
       device_type_name: item.device_type_name || 'GPS Tracker'
@@ -274,9 +274,15 @@ function getUnifiedStaffRecords(startDate, endDate) {
         installation_date: date,
         installed_by: finalTech || 'Technician',
         sales_manager: sm || 'Direct / Unassigned',
-        sales_person: sp || 'Unassigned',
-        customer_name: attrs['CUSTOMER NAME'] || attrs['Customer Name'] || attrs['CERTIFICATE ISSUED TO'] || attrs['MINING SITE'] || attrs['SITE NAME'] || 'Customer',
-        customer_contact: attrs['CUSTOMER PHONE NUMBER'] || attrs['Customer Phone Number'] || attrs['CUSTOMER PHONE'] || attrs['Customer Phone'] || attrs['CUSTOMER CONTACT'] || attrs['Customer Contact'] || attrs['MOBILE'] || attrs['PHONE'] || '',
+        customer_name: (() => {
+          const raw = attrs['CUSTOMER NAME'] || attrs['Customer Name'] || attrs['CERTIFICATE ISSUED TO'] || attrs['MINING SITE'] || attrs['SITE NAME'] || '';
+          return (/^(customer|valued customer|client|party|-|—|na|n\/a)$/i.test(String(raw).trim())) ? '—' : String(raw).trim() || '—';
+        })(),
+        customer_contact: (() => {
+          const raw = attrs['CUSTOMER PHONE NUMBER'] || attrs['Customer Phone Number'] || attrs['CUSTOMER PHONE'] || attrs['Customer Phone'] || attrs['CUSTOMER CONTACT'] || attrs['Customer Contact'] || attrs['MOBILE'] || attrs['PHONE'] || '';
+          const digits = String(raw).replace(/\D/g, '');
+          return (digits === '9999999999' || digits === '0000000000' || digits === '1234567890') ? '' : String(raw).trim();
+        })(),
         vehicle_number: (vehNo && vehNo !== '-' && vehNo !== '—') ? vehNo : '—',
         vehicle_type: attrs['CATEGORY'] || attrs['DEVICE CATEGORY'] || attrs['Category'] || 'Vehicle',
         sale_price: cost,

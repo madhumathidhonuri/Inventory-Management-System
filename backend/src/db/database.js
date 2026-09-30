@@ -517,6 +517,105 @@ function initDatabase() {
   } catch (e) {
     console.warn('[Database] Cleanup ghost columns warning:', e.message);
   }
+
+  // Automatically purge legacy dummy placeholder data ("Customer", "9999999999", "Field Site") from database
+  try {
+    // 1. Clean installations table
+    db.prepare(`
+      UPDATE installations
+      SET customer_name = NULL
+      WHERE customer_name IS NOT NULL AND LOWER(TRIM(customer_name)) IN ('customer', 'valued customer', 'client', 'party', '-', '—', 'na', 'n/a');
+    `).run();
+
+    db.prepare(`
+      UPDATE installations
+      SET customer_contact = NULL
+      WHERE customer_contact IS NOT NULL AND TRIM(customer_contact) IN ('9999999999', '0000000000', '1234567890', 'Customer', 'customer', '-', '—');
+    `).run();
+
+    db.prepare(`
+      UPDATE installations
+      SET installation_location = NULL
+      WHERE installation_location IS NOT NULL AND LOWER(TRIM(installation_location)) IN ('field site', '-', '—', 'na', 'n/a');
+    `).run();
+
+    // 2. Unlink dummy customer IDs from installations and remove dummy customer rows
+    const dummyCustIds = db.prepare(`
+      SELECT id FROM customers
+      WHERE LOWER(TRIM(name)) IN ('customer', 'valued customer', 'client', 'party', '-', '—')
+         OR TRIM(phone_number) IN ('9999999999', '0000000000', '1234567890')
+         OR phone_number LIKE 'WALKIN_%';
+    `).all().map(c => c.id);
+
+    if (dummyCustIds.length > 0) {
+      const phs = dummyCustIds.map(() => '?').join(',');
+      db.prepare(`UPDATE installations SET customer_id = NULL WHERE customer_id IN (${phs})`).run(...dummyCustIds);
+      db.prepare(`DELETE FROM customers WHERE id IN (${phs})`).run(...dummyCustIds);
+    }
+
+    // 3. Clean devices additional_attributes and current_holder_name
+    const devsToClean = db.prepare(`
+      SELECT id, current_holder_name, additional_attributes
+      FROM devices
+      WHERE additional_attributes LIKE '%Customer%'
+         OR additional_attributes LIKE '%9999999999%'
+         OR additional_attributes LIKE '%Field Site%'
+         OR current_holder_name LIKE 'Customer%'
+    `).all();
+
+    const updateDevAttrsStmt = db.prepare('UPDATE devices SET current_holder_name = ?, additional_attributes = ? WHERE id = ?');
+
+    let cleanedDevCount = 0;
+    for (const dev of devsToClean) {
+      let attrs = {};
+      try { attrs = JSON.parse(dev.additional_attributes || '{}'); } catch { attrs = {}; }
+      let modified = false;
+
+      // Clean dummy customer names in attrs
+      ['CUSTOMER NAME', 'Customer Name', 'CUSTOMER', 'Customer', 'Party Name', 'PARTY NAME', 'client_name', 'owner_name'].forEach(k => {
+        if (attrs[k] && /^(customer|valued customer|client|party|-|—|na|n\/a)$/i.test(String(attrs[k]).trim())) {
+          delete attrs[k];
+          modified = true;
+        }
+      });
+
+      // Clean dummy phone numbers in attrs
+      ['CUSTOMER PHONE NUMBER', 'Customer Phone Number', 'CUSTOMER PHONE', 'Customer Phone', 'Phone Number', 'phone_number', 'MOBILE NUMBER', 'Phone', 'CUSTOMER CONTACT'].forEach(k => {
+        if (attrs[k] && (/^9999999999$|^0000000000$|^1234567890$|^customer$/i.test(String(attrs[k]).trim()) || String(attrs[k]).replace(/\D/g, '') === '9999999999')) {
+          delete attrs[k];
+          modified = true;
+        }
+      });
+
+      // Clean dummy location in attrs
+      ['RTO LOCATION', 'LOCATION', 'Location', 'rto_location', 'site_name', 'SITE NAME'].forEach(k => {
+        if (attrs[k] && /^(field site|-|—|na|n\/a)$/i.test(String(attrs[k]).trim())) {
+          delete attrs[k];
+          modified = true;
+        }
+      });
+
+      // Clean current_holder_name
+      let holder = dev.current_holder_name || '';
+      if (/^Customer\s*\((.*)\)$/i.test(holder)) {
+        holder = holder.replace(/^Customer\s*\((.*)\)$/i, '$1').trim();
+        modified = true;
+      } else if (/^Customer$/i.test(holder)) {
+        holder = attrs['VEHICLE NUMBER'] || attrs['STOCK PLACE'] || '';
+        modified = true;
+      }
+
+      if (modified) {
+        updateDevAttrsStmt.run(holder, JSON.stringify(attrs), dev.id);
+        cleanedDevCount++;
+      }
+    }
+    if (cleanedDevCount > 0) {
+      console.log(`[Database] Purged dummy placeholder values (Customer, 9999999999, Field Site) from ${cleanedDevCount} device records.`);
+    }
+  } catch (e) {
+    console.warn('[Database] Cleanup dummy data warning:', e.message);
+  }
 }
 
 initDatabase();

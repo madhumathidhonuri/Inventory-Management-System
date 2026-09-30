@@ -292,10 +292,10 @@ function syncFitmentsToInstallations(dbParam) {
           } else {
             try {
               const custRes = insertCustomerStmt.run(
-                customerName || 'Customer',
+                customerName || '',
                 customerPhone,
                 attrs['EMAIL ID'] || null,
-                location || null,
+                location && location !== 'Field Site' ? location : null,
                 attrs['AADHAR NUMBER'] || null,
                 attrs['PAN CARD'] || attrs['PAN NUMBER'] || null,
                 softwareUser,
