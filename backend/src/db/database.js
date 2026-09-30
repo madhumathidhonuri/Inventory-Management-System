@@ -188,7 +188,7 @@ function initDatabase() {
     CREATE TABLE IF NOT EXISTS customers (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
-      phone_number TEXT UNIQUE NOT NULL,
+      phone_number TEXT UNIQUE,
       alternate_phone TEXT,
       email TEXT,
       address TEXT,
@@ -199,19 +199,19 @@ function initDatabase() {
 
     CREATE TABLE IF NOT EXISTS installations (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      device_id INTEGER NOT NULL,
+      device_id INTEGER,
       imei_number TEXT NOT NULL,
-      customer_id INTEGER NOT NULL,
+      customer_id INTEGER,
       installation_date TEXT NOT NULL,
-      installed_by TEXT NOT NULL,
+      installed_by TEXT DEFAULT 'Technician',
       sales_manager TEXT,
       sales_person TEXT,
-      customer_name TEXT NOT NULL,
-      customer_contact TEXT NOT NULL,
-      vehicle_number TEXT NOT NULL,
+      customer_name TEXT,
+      customer_contact TEXT,
+      vehicle_number TEXT,
       vehicle_type TEXT DEFAULT 'Car',
       sale_price REAL DEFAULT 0,
-      installation_location TEXT NOT NULL,
+      installation_location TEXT,
       remarks TEXT,
       warranty_end_date TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -373,6 +373,70 @@ function initDatabase() {
     }
   } catch (e) {
     console.warn('[Database] Expenses migration notice:', e.message);
+  }
+
+  // Installations Schema Migration: Relax NOT NULL constraints on customer_id, customer_name, vehicle_number etc.
+  try {
+    const instTableInfo = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='installations'").get();
+    if (instTableInfo && instTableInfo.sql && (instTableInfo.sql.includes('customer_id INTEGER NOT NULL') || instTableInfo.sql.includes('customer_name TEXT NOT NULL') || instTableInfo.sql.includes('customer_contact TEXT NOT NULL') || instTableInfo.sql.includes('installation_location TEXT NOT NULL'))) {
+      const existingCols = db.prepare("PRAGMA table_info(installations)").all().map(c => c.name);
+      const targetCols = [
+        'id', 'device_id', 'imei_number', 'customer_id', 'installation_date', 'installed_by',
+        'sales_manager', 'sales_person', 'customer_name', 'customer_contact',
+        'vehicle_number', 'vehicle_type', 'sale_price', 'installation_location',
+        'remarks', 'warranty_end_date', 'software_user_id', 'software_password',
+        'payment_status', 'amount_paid', 'payment_date', 'payment_mode', 'utr_number',
+        'payment_remarks', 'aadhar_number', 'pan_number', 'chasis_number', 'engine_number',
+        'amc_due_date', 'sim_expiry_date', 'created_at'
+      ];
+      const commonCols = targetCols.filter(c => existingCols.includes(c));
+      const colListStr = commonCols.join(', ');
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS installations_v2 (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          device_id INTEGER,
+          imei_number TEXT NOT NULL,
+          customer_id INTEGER,
+          installation_date TEXT NOT NULL,
+          installed_by TEXT DEFAULT 'Technician',
+          sales_manager TEXT,
+          sales_person TEXT,
+          customer_name TEXT,
+          customer_contact TEXT,
+          vehicle_number TEXT,
+          vehicle_type TEXT DEFAULT 'Car',
+          sale_price REAL DEFAULT 0,
+          installation_location TEXT,
+          remarks TEXT,
+          warranty_end_date TEXT,
+          software_user_id TEXT,
+          software_password TEXT,
+          payment_status TEXT DEFAULT 'PENDING',
+          amount_paid REAL DEFAULT NULL,
+          payment_date TEXT,
+          payment_mode TEXT DEFAULT 'UPI',
+          utr_number TEXT,
+          payment_remarks TEXT,
+          aadhar_number TEXT,
+          pan_number TEXT,
+          chasis_number TEXT,
+          engine_number TEXT,
+          amc_due_date TEXT,
+          sim_expiry_date TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (device_id) REFERENCES devices(id),
+          FOREIGN KEY (customer_id) REFERENCES customers(id)
+        );
+        INSERT INTO installations_v2 (${colListStr})
+        SELECT ${colListStr} FROM installations;
+        DROP TABLE installations;
+        ALTER TABLE installations_v2 RENAME TO installations;
+      `);
+      console.log('[Database] Migrated installations table to flexible nullable schema successfully.');
+    }
+  } catch (e) {
+    console.warn('[Database] Installations migration notice:', e.message);
   }
 
   try { db.exec("ALTER TABLE expenses ADD COLUMN sub_category TEXT;"); } catch (e) { }

@@ -343,6 +343,7 @@ function syncFitmentsToInstallations(dbParam) {
             customerName || null,
             customerPhone || null,
             effectiveVehicle,
+            category,
             salePrice,
             paymentStatus,
             softwareUser,
