@@ -27,9 +27,14 @@ import MarkPaymentModal from '../components/MarkPaymentModal';
 import * as XLSX from 'xlsx';
 
 export default function PendingPaymentsPage({ onOpenTraceDrawer }) {
+  const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
+  const yesterdayStr = useMemo(() => new Date(Date.now() - 86400000).toISOString().split('T')[0], []);
+
   const [loading, setLoading] = useState(true);
   const [alertsData, setAlertsData] = useState(null);
-  const [selectedMonth, setSelectedMonth] = useState('ALL');
+  const [dateFilterMode, setDateFilterMode] = useState('ALL'); // 'ALL' | 'TODAY' | 'YESTERDAY' | 'CUSTOM'
+  const [startDate, setStartDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [endDate, setEndDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedQrItem, setSelectedQrItem] = useState(null);
   const [selectedPayItem, setSelectedPayItem] = useState(null);
@@ -46,14 +51,6 @@ export default function PendingPaymentsPage({ onOpenTraceDrawer }) {
       const res = await fetchPendingPaymentAlerts();
       if (res.success) {
         setAlertsData(res);
-        // Default to current month if available and month not explicitly set
-        if (res.summary?.current_month && selectedMonth === 'ALL') {
-          // Check if current month exists in available months
-          const hasCurrentMonth = (res.available_months || []).some(m => m.month === res.summary.current_month);
-          if (hasCurrentMonth) {
-            setSelectedMonth(res.summary.current_month);
-          }
-        }
       }
     } catch (err) {
       console.warn('Failed to load pending payments:', err);
@@ -81,14 +78,23 @@ export default function PendingPaymentsPage({ onOpenTraceDrawer }) {
 
   const summary = alertsData?.summary || {};
   const allItems = alertsData?.data || [];
-  const availableMonths = alertsData?.available_months || [];
   const rawDateGroups = alertsData?.date_groups || [];
 
-  // Filter items based on selected month & search query
+  // Filter items based on selected date mode & search query
   const filteredDateGroups = useMemo(() => {
     return rawDateGroups
       .filter(g => {
-        if (selectedMonth !== 'ALL' && g.month !== selectedMonth) return false;
+        const gDate = g.date; // YYYY-MM-DD
+        if (dateFilterMode === 'ALL') return true;
+        if (dateFilterMode === 'TODAY') return gDate === todayStr;
+        if (dateFilterMode === 'YESTERDAY') return gDate === yesterdayStr;
+        if (dateFilterMode === 'CUSTOM') {
+          if (startDate && endDate) {
+            return gDate >= startDate && gDate <= endDate;
+          }
+          if (startDate) return gDate >= startDate;
+          if (endDate) return gDate <= endDate;
+        }
         return true;
       })
       .map(g => {
@@ -109,7 +115,7 @@ export default function PendingPaymentsPage({ onOpenTraceDrawer }) {
         };
       })
       .filter(g => g.filteredItems.length > 0);
-  }, [rawDateGroups, selectedMonth, searchQuery]);
+  }, [rawDateGroups, dateFilterMode, startDate, endDate, searchQuery, todayStr, yesterdayStr]);
 
   // Compute stats for current selected month view
   const currentViewStats = useMemo(() => {
@@ -161,7 +167,7 @@ export default function PendingPaymentsPage({ onOpenTraceDrawer }) {
     const ws = XLSX.utils.json_to_sheet(dataToExport);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Pending Payments');
-    XLSX.writeFile(wb, `Pending_Payments_${selectedMonth}_${new Date().toISOString().split('T')[0]}.xlsx`);
+    XLSX.writeFile(wb, `Pending_Payments_${dateFilterMode}_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
   return (
@@ -180,7 +186,7 @@ export default function PendingPaymentsPage({ onOpenTraceDrawer }) {
             </span>
           </div>
           <p className="text-xs text-slate-500 mt-1">
-            Track daily installations vs uncollected payments month-by-month and send instant WhatsApp reminders
+            Track daily installations vs uncollected payments with quick Today/Yesterday and Custom filters
           </p>
         </div>
 
@@ -212,23 +218,23 @@ export default function PendingPaymentsPage({ onOpenTraceDrawer }) {
         </div>
       )}
 
-      {/* Month Selector & Filter Controls Bar */}
+      {/* Date Filter & Search Controls Bar */}
       <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs space-y-3">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
           
-          {/* Month Selector Pills */}
-          <div className="flex items-center space-x-1.5 overflow-x-auto pb-1 md:pb-0">
+          {/* Quick Date Mode Pills & Custom Range */}
+          <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1 mr-1">
               <Calendar className="w-3.5 h-3.5 text-slate-400" />
-              <span>Month:</span>
+              <span>Filter:</span>
             </span>
 
-            {/* Current Month & All Month buttons */}
+            {/* All Records button */}
             <button
               type="button"
-              onClick={() => setSelectedMonth('ALL')}
+              onClick={() => setDateFilterMode('ALL')}
               className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
-                selectedMonth === 'ALL'
+                dateFilterMode === 'ALL'
                   ? 'bg-slate-900 text-white shadow-xs'
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
               }`}
@@ -236,25 +242,74 @@ export default function PendingPaymentsPage({ onOpenTraceDrawer }) {
               All Records ({summary.total_pending_count || 0})
             </button>
 
-            {availableMonths.map(m => (
-              <button
-                key={m.month}
-                type="button"
-                onClick={() => setSelectedMonth(m.month)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
-                  selectedMonth === m.month
-                    ? 'bg-amber-600 text-white shadow-sm shadow-amber-200'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                <span>{m.month_label}</span>
-                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
-                  selectedMonth === m.month ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
-                }`}>
-                  {m.pending_count} Due
-                </span>
-              </button>
-            ))}
+            {/* Today button */}
+            <button
+              type="button"
+              onClick={() => setDateFilterMode('TODAY')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
+                dateFilterMode === 'TODAY'
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              <Calendar className="w-3.5 h-3.5" />
+              <span>Today</span>
+            </button>
+
+            {/* Yesterday button */}
+            <button
+              type="button"
+              onClick={() => setDateFilterMode('YESTERDAY')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
+                dateFilterMode === 'YESTERDAY'
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              <Calendar className="w-3.5 h-3.5" />
+              <span>Yesterday</span>
+            </button>
+
+            {/* Custom Date Range button */}
+            <button
+              type="button"
+              onClick={() => setDateFilterMode('CUSTOM')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
+                dateFilterMode === 'CUSTOM'
+                  ? 'bg-amber-600 text-white shadow-sm shadow-amber-200'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              <Filter className="w-3.5 h-3.5" />
+              <span>Custom Range</span>
+            </button>
+
+            {/* Date Range Picker if in CUSTOM mode */}
+            {dateFilterMode === 'CUSTOM' && (
+              <div className="flex items-center gap-2 bg-slate-50 p-1 border border-slate-200 rounded-xl">
+                <div className="flex items-center gap-1 text-xs text-slate-600 font-semibold px-1">
+                  <span className="text-[10px] text-slate-400 uppercase">From</span>
+                  <input
+                    type="date"
+                    value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)}
+                    className="bg-white border border-slate-200 rounded-lg px-2 py-0.5 text-xs font-bold text-slate-800 focus:outline-hidden focus:border-amber-500 cursor-pointer font-mono shadow-2xs"
+                  />
+                </div>
+
+                <span className="text-slate-400 font-bold text-xs">→</span>
+
+                <div className="flex items-center gap-1 text-xs text-slate-600 font-semibold px-1">
+                  <span className="text-[10px] text-slate-400 uppercase">To</span>
+                  <input
+                    type="date"
+                    value={endDate}
+                    onChange={(e) => setEndDate(e.target.value)}
+                    className="bg-white border border-slate-200 rounded-lg px-2 py-0.5 text-xs font-bold text-slate-800 focus:outline-hidden focus:border-amber-500 cursor-pointer font-mono shadow-2xs"
+                  />
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Search Box */}
@@ -279,7 +334,7 @@ export default function PendingPaymentsPage({ onOpenTraceDrawer }) {
 
         </div>
 
-        {/* Selected Month Summary Ribbon */}
+        {/* Selected View Summary Ribbon */}
         <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3 text-xs">
           <div className="flex items-center gap-4 text-slate-600">
             <span>
