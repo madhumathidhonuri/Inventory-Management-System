@@ -46,7 +46,11 @@ import PaymentQrModal from '../components/PaymentQrModal';
 import { buildCustomerCredentialsWhatsAppMessage, buildPaymentQrWhatsAppMessage } from '../utils/whatsapp';
 
 export default function DailyReportsPage({ onOpenTraceDrawer }) {
+  const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
+  const [dateMode, setDateMode] = useState('TODAY'); // 'TODAY' | 'CUSTOM_RANGE'
   const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [startDate, setStartDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [endDate, setEndDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [availableDates, setAvailableDates] = useState([]);
   const [dateSummary, setDateSummary] = useState(null);
   const [records, setRecords] = useState([]);
@@ -76,21 +80,32 @@ export default function DailyReportsPage({ onOpenTraceDrawer }) {
   const [isPaymentQrOpen, setIsPaymentQrOpen] = useState(false);
 
   useEffect(() => {
-    loadDailyLog(selectedDate);
+    if (dateMode === 'CUSTOM_RANGE') {
+      loadDailyLog({ startDate, endDate });
+    } else {
+      loadDailyLog({ date: selectedDate });
+    }
     setSelectedIds(new Set());
-  }, [selectedDate]);
+  }, [dateMode, selectedDate, startDate, endDate]);
 
-  const loadDailyLog = async (date) => {
+  const loadDailyLog = async (params = {}) => {
     setLoading(true);
     try {
-      const res = await fetchDailyInstallationLog({ date: date || '' });
+      let queryParams = {};
+      if (params.startDate && params.endDate) {
+        queryParams = { startDate: params.startDate, endDate: params.endDate };
+      } else if (params.date) {
+        queryParams = { date: params.date };
+      } else if (dateMode === 'CUSTOM_RANGE') {
+        queryParams = { startDate, endDate };
+      } else {
+        queryParams = { date: selectedDate };
+      }
+      const res = await fetchDailyInstallationLog(queryParams);
       if (res.success) {
         setAvailableDates(res.available_dates || []);
         setDateSummary(res.date_summary || null);
         setRecords(res.records || []);
-        if (res.active_date && res.active_date !== selectedDate) {
-          setSelectedDate(res.active_date);
-        }
       }
     } catch (err) {
       console.error('Failed to load daily log:', err);
@@ -98,9 +113,6 @@ export default function DailyReportsPage({ onOpenTraceDrawer }) {
       setLoading(false);
     }
   };
-
-  const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
-  const yesterdayStr = useMemo(() => new Date(Date.now() - 86400000).toISOString().split('T')[0], []);
 
   // Filtered Records for Selected Date
   const filteredRecords = useMemo(() => {
@@ -311,67 +323,98 @@ export default function DailyReportsPage({ onOpenTraceDrawer }) {
       </div>
 
       {/* Date Navigation & Selector Ribbon */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-2xs flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-        {/* Quick Date Pills & Custom Date Picker */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+        {/* Quick Date Mode Switcher */}
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs font-bold text-slate-400 uppercase tracking-wider mr-1 flex items-center gap-1">
             <Clock className="w-3.5 h-3.5 text-slate-500" /> Select Date:
           </span>
 
           <button
-            onClick={() => setSelectedDate(todayStr)}
-            className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all cursor-pointer ${selectedDate === todayStr
+            type="button"
+            onClick={() => {
+              setDateMode('TODAY');
+              setSelectedDate(todayStr);
+              setStartDate(todayStr);
+              setEndDate(todayStr);
+            }}
+            className={`px-3.5 py-1.5 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5 ${dateMode === 'TODAY'
                 ? 'bg-emerald-600 text-white shadow-xs'
                 : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
               }`}
           >
-            Today
+            <Calendar className="w-3.5 h-3.5" />
+            <span>Today</span>
           </button>
 
           <button
-            onClick={() => setSelectedDate(yesterdayStr)}
-            className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all cursor-pointer ${selectedDate === yesterdayStr
-                ? 'bg-emerald-600 text-white shadow-xs'
+            type="button"
+            onClick={() => setDateMode('CUSTOM_RANGE')}
+            className={`px-3.5 py-1.5 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5 ${dateMode === 'CUSTOM_RANGE'
+                ? 'bg-slate-900 text-white shadow-xs'
                 : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
               }`}
           >
-            Yesterday
+            <Filter className="w-3.5 h-3.5" />
+            <span>Custom Date Range</span>
           </button>
-
-          {/* Quick Recent Dates Horizontal List */}
-          {availableDates.slice(0, 5).map(d => (
-            <button
-              key={d.date}
-              onClick={() => setSelectedDate(d.date)}
-              className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all cursor-pointer hidden sm:inline-flex items-center gap-1.5 ${selectedDate === d.date
-                  ? 'bg-slate-900 text-white shadow-xs'
-                  : 'bg-slate-50 border border-slate-200 text-slate-600 hover:bg-slate-100'
-                }`}
-            >
-              <span>{d.display_date}</span>
-              <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${selectedDate === d.date ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
-                }`}>
-                {d.total_count}
-              </span>
-            </button>
-          ))}
         </div>
 
-        {/* Custom Date Input & Refresh */}
-        <div className="flex items-center gap-2">
-          <div className="relative">
-            <input
-              type="date"
-              value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
-              className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-800 focus:outline-hidden focus:border-emerald-500 cursor-pointer font-mono"
-            />
-          </div>
+        {/* Date Inputs & Refresh Controls */}
+        <div className="flex flex-wrap items-center gap-2.5">
+          {dateMode === 'CUSTOM_RANGE' ? (
+            <div className="flex items-center gap-2 bg-slate-50 p-1.5 border border-slate-200 rounded-xl">
+              <div className="flex items-center gap-1.5 text-xs text-slate-600 font-semibold px-1">
+                <span className="text-[11px] text-slate-400 uppercase">From</span>
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  className="bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-bold text-slate-800 focus:outline-hidden focus:border-emerald-500 cursor-pointer font-mono shadow-2xs"
+                />
+              </div>
+
+              <span className="text-slate-400 font-bold text-xs">→</span>
+
+              <div className="flex items-center gap-1.5 text-xs text-slate-600 font-semibold px-1">
+                <span className="text-[11px] text-slate-400 uppercase">To</span>
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  className="bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-bold text-slate-800 focus:outline-hidden focus:border-emerald-500 cursor-pointer font-mono shadow-2xs"
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <input
+                type="date"
+                value={selectedDate}
+                onChange={(e) => {
+                  setSelectedDate(e.target.value);
+                  setStartDate(e.target.value);
+                  setEndDate(e.target.value);
+                  if (e.target.value !== todayStr) {
+                    setDateMode('SINGLE_DATE');
+                  }
+                }}
+                className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-800 focus:outline-hidden focus:border-emerald-500 cursor-pointer font-mono shadow-2xs"
+              />
+            </div>
+          )}
 
           <button
-            onClick={() => loadDailyLog(selectedDate)}
+            type="button"
+            onClick={() => {
+              if (dateMode === 'CUSTOM_RANGE') {
+                loadDailyLog({ startDate, endDate });
+              } else {
+                loadDailyLog({ date: selectedDate });
+              }
+            }}
             className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl transition-colors cursor-pointer"
-            title="Refresh current date"
+            title="Refresh records"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-emerald-600' : ''}`} />
           </button>

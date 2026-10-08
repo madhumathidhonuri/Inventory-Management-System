@@ -1235,6 +1235,10 @@ router.get('/daily-log', (req, res) => {
       });
     }
 
+    const isRange = Boolean(req.query.startDate && req.query.endDate);
+    const startDate = req.query.startDate ? standardizeDate(req.query.startDate) : null;
+    const endDate = req.query.endDate ? standardizeDate(req.query.endDate) : null;
+
     // Sort available dates DESC
     const availableDates = Object.keys(dateMap)
       .sort((a, b) => b.localeCompare(a))
@@ -1253,6 +1257,57 @@ router.get('/daily-log', (req, res) => {
           pending_amount: entry.pending_amount
         };
       });
+
+    if (isRange && startDate && endDate) {
+      let rangeRecords = [];
+      const rangeSummary = {
+        date: `${startDate} to ${endDate}`,
+        display_date: startDate === endDate
+          ? (startDate.includes('-') ? startDate.split('-').reverse().join('-') : startDate)
+          : `${startDate.includes('-') ? startDate.split('-').reverse().join('-') : startDate} to ${endDate.includes('-') ? endDate.split('-').reverse().join('-') : endDate}`,
+        total_count: 0,
+        categories: { 'VLTD': 0, 'TG MINING': 0, 'AP MINING': 0, 'GENERAL': 0, 'OTHER': 0 },
+        technicians: new Set(),
+        paid_count: 0,
+        pending_count: 0,
+        total_revenue: 0,
+        pending_amount: 0
+      };
+
+      const sortedDates = Object.keys(dateMap).sort();
+      for (const dKey of sortedDates) {
+        if (dKey >= startDate && dKey <= endDate) {
+          const dEntry = dateMap[dKey];
+          rangeSummary.total_count += dEntry.total_count;
+          Object.keys(rangeSummary.categories).forEach(k => {
+            rangeSummary.categories[k] += (dEntry.categories[k] || 0);
+          });
+          if (dEntry.technicians && typeof dEntry.technicians.forEach === 'function') {
+            dEntry.technicians.forEach(t => rangeSummary.technicians.add(t));
+          }
+          rangeSummary.paid_count += dEntry.paid_count;
+          rangeSummary.pending_count += dEntry.pending_count;
+          rangeSummary.total_revenue += dEntry.total_revenue;
+          rangeSummary.pending_amount += dEntry.pending_amount;
+          rangeRecords = rangeRecords.concat(dEntry.items);
+        }
+      }
+
+      return res.json({
+        success: true,
+        server_today: today,
+        is_range: true,
+        start_date: startDate,
+        end_date: endDate,
+        active_date: `${startDate} to ${endDate}`,
+        available_dates: availableDates,
+        date_summary: {
+          ...rangeSummary,
+          technicians: Array.from(rangeSummary.technicians)
+        },
+        records: rangeRecords
+      });
+    }
 
     const activeDate = requestedDate || (availableDates.length > 0 ? availableDates[0].date : today);
     const activeDateData = dateMap[activeDate] || {
