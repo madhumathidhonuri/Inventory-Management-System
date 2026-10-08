@@ -1146,13 +1146,14 @@ router.post('/payment-excel-preview', upload.single('file'), (req, res) => {
       let status = 'NOT_FOUND';
       let proposedStatus = 'RECEIVED';
       let reason = '';
+      let match = null;
       let matchedInstallation = null;
       let matchedDevice = null;
 
       const isDirectEntry = !rawVeh || rawVeh === '-' || rawVeh.toLowerCase().includes('balance') || rawVeh.toLowerCase().includes('device balance');
 
       if (!isDirectEntry) {
-        const match = findInstallationAndDeviceByVehicle(rawVeh);
+        match = findInstallationAndDeviceByVehicle(rawVeh);
         if (match) {
           matchedInstallation = match.installation;
           matchedDevice = match.device;
