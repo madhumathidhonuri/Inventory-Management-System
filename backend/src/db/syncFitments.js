@@ -179,7 +179,6 @@ function extractInstallationDate(dev = {}, attrs = {}) {
     'INSTALLATION DATE', 'Installation Date', 'installation_date',
     'TG MINING DATE', 'TG_MINING_DATE', 'Tg Mining Date', 'tg_mining_date',
     'MINING DATE', 'Mining Date', 'mining_date',
-    'STOCK PLACE DATE', 'Stock Place Date',
     'PAYMENT RECEIVED DATE', 'Payment Received Date',
     'PAYMENT DATE', 'Payment Date',
     'DATE', 'Date'
@@ -199,6 +198,17 @@ function extractInstallationDate(dev = {}, attrs = {}) {
 function syncFitmentsToInstallations(dbParam) {
   try {
     const db = getDb(dbParam);
+
+    // Clean up any previously auto-generated placeholder records where no real vehicle number existed
+    try {
+      db.prepare(`
+        DELETE FROM installations 
+        WHERE vehicle_number LIKE 'INSTALLED-%' 
+           OR vehicle_number IS NULL 
+           OR TRIM(vehicle_number) = ''
+      `).run();
+    } catch (cleanErr) {}
+
     const devices = db.prepare('SELECT * FROM devices').all();
     if (!devices || devices.length === 0) return { synchronized: 0 };
 
@@ -262,17 +272,19 @@ function syncFitmentsToInstallations(dbParam) {
         try { attrs = JSON.parse(dev.additional_attributes || '{}'); } catch { attrs = {}; }
 
         const vehicleNo = extractVehicleNumber(dev, attrs);
-        const hasCert = Boolean(attrs['CERTIFICATE ISSUED DATE'] || attrs['Certificate Issued Date']);
-        const isInstalled = dev.current_status === 'INSTALLED' || Boolean(vehicleNo) || hasCert;
+        
+        // A device is ONLY an installation if it has a real, explicit vehicle number
+        if (!vehicleNo || !vehicleNo.trim() || vehicleNo.toUpperCase().startsWith('INSTALLED-')) {
+          continue;
+        }
 
-        if (!isInstalled && !vehicleNo) continue;
-
-        const effectiveVehicle = vehicleNo || (dev.current_status === 'INSTALLED' ? `INSTALLED-${dev.imei_number.slice(-4)}` : '');
-        if (!effectiveVehicle) continue;
+        const effectiveVehicle = vehicleNo.trim();
 
         const customerName = extractCustomerName(attrs);
         const customerPhone = extractCustomerPhone(attrs);
         const salePrice = extractSalePrice(attrs, dev);
+        const category = (attrs['CATEGORY'] || attrs['DEVICE CATEGORY'] || dev.vehicle_type || 'VLTD').toString().trim().toUpperCase();
+        const paymentStatus = extractPaymentStatus(attrs);
         const rawDate = extractInstallationDate(dev, attrs);
         const instDate = (rawDate && String(rawDate).trim()) 
           ? standardizeDate(rawDate) 
