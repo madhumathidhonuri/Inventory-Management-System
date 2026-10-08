@@ -1013,8 +1013,15 @@ export default function DailyReportsPage({ onOpenTraceDrawer }) {
       <DailyInstallationUploadModal
         isOpen={showUploadModal}
         onClose={() => setShowUploadModal(false)}
-        onUploadSuccess={() => {
-          loadDailyLog(selectedDate);
+        initialDate={selectedDate}
+        onUploadSuccess={(uploadedDate) => {
+          if (uploadedDate && dateMode === 'TODAY' && uploadedDate !== selectedDate) {
+            setSelectedDate(uploadedDate);
+          } else if (dateMode === 'CUSTOM_RANGE') {
+            loadDailyLog({ startDate, endDate });
+          } else {
+            loadDailyLog({ date: selectedDate });
+          }
         }}
       />
 

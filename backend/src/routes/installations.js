@@ -449,6 +449,11 @@ router.post('/excel-preview', upload.single('file'), (req, res) => {
     let warningCount = 0;
     let errorCount = 0;
 
+    const defaultDate = (req.body.installation_date || req.body.default_date)
+      ? standardizeDate(req.body.installation_date || req.body.default_date)
+      : new Date().toISOString().split('T')[0];
+    const overrideDate = req.body.override_date === 'true' || req.body.override_date === true;
+
     const previewRows = rowObjects.map((row, idx) => {
       const rowNum = idx + 2; // 1-based header + data row
       const imeiKey = autoMapping.imei || Object.keys(row)[0];
@@ -467,7 +472,8 @@ router.post('/excel-preview', upload.single('file'), (req, res) => {
       const custNameVal = String(custNameKey && row[custNameKey] ? row[custNameKey] : '').trim();
       const phoneVal = cleanPhoneString(phoneKey && row[phoneKey] ? row[phoneKey] : '');
       const techVal = String(techKey && row[techKey] ? row[techKey] : '').trim();
-      const dateVal = standardizeDate(dateKey && row[dateKey] ? row[dateKey] : '') || new Date().toISOString().split('T')[0];
+      const rawDateVal = dateKey && row[dateKey] ? standardizeDate(row[dateKey]) : '';
+      const dateVal = (!overrideDate && rawDateVal) ? rawDateVal : defaultDate;
       const catVal = String(catKey && row[catKey] ? row[catKey] : '').trim().toUpperCase() || 'VLTD';
       const locVal = String(locKey && row[locKey] ? row[locKey] : '').trim();
       const priceVal = priceKey && row[priceKey] ? parseFloat(String(row[priceKey]).replace(/[^0-9.]/g, '')) || 0 : 0;
@@ -553,6 +559,10 @@ router.post('/excel-upload', upload.single('file'), (req, res) => {
     let customMapping = null;
     let defaultCategory = req.body.default_category || 'VLTD';
     let defaultTech = req.body.default_technician || 'Technician';
+    let defaultDate = (req.body.installation_date || req.body.default_date)
+      ? standardizeDate(req.body.installation_date || req.body.default_date)
+      : new Date().toISOString().split('T')[0];
+    let overrideDate = req.body.override_date === 'true' || req.body.override_date === true;
 
     if (req.body.mapping) {
       try {
@@ -584,50 +594,60 @@ router.post('/excel-upload', upload.single('file'), (req, res) => {
       const rawRows = xlsx.utils.sheet_to_json(worksheet, { header: headers, range: range.s.r + 1, defval: '' });
       const mapping = customMapping || detectInstallationColumns(headers);
 
-      rowsToProcess = rawRows.map((r, idx) => ({
-        row_number: idx + 2,
-        raw: r,
-        imei: cleanImeiString(r[mapping.imei]),
-        vehicle_number: String(mapping.vehicle_number && r[mapping.vehicle_number] ? r[mapping.vehicle_number] : '').trim().toUpperCase(),
-        customer_name: String(mapping.customer_name && r[mapping.customer_name] ? r[mapping.customer_name] : '').trim(),
-        customer_phone: cleanPhoneString(mapping.customer_phone && r[mapping.customer_phone] ? r[mapping.customer_phone] : ''),
-        installed_by: String(mapping.installed_by && r[mapping.installed_by] ? r[mapping.installed_by] : defaultTech).trim(),
-        installation_date: standardizeDate(mapping.installation_date && r[mapping.installation_date] ? r[mapping.installation_date] : '') || new Date().toISOString().split('T')[0],
-        category: String(mapping.category && r[mapping.category] ? r[mapping.category] : defaultCategory).trim().toUpperCase() || 'VLTD',
-        installation_location: String(mapping.installation_location && r[mapping.installation_location] ? r[mapping.installation_location] : '').trim(),
-        sale_price: mapping.sale_price && r[mapping.sale_price] ? parseFloat(String(r[mapping.sale_price]).replace(/[^0-9.]/g, '')) || 0 : 0,
-        payment_status: String(mapping.payment_status && r[mapping.payment_status] ? r[mapping.payment_status] : '').trim().toUpperCase(),
-        chasis_number: String(mapping.chasis_number && r[mapping.chasis_number] ? r[mapping.chasis_number] : '').trim().toUpperCase(),
-        engine_number: String(mapping.engine_number && r[mapping.engine_number] ? r[mapping.engine_number] : '').trim().toUpperCase(),
-        aadhar_number: String(mapping.aadhar_number && r[mapping.aadhar_number] ? r[mapping.aadhar_number] : '').trim(),
-        pan_number: String(mapping.pan_number && r[mapping.pan_number] ? r[mapping.pan_number] : '').trim().toUpperCase(),
-        software_user_id: String(mapping.software_user_id && r[mapping.software_user_id] ? r[mapping.software_user_id] : '').trim(),
-        software_password: String(mapping.software_password && r[mapping.software_password] ? r[mapping.software_password] : '').trim(),
-        remarks: String(mapping.remarks && r[mapping.remarks] ? r[mapping.remarks] : '').trim()
-      }));
+      rowsToProcess = rawRows.map((r, idx) => {
+        const rawDate = mapping.installation_date && r[mapping.installation_date] ? standardizeDate(r[mapping.installation_date]) : '';
+        const finalDate = (!overrideDate && rawDate) ? rawDate : defaultDate;
+
+        return {
+          row_number: idx + 2,
+          raw: r,
+          imei: cleanImeiString(r[mapping.imei]),
+          vehicle_number: String(mapping.vehicle_number && r[mapping.vehicle_number] ? r[mapping.vehicle_number] : '').trim().toUpperCase(),
+          customer_name: String(mapping.customer_name && r[mapping.customer_name] ? r[mapping.customer_name] : '').trim(),
+          customer_phone: cleanPhoneString(mapping.customer_phone && r[mapping.customer_phone] ? r[mapping.customer_phone] : ''),
+          installed_by: String(mapping.installed_by && r[mapping.installed_by] ? r[mapping.installed_by] : defaultTech).trim(),
+          installation_date: finalDate,
+          category: String(mapping.category && r[mapping.category] ? r[mapping.category] : defaultCategory).trim().toUpperCase() || 'VLTD',
+          installation_location: String(mapping.installation_location && r[mapping.installation_location] ? r[mapping.installation_location] : '').trim(),
+          sale_price: mapping.sale_price && r[mapping.sale_price] ? parseFloat(String(r[mapping.sale_price]).replace(/[^0-9.]/g, '')) || 0 : 0,
+          payment_status: String(mapping.payment_status && r[mapping.payment_status] ? r[mapping.payment_status] : '').trim().toUpperCase(),
+          chasis_number: String(mapping.chasis_number && r[mapping.chasis_number] ? r[mapping.chasis_number] : '').trim().toUpperCase(),
+          engine_number: String(mapping.engine_number && r[mapping.engine_number] ? r[mapping.engine_number] : '').trim().toUpperCase(),
+          aadhar_number: String(mapping.aadhar_number && r[mapping.aadhar_number] ? r[mapping.aadhar_number] : '').trim(),
+          pan_number: String(mapping.pan_number && r[mapping.pan_number] ? r[mapping.pan_number] : '').trim().toUpperCase(),
+          software_user_id: String(mapping.software_user_id && r[mapping.software_user_id] ? r[mapping.software_user_id] : '').trim(),
+          software_password: String(mapping.software_password && r[mapping.software_password] ? r[mapping.software_password] : '').trim(),
+          remarks: String(mapping.remarks && r[mapping.remarks] ? r[mapping.remarks] : '').trim()
+        };
+      });
     } else if (req.body.rows) {
       const parsedRows = typeof req.body.rows === 'string' ? JSON.parse(req.body.rows) : req.body.rows;
-      rowsToProcess = parsedRows.map((r, idx) => ({
-        row_number: r.row_number || idx + 2,
-        raw: r.raw || r,
-        imei: cleanImeiString(r.detected_imei || r.imei || r.imei_number),
-        vehicle_number: String(r.detected_vehicle || r.vehicle_number || r.vehicle || '').trim().toUpperCase(),
-        customer_name: String(r.detected_customer_name || r.customer_name || '').trim(),
-        customer_phone: cleanPhoneString(r.detected_phone || r.customer_phone || r.phone),
-        installed_by: String(r.detected_tech || r.installed_by || defaultTech).trim(),
-        installation_date: standardizeDate(r.detected_date || r.installation_date) || new Date().toISOString().split('T')[0],
-        category: String(r.detected_category || r.category || defaultCategory).trim().toUpperCase() || 'VLTD',
-        installation_location: String(r.detected_location || r.installation_location || '').trim(),
-        sale_price: r.detected_price !== undefined ? parseFloat(r.detected_price) || 0 : (r.sale_price ? parseFloat(r.sale_price) || 0 : 0),
-        payment_status: String(r.detected_payment_status || r.payment_status || '').trim().toUpperCase(),
-        chasis_number: String(r.chasis_number || '').trim().toUpperCase(),
-        engine_number: String(r.engine_number || '').trim().toUpperCase(),
-        aadhar_number: String(r.aadhar_number || '').trim(),
-        pan_number: String(r.pan_number || '').trim().toUpperCase(),
-        software_user_id: String(r.software_user_id || '').trim(),
-        software_password: String(r.software_password || '').trim(),
-        remarks: String(r.remarks || '').trim()
-      }));
+      rowsToProcess = parsedRows.map((r, idx) => {
+        const rawDate = standardizeDate(r.detected_date || r.installation_date);
+        const finalDate = (!overrideDate && rawDate) ? rawDate : defaultDate;
+
+        return {
+          row_number: r.row_number || idx + 2,
+          raw: r.raw || r,
+          imei: cleanImeiString(r.detected_imei || r.imei || r.imei_number),
+          vehicle_number: String(r.detected_vehicle || r.vehicle_number || r.vehicle || '').trim().toUpperCase(),
+          customer_name: String(r.detected_customer_name || r.customer_name || '').trim(),
+          customer_phone: cleanPhoneString(r.detected_phone || r.customer_phone || r.phone),
+          installed_by: String(r.detected_tech || r.installed_by || defaultTech).trim(),
+          installation_date: finalDate,
+          category: String(r.detected_category || r.category || defaultCategory).trim().toUpperCase() || 'VLTD',
+          installation_location: String(r.detected_location || r.installation_location || '').trim(),
+          sale_price: r.detected_price !== undefined ? parseFloat(r.detected_price) || 0 : (r.sale_price ? parseFloat(r.sale_price) || 0 : 0),
+          payment_status: String(r.detected_payment_status || r.payment_status || '').trim().toUpperCase(),
+          chasis_number: String(r.chasis_number || '').trim().toUpperCase(),
+          engine_number: String(r.engine_number || '').trim().toUpperCase(),
+          aadhar_number: String(r.aadhar_number || '').trim(),
+          pan_number: String(r.pan_number || '').trim().toUpperCase(),
+          software_user_id: String(r.software_user_id || '').trim(),
+          software_password: String(r.software_password || '').trim(),
+          remarks: String(r.remarks || '').trim()
+        };
+      });
     }
 
     if (rowsToProcess.length === 0) {
