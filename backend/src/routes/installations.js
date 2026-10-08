@@ -1186,8 +1186,10 @@ router.post('/payment-excel-preview', upload.single('file'), (req, res) => {
 
       return {
         row_number: rowNum,
+        row_index: rowNum,
         raw: row,
         vehicle_number: rawVeh,
+        vehicle_no: rawVeh,
         amount_received: amountReceived,
         pending_amt: pendingAmt,
         payment_date: rawDate,
@@ -1201,6 +1203,8 @@ router.post('/payment-excel-preview', upload.single('file'), (req, res) => {
         proposed_status: proposedStatus,
         reason,
         matched_imei: matchedInstallation?.imei_number || matchedDevice?.imei_number || '',
+        matched_device_imei: matchedInstallation?.imei_number || matchedDevice?.imei_number || '',
+        match_type: match?.type || '',
         existing_status: matchedInstallation?.payment_status || 'PENDING',
         existing_sale_price: matchedInstallation?.sale_price || 0
       };
@@ -1216,8 +1220,20 @@ router.post('/payment-excel-preview', upload.single('file'), (req, res) => {
       dealer_direct_count: dealerDirectCount,
       total_amount_received: totalAmountReceived,
       total_pending_amount: totalPendingAmount,
+      stats: {
+        total: rawRows.length,
+        matched: matchedCount,
+        partial: partialCount,
+        already_paid: alreadyPaidCount,
+        not_found: notFoundCount,
+        dealer_direct_entry: dealerDirectCount,
+        total_received: totalAmountReceived,
+        total_pending: totalPendingAmount
+      },
+      detected_columns: autoMapping,
       headers: headers.filter(h => !h.startsWith('__EMPTY')),
       autoMapping,
+      rows: previewRows,
       previewRows
     });
 

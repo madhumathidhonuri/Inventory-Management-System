@@ -105,13 +105,13 @@ export default function BulkPaymentUploadModal({ isOpen, onClose, onUploadSucces
   };
 
   const handleCommit = async () => {
-    if (!previewData || !previewData.rows) return;
+    if (!allRows || allRows.length === 0) return;
     setLoading(true);
     setError(null);
     setStep(2);
     try {
       const payload = {
-        rows: previewData.rows,
+        rows: allRows,
         default_payment_date: overrideSheetDate ? defaultPaymentDate : undefined,
         default_received_by: defaultReceivedBy.trim() || undefined,
         default_payment_mode: defaultPaymentMode.trim() || undefined
@@ -146,27 +146,40 @@ export default function BulkPaymentUploadModal({ isOpen, onClose, onUploadSucces
     setPreviewFilter('ALL');
   };
 
+  // Safe rows extraction supporting both rows and previewRows
+  const allRows = useMemo(() => {
+    if (!previewData) return [];
+    return Array.isArray(previewData.rows)
+      ? previewData.rows
+      : Array.isArray(previewData.previewRows)
+      ? previewData.previewRows
+      : [];
+  }, [previewData]);
+
   // Filter preview rows
   const filteredRows = useMemo(() => {
-    if (!previewData || !previewData.rows) return [];
-    if (previewFilter === 'ALL') return previewData.rows;
-    if (previewFilter === 'MATCHED') return previewData.rows.filter(r => r.status === 'MATCHED' || r.status === 'ALREADY_PAID');
-    if (previewFilter === 'PARTIAL') return previewData.rows.filter(r => r.status === 'PARTIAL');
-    if (previewFilter === 'DIRECT') return previewData.rows.filter(r => r.status === 'DEALER_DIRECT_ENTRY');
-    if (previewFilter === 'NOT_FOUND') return previewData.rows.filter(r => r.status === 'NOT_FOUND');
-    return previewData.rows;
-  }, [previewData, previewFilter]);
+    if (!allRows || allRows.length === 0) return [];
+    if (previewFilter === 'ALL') return allRows;
+    if (previewFilter === 'MATCHED') return allRows.filter(r => r && (r.status === 'MATCHED' || r.status === 'ALREADY_PAID'));
+    if (previewFilter === 'PARTIAL') return allRows.filter(r => r && r.status === 'PARTIAL');
+    if (previewFilter === 'DIRECT') return allRows.filter(r => r && r.status === 'DEALER_DIRECT_ENTRY');
+    if (previewFilter === 'NOT_FOUND') return allRows.filter(r => r && r.status === 'NOT_FOUND');
+    return allRows;
+  }, [allRows, previewFilter]);
 
-  const stats = previewData?.stats || {
-    total: 0,
-    matched: 0,
-    partial: 0,
-    already_paid: 0,
-    dealer_direct_entry: 0,
-    not_found: 0,
-    total_received: 0,
-    total_pending: 0
-  };
+  const stats = useMemo(() => {
+    if (previewData?.stats) return previewData.stats;
+    return {
+      total: previewData?.total_rows || allRows.length || 0,
+      matched: previewData?.matched_count || 0,
+      partial: previewData?.partial_count || 0,
+      already_paid: previewData?.already_paid_count || 0,
+      dealer_direct_entry: previewData?.dealer_direct_count || 0,
+      not_found: previewData?.not_found_count || 0,
+      total_received: previewData?.total_amount_received || 0,
+      total_pending: previewData?.total_pending_amount || 0
+    };
+  }, [previewData, allRows]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-sm overflow-y-auto animate-in fade-in duration-200">
@@ -462,7 +475,7 @@ export default function BulkPaymentUploadModal({ isOpen, onClose, onUploadSucces
                     </div>
 
                     <div className="text-xs text-slate-400">
-                      Showing <strong className="text-white">{filteredRows.length}</strong> of {previewData.rows.length} rows
+                      Showing <strong className="text-white">{filteredRows.length}</strong> of {allRows.length} rows
                     </div>
                   </div>
 
@@ -672,7 +685,7 @@ export default function BulkPaymentUploadModal({ isOpen, onClose, onUploadSucces
           <div>
             {step === 1 && previewData && (
               <span className="text-xs text-slate-400">
-                Ready to reconcile <strong className="text-emerald-400">{previewData.rows.length}</strong> payments.
+                Ready to reconcile <strong className="text-emerald-400">{allRows.length}</strong> payments.
               </span>
             )}
           </div>
@@ -690,11 +703,11 @@ export default function BulkPaymentUploadModal({ isOpen, onClose, onUploadSucces
                   <button
                     type="button"
                     onClick={handleCommit}
-                    disabled={loading || previewData.rows.length === 0}
+                    disabled={loading || allRows.length === 0}
                     className="px-5 py-2.5 text-xs font-bold text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 rounded-xl shadow-lg shadow-emerald-900/30 flex items-center gap-2 transition-all disabled:opacity-50"
                   >
                     <CheckCircle className="w-4 h-4" />
-                    Reconcile & Update Ledger ({previewData.rows.length} Rows)
+                    Reconcile & Update Ledger ({allRows.length} Rows)
                   </button>
                 )}
               </>
