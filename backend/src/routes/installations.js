@@ -1146,7 +1146,7 @@ router.get('/daily-log', (req, res) => {
 
     // Fetch all installations
     const allRows = db.prepare(`
-      SELECT i.*, d.sim_number, d.additional_attributes as device_additional_attributes, dt.name as device_type_name
+      SELECT i.*, d.sim_number, d.additional_attributes as device_additional_attributes, d.purchase_date as device_purchase_date, dt.name as device_type_name
       FROM installations i
       LEFT JOIN devices d ON i.device_id = d.id
       LEFT JOIN device_types dt ON d.device_type_id = dt.id
@@ -1165,7 +1165,16 @@ router.get('/daily-log', (req, res) => {
 
       const attrDate = extractInstallationDate(item, attrs);
       const rawInstDate = attrDate || item.installation_date;
-      const instDate = (rawInstDate && String(rawInstDate).trim()) ? standardizeDate(rawInstDate) : today;
+      let instDate = '';
+      if (rawInstDate && String(rawInstDate).trim()) {
+        instDate = standardizeDate(rawInstDate);
+      } else if (item.device_purchase_date && String(item.device_purchase_date).trim()) {
+        instDate = standardizeDate(item.device_purchase_date);
+      } else if (item.created_at && String(item.created_at).trim()) {
+        instDate = standardizeDate(item.created_at.split(' ')[0]);
+      } else {
+        instDate = 'Undated';
+      }
       
       let displayDate = instDate;
       if (/^\d{4}-\d{2}-\d{2}$/.test(instDate)) {
@@ -1806,44 +1815,15 @@ function cleanDeviceAfterInstallationDelete(devId, imei) {
     
     if (!dev) return;
 
-    const inDispatch = db.prepare('SELECT id FROM dispatch_items WHERE device_id = ? LIMIT 1').get(dev.id);
-
-    // If it was created solely as a Direct Entry via daily upload and never had a purchase batch or dispatch
-    if (dev.vendor_name === 'Direct Entry' && !dev.purchase_batch_id && !inDispatch) {
-      db.prepare('DELETE FROM device_history WHERE device_id = ?').run(dev.id);
-      db.prepare('DELETE FROM devices WHERE id = ?').run(dev.id);
-    } else {
-      const keysToClean = [
-        'VEHICLE NUMBER', 'Vehicle Number', 'Vehicle ID', 'Vehicle No', 'VEHICLE NO', 'Reg No', 'vehicle_number', 'vehicle_no',
-        'MACHINERY NUMBER', 'EQUIPMENT NUMBER',
-        'CERTIFICATE ISSUED DATE', 'Certificate Issued Date', 'certificate_issued_date',
-        'CERTIFICATE DATE', 'Certificate Date', 'certificate_date',
-        'INSTALLATION DATE', 'Installation Date', 'installation_date',
-        'TG MINING DATE', 'TG_MINING_DATE', 'Tg Mining Date', 'tg_mining_date',
-        'MINING DATE', 'Mining Date', 'mining_date',
-        'CUSTOMER NAME', 'Customer Name', 'CERTIFICATE ISSUED TO', 'Certificate Issued To',
-        'CUSTOMER PHONE NUMBER', 'Customer Phone Number', 'CUSTOMER PHONE', 'Customer Phone',
-        'TECHNICIAN', 'INSTALLED BY', 'FITTER', 'SALES PERSON NAME',
-        'TOTAL COST', 'Total Cost', 'COST', 'Cost', 'SALE PRICE', 'Sale Price', 'PRICE', 'Price', 'INSTALLATION CHARGES',
-        'AMOUNT RECEIVED', 'Amount Received', 'PAYMENT STATUS', 'Payment Status', 'AMOUNT RECEIVED STATUS', 'AMOUNT RECEIVED BY',
-        'USERNAME', 'SOFTWARE USER ID', 'GPS USER ID', 'PASSWORD', 'SOFTWARE PASSWORD', 'GPS PASSWORD'
-      ];
-      let attrs = {};
-      try { attrs = JSON.parse(dev.additional_attributes || '{}'); } catch {}
-      for (const k of keysToClean) {
-        delete attrs[k];
-      }
-      attrs['STOCK PLACE'] = attrs['STOCK PLACE'] || 'Central Warehouse';
-      db.prepare(`
-        UPDATE devices 
-        SET current_status = 'IN_WAREHOUSE', 
-            current_holder_type = 'WAREHOUSE', 
-            current_holder_name = 'Central Warehouse', 
-            additional_attributes = ?,
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `).run(JSON.stringify(attrs), dev.id);
-    }
+    // Reset device status to warehouse stock while safely retaining customer & vehicle metadata in history
+    db.prepare(`
+      UPDATE devices 
+      SET current_status = 'IN_WAREHOUSE', 
+          current_holder_type = 'WAREHOUSE', 
+          current_holder_name = 'Central Warehouse', 
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(dev.id);
   } catch (err) {
     console.warn('[cleanDeviceAfterInstallationDelete error]', err.message);
   }

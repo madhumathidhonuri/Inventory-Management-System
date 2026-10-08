@@ -273,9 +273,10 @@ function syncFitmentsToInstallations(dbParam) {
         const customerName = extractCustomerName(attrs);
         const customerPhone = extractCustomerPhone(attrs);
         const salePrice = extractSalePrice(attrs, dev);
-        const paymentStatus = extractPaymentStatus(attrs);
-        const instDate = extractInstallationDate(dev, attrs);
-        const category = extractCategory(attrs, dev);
+        const rawDate = extractInstallationDate(dev, attrs);
+        const instDate = (rawDate && String(rawDate).trim()) 
+          ? standardizeDate(rawDate) 
+          : (dev.purchase_date && String(dev.purchase_date).trim() ? standardizeDate(dev.purchase_date) : (dev.created_at ? standardizeDate(dev.created_at.split(' ')[0]) : ''));
         const location = attrs['RTO LOCATION'] || attrs['STOCK PLACE'] || attrs['LOCATION'] || '';
         const technician = attrs['TECHNICIAN'] || attrs['INSTALLED BY'] || attrs['FITTER'] || attrs['SALES PERSON NAME'] || '';
         const salesManager = attrs['SALES MANAGER'] || null;

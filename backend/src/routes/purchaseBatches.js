@@ -453,23 +453,37 @@ router.delete('/:id', (req, res) => {
     }
 
     const transaction = db.transaction(() => {
-      const devs = db.prepare('SELECT id, imei_number FROM devices WHERE purchase_batch_id = ?').all(id);
+      const devs = db.prepare('SELECT id, imei_number, current_status FROM devices WHERE purchase_batch_id = ?').all(id);
+      let uninstalledDeletedCount = 0;
+      let decoupledCount = 0;
+
       for (const dev of devs) {
-        db.prepare('DELETE FROM device_history WHERE device_id = ? OR imei_number = ?').run(dev.id, dev.imei_number);
-        db.prepare('DELETE FROM dispatch_items WHERE device_id = ? OR imei_number = ?').run(dev.id, dev.imei_number);
-        db.prepare('DELETE FROM installations WHERE device_id = ? OR imei_number = ?').run(dev.id, dev.imei_number);
-        db.prepare('DELETE FROM reminders WHERE device_id = ? OR imei_number = ?').run(dev.id, dev.imei_number);
+        const hasInstallation = db.prepare('SELECT id FROM installations WHERE device_id = ? OR imei_number = ? LIMIT 1').get(dev.id, dev.imei_number);
+        
+        if (dev.current_status === 'INSTALLED' || hasInstallation) {
+          // Keep customer installation & history 100% safe, only decouple batch reference
+          db.prepare('UPDATE devices SET purchase_batch_id = NULL WHERE id = ?').run(dev.id);
+          decoupledCount++;
+        } else {
+          // Only remove uninstalled devices that have no customer records
+          db.prepare('DELETE FROM device_history WHERE device_id = ? OR imei_number = ?').run(dev.id, dev.imei_number);
+          db.prepare('DELETE FROM dispatch_items WHERE device_id = ? OR imei_number = ?').run(dev.id, dev.imei_number);
+          db.prepare('DELETE FROM reminders WHERE device_id = ? OR imei_number = ?').run(dev.id, dev.imei_number);
+          db.prepare('DELETE FROM devices WHERE id = ?').run(dev.id);
+          uninstalledDeletedCount++;
+        }
       }
-      db.prepare('DELETE FROM devices WHERE purchase_batch_id = ?').run(id);
+
       db.prepare('DELETE FROM purchase_batches WHERE id = ?').run(id);
-      return devs.length;
+      return { uninstalledDeletedCount, decoupledCount, total: devs.length };
     });
 
-    const deletedCount = transaction();
+    const result = transaction();
     res.json({
       success: true,
-      count: deletedCount,
-      message: `Successfully deleted upload list '${batch.source_file || batch.notes || id}' and ${deletedCount} device(s)`
+      count: result.uninstalledDeletedCount,
+      decoupled_count: result.decoupledCount,
+      message: `Successfully deleted upload batch '${batch.source_file || batch.notes || id}'. Removed ${result.uninstalledDeletedCount} uninstalled stock item(s) and preserved ${result.decoupledCount} installed customer record(s).`
     });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });

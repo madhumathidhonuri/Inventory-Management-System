@@ -1,0 +1,19 @@
+# Workspace Instructions for Roo Code / Cline & AI Agents
+
+## 1. Project Context
+- **Name**: Inventory Management System
+- **Stack**: Full-stack MERN/PERN-style (React + Vite Frontend, Node.js + Express Backend, SQLite / Cloud DB).
+- **Core Workflows**: Inventory stock management, payment tracking, customer records, daily reports, Google Sheets & Cloud synchronization.
+
+## 2. Ralph Loop (Autonomous Verification)
+- When implementing a feature or bug fix:
+  1. Make the required edits.
+  2. Run verification commands (e.g. `node backend/src/scripts/test_sync.js`, build checks, or route checks).
+  3. If there are syntax or runtime errors, inspect the stack trace, fix the code immediately, and re-run.
+  4. Only consider the task finished when tests/checks pass with 0 errors.
+
+## 3. GSD (Get Shit Done) Protocol
+- **Zero Fluff**: Be concise, direct, and actionable. Avoid filler explanations.
+- **Action-First**: When asked to fix or build something, directly modify the code files rather than explaining hypothetical solutions.
+- **Precision**: Modify only the necessary lines. Do not alter unrelated business logic or delete database backup logic.
+- **Financial & Stock Integrity**: Double-check all stock quantity deductions, price calculations, and transaction records for accuracy and safety.

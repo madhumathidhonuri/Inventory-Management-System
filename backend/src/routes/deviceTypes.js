@@ -318,14 +318,21 @@ router.delete('/:id', (req, res) => {
 
     db.transaction(() => {
       if (count > 0) {
-        const typeDevs = db.prepare('SELECT id, imei_number FROM devices WHERE device_type_id = ?').all(id);
+        const typeDevs = db.prepare('SELECT id, imei_number, current_status FROM devices WHERE device_type_id = ?').all(id);
         for (const dev of typeDevs) {
-          db.prepare('DELETE FROM device_history WHERE device_id = ? OR imei_number = ?').run(dev.id, dev.imei_number);
-          db.prepare('DELETE FROM dispatch_items WHERE device_id = ? OR imei_number = ?').run(dev.id, dev.imei_number);
-          db.prepare('DELETE FROM installations WHERE device_id = ? OR imei_number = ?').run(dev.id, dev.imei_number);
-          db.prepare('DELETE FROM reminders WHERE device_id = ? OR imei_number = ?').run(dev.id, dev.imei_number);
+          const hasInstallation = db.prepare('SELECT id FROM installations WHERE device_id = ? OR imei_number = ? LIMIT 1').get(dev.id, dev.imei_number);
+          
+          if (dev.current_status === 'INSTALLED' || hasInstallation) {
+            // Keep customer installation & history 100% safe
+            // Retain device and installation records
+          } else {
+            // Only remove uninstalled devices that have no customer records
+            db.prepare('DELETE FROM device_history WHERE device_id = ? OR imei_number = ?').run(dev.id, dev.imei_number);
+            db.prepare('DELETE FROM dispatch_items WHERE device_id = ? OR imei_number = ?').run(dev.id, dev.imei_number);
+            db.prepare('DELETE FROM reminders WHERE device_id = ? OR imei_number = ?').run(dev.id, dev.imei_number);
+            db.prepare('DELETE FROM devices WHERE id = ?').run(dev.id);
+          }
         }
-        db.prepare('DELETE FROM devices WHERE device_type_id = ?').run(id);
         db.prepare('DELETE FROM purchase_batches WHERE device_type_id = ?').run(id);
       }
       db.prepare('DELETE FROM device_pricing WHERE device_type_id = ?').run(id);

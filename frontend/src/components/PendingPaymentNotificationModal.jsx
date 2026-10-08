@@ -42,6 +42,9 @@ export default function PendingPaymentNotificationModal({
 
   useEffect(() => {
     if (isOpen) {
+      setSelectedDateFilter('ALL');
+      setSearchQuery('');
+      setSuccessMsg('');
       loadAlerts();
     }
   }, [isOpen]);
@@ -159,16 +162,15 @@ export default function PendingPaymentNotificationModal({
               <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
               <span>Daily Installation Reminders:</span>
             </div>
-            
+
             <div className="flex items-center gap-2 overflow-x-auto pb-1">
               <button
                 type="button"
                 onClick={() => setSelectedDateFilter('ALL')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
-                  selectedDateFilter === 'ALL'
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${selectedDateFilter === 'ALL'
                     ? 'bg-slate-900 text-white shadow-xs'
                     : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
-                }`}
+                  }`}
               >
                 All Dates ({summary.total_pending_count || 0})
               </button>
@@ -178,11 +180,10 @@ export default function PendingPaymentNotificationModal({
                   key={rem.date}
                   type="button"
                   onClick={() => setSelectedDateFilter(selectedDateFilter === rem.date ? 'ALL' : rem.date)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 ${
-                    selectedDateFilter === rem.date
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 ${selectedDateFilter === rem.date
                       ? 'bg-red-600 text-white shadow-sm shadow-red-200 ring-2 ring-red-400/30'
                       : 'bg-white text-red-700 hover:bg-red-50 border border-red-200'
-                  }`}
+                    }`}
                   title={rem.reminder_text}
                 >
                   <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
@@ -286,7 +287,7 @@ export default function PendingPaymentNotificationModal({
 
                   {/* 6 Core Info Grid: Customer, Phone, IMEI, Tech */}
                   <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs">
-                    
+
                     {/* Customer Name */}
                     <div className="space-y-0.5">
                       <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Customer Name</p>
@@ -333,7 +334,7 @@ export default function PendingPaymentNotificationModal({
 
                   {/* Bottom Action Buttons Row */}
                   <div className="flex items-center justify-end flex-wrap gap-2 pt-2 border-t border-slate-100">
-                    
+
                     {/* WhatsApp Reminder */}
                     <button
                       type="button"

@@ -1,0 +1,40 @@
+# CodeRabbit Configuration for Inventory Management System
+version: "2"
+language: "en-US"
+
+early_access: false
+
+reviews:
+  # Enable automated reviews on PRs
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - "main"
+      - "master"
+      - "dev"
+      - "development"
+
+  # High-level PR overview and breakdown
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: false
+
+  # Custom instructions for your full-stack Inventory Management System
+  instructions: |
+    You are reviewing a full-stack Inventory Management System (React frontend, Node/Express backend).
+    Pay critical attention to:
+    1. **Inventory & Stock Calculations**: Ensure stock balance, deductions, and updates cannot result in race conditions or negative quantities without validation.
+    2. **Payments & Financial Transactions**: Scrutinize payment recording, debt tracking, and revenue calculations for precision and error handling.
+    3. **Database Consistency**: Check database transactions, index usage, and data sanitization across backend routes and scripts.
+    4. **Authentication & Security**: Verify authorization checks, JWT handling, and input validation on sensitive endpoints.
+    5. **Frontend State & Performance**: Ensure React hooks, state updates, and API error states are properly handled in components.
+
+  # Path filters
+  path_filters:
+    - "!**/node_modules/**"
+    - "!**/dist/**"
+    - "!**/build/**"
+    - "!**/.git/**"
+    - "!**/package-lock.json"
