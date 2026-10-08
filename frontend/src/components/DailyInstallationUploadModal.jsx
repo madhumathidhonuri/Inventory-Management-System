@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   FileSpreadsheet,
   Upload,
@@ -55,6 +55,12 @@ export default function DailyInstallationUploadModal({ isOpen, onClose, onUpload
   // Date selection states
   const [uploadDate, setUploadDate] = useState(initialDate || todayStr);
   const [overrideSheetDate, setOverrideSheetDate] = useState(false);
+
+  useEffect(() => {
+    if (isOpen && initialDate) {
+      setUploadDate(initialDate);
+    }
+  }, [isOpen, initialDate]);
 
   // Defaults
   const [defaultCategory, setDefaultCategory] = useState('VLTD');

@@ -47,7 +47,12 @@ import { buildCustomerCredentialsWhatsAppMessage, buildPaymentQrWhatsAppMessage 
 
 export default function DailyReportsPage({ onOpenTraceDrawer }) {
   const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
-  const [dateMode, setDateMode] = useState('TODAY'); // 'TODAY' | 'CUSTOM_RANGE'
+  const yesterdayStr = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 1);
+    return d.toISOString().split('T')[0];
+  }, []);
+  const [dateMode, setDateMode] = useState('TODAY'); // 'TODAY' | 'YESTERDAY' | 'SINGLE_DATE' | 'CUSTOM_RANGE'
   const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [startDate, setStartDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [endDate, setEndDate] = useState(() => new Date().toISOString().split('T')[0]);
@@ -338,13 +343,30 @@ export default function DailyReportsPage({ onOpenTraceDrawer }) {
               setStartDate(todayStr);
               setEndDate(todayStr);
             }}
-            className={`px-3.5 py-1.5 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5 ${dateMode === 'TODAY'
+            className={`px-3.5 py-1.5 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5 ${dateMode === 'TODAY' || (selectedDate === todayStr && dateMode !== 'CUSTOM_RANGE')
                 ? 'bg-emerald-600 text-white shadow-xs'
                 : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
               }`}
           >
             <Calendar className="w-3.5 h-3.5" />
             <span>Today</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setDateMode('YESTERDAY');
+              setSelectedDate(yesterdayStr);
+              setStartDate(yesterdayStr);
+              setEndDate(yesterdayStr);
+            }}
+            className={`px-3.5 py-1.5 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5 ${dateMode === 'YESTERDAY' || (selectedDate === yesterdayStr && dateMode !== 'CUSTOM_RANGE')
+                ? 'bg-emerald-600 text-white shadow-xs'
+                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+              }`}
+          >
+            <Clock className="w-3.5 h-3.5" />
+            <span>Yesterday</span>
           </button>
 
           <button
