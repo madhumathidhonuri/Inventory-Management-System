@@ -224,12 +224,13 @@ router.post('/', (req, res) => {
         WHERE id = ?
       `).run(customer_name.trim(), customer_email || null, customer_address || null, cleanAadhar, cleanPan, cleanSoftwareUser, cleanSoftwarePass, customerId);
     } else {
+      const safePhone = cleanPhone || `NA-${cleanImei || Date.now()}`;
       const custResult = db.prepare(`
         INSERT INTO customers (name, phone_number, alternate_phone, email, address, customer_type, source, aadhar_number, pan_number, software_user_id, software_password)
         VALUES (?, ?, ?, ?, ?, ?, 'Direct Entry', ?, ?, ?, ?)
       `).run(
         customer_name.trim(),
-        cleanPhone,
+        safePhone,
         alternate_phone || null,
         customer_email || null,
         customer_address || null,
@@ -766,6 +767,9 @@ router.post('/excel-upload', upload.single('file'), (req, res) => {
           let customerId = null;
           if (cleanPhone || (cleanName && cleanName !== 'Customer')) {
             let customer = cleanPhone ? db.prepare('SELECT * FROM customers WHERE phone_number = ?').get(cleanPhone) : null;
+            if (!customer && cleanName && cleanName !== 'Customer') {
+              customer = db.prepare('SELECT * FROM customers WHERE name = ? COLLATE NOCASE').get(cleanName);
+            }
             if (customer) {
               customerId = customer.id;
               db.prepare(`
@@ -778,10 +782,11 @@ router.post('/excel-upload', upload.single('file'), (req, res) => {
                 WHERE id = ?
               `).run(cleanName || '', cleanAadhar, cleanPan, cleanSoftwareUser, cleanSoftwarePass, customerId);
             } else {
+              const safePhone = cleanPhone || `NA-${cleanImei}`;
               const custResult = db.prepare(`
                 INSERT INTO customers (name, phone_number, customer_type, source, aadhar_number, pan_number, software_user_id, software_password)
                 VALUES (?, ?, 'Individual', 'Daily Excel Import', ?, ?, ?, ?)
-              `).run(cleanName || null, cleanPhone || null, cleanAadhar || null, cleanPan || null, cleanSoftwareUser || null, cleanSoftwarePass || null);
+              `).run(cleanName || 'Customer', safePhone, cleanAadhar || null, cleanPan || null, cleanSoftwareUser || null, cleanSoftwarePass || null);
               customerId = custResult.lastInsertRowid;
             }
           }
@@ -1017,10 +1022,11 @@ router.post('/bulk', (req, res) => {
           WHERE id = ?
         `).run(cleanName, cleanSoftwareUser, cleanSoftwarePass, customerId);
       } else {
+        const safePhone = cleanPhone || `NA-${cleanImei || Date.now()}`;
         const custResult = db.prepare(`
           INSERT INTO customers (name, phone_number, source, software_user_id, software_password)
           VALUES (?, ?, 'Direct Entry', ?, ?)
-        `).run(cleanName, cleanPhone, cleanSoftwareUser || null, cleanSoftwarePass || null);
+        `).run(cleanName, safePhone, cleanSoftwareUser || null, cleanSoftwarePass || null);
         customerId = custResult.lastInsertRowid;
       }
 
