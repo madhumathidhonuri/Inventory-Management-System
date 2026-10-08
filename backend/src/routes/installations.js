@@ -19,7 +19,7 @@ function cleanImeiString(raw) {
       if (!isNaN(num) && num > 0) {
         str = BigInt(Math.round(num)).toString();
       }
-    } catch {}
+    } catch { }
   }
 
   // Remove trailing decimal zeroes like .0, .00
@@ -556,14 +556,14 @@ router.post('/excel-upload', upload.single('file'), (req, res) => {
     if (req.body.mapping) {
       try {
         customMapping = typeof req.body.mapping === 'string' ? JSON.parse(req.body.mapping) : req.body.mapping;
-      } catch (e) {}
+      } catch (e) { }
     }
 
     if (req.file) {
       const workbook = xlsx.read(req.file.buffer, { type: 'buffer' });
       const sheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[sheetName];
-      
+
       const range = xlsx.utils.decode_range(worksheet['!ref'] || 'A1:A1');
       const headers = [];
       let emptyIdx = 0;
@@ -732,7 +732,7 @@ router.post('/excel-upload', upload.single('file'), (req, res) => {
             dev = db.prepare('SELECT * FROM devices WHERE id = ?').get(info.lastInsertRowid);
           } else {
             // Existing Device: In-place update preserving master batch/vendor info
-            try { attrs = JSON.parse(dev.additional_attributes || '{}'); } catch {}
+            try { attrs = JSON.parse(dev.additional_attributes || '{}'); } catch { }
             if (item.raw && typeof item.raw === 'object') {
               Object.keys(item.raw).forEach(k => {
                 if (!k.startsWith('__EMPTY')) attrs[k] = item.raw[k];
@@ -1090,7 +1090,7 @@ router.post('/bulk', (req, res) => {
     if (processedImeis.length > 0) {
       googleSheetsSync.syncBulkDevices(processedImeis);
     }
-  } catch (e) {}
+  } catch (e) { }
 
   res.json({
     success: true,
@@ -1110,7 +1110,7 @@ function extractInstCategory(inst) {
     devAttrs = typeof inst.device_additional_attributes === 'string'
       ? JSON.parse(inst.device_additional_attributes || '{}')
       : (inst.device_additional_attributes || {});
-  } catch {}
+  } catch { }
 
   const rawCat = (
     inst.category ||
@@ -1142,7 +1142,7 @@ router.get('/daily-log', (req, res) => {
     }
 
     const today = new Date().toISOString().split('T')[0];
-    const requestedDate = req.query.date ? standardizeDate(req.query.date) : null;
+    const requestedDate = req.query.date ? standardizeDate(req.query.date) : today;
 
     // Fetch all installations
     const allRows = db.prepare(`
@@ -1161,7 +1161,7 @@ router.get('/daily-log', (req, res) => {
         attrs = typeof item.device_additional_attributes === 'string'
           ? JSON.parse(item.device_additional_attributes || '{}')
           : (item.device_additional_attributes || {});
-      } catch {}
+      } catch { }
 
       const attrDate = extractInstallationDate(item, attrs);
       const rawInstDate = attrDate || item.installation_date;
@@ -1175,7 +1175,7 @@ router.get('/daily-log', (req, res) => {
       } else {
         instDate = 'Undated';
       }
-      
+
       let displayDate = instDate;
       if (/^\d{4}-\d{2}-\d{2}$/.test(instDate)) {
         const [y, m, d] = instDate.split('-');
@@ -1336,13 +1336,13 @@ router.get('/pending-alerts', (req, res) => {
         attrs = typeof item.device_additional_attributes === 'string'
           ? JSON.parse(item.device_additional_attributes || '{}')
           : (item.device_additional_attributes || {});
-      } catch {}
+      } catch { }
 
       // Extract accurate date from attributes first, fallback to installation_date
       const attrDate = extractInstallationDate(item, attrs);
       const rawInstDate = attrDate || item.installation_date;
       const instDate = (rawInstDate && String(rawInstDate).trim()) ? standardizeDate(rawInstDate) : 'Date Not Specified';
-      
+
       let displayDate = instDate;
       if (/^\d{4}-\d{2}-\d{2}$/.test(instDate)) {
         const [y, m, d] = instDate.split('-');
@@ -1392,10 +1392,10 @@ router.get('/pending-alerts', (req, res) => {
       const totalPrice = parseFloat(item.sale_price) || 0;
       const amountPaid = parseFloat(item.amount_paid) || 0;
       const statusUpper = (item.payment_status || '').toString().toUpperCase().trim();
-      
+
       const isFullyPaid = ['RECEIVED', 'PAID', 'YES'].includes(statusUpper) && (amountPaid === 0 || amountPaid >= totalPrice);
       const isPartial = statusUpper === 'PARTIAL' || (amountPaid > 0 && amountPaid < totalPrice && statusUpper !== 'RECEIVED');
-      
+
       const pendingAmount = isFullyPaid ? 0 : (isPartial ? Math.max(0, totalPrice - amountPaid) : totalPrice);
 
       if (isFullyPaid) {
@@ -1742,7 +1742,7 @@ router.get('/export', async (req, res) => {
         devAttrs = typeof inst.device_additional_attributes === 'string'
           ? JSON.parse(inst.device_additional_attributes || '{}')
           : (inst.device_additional_attributes || {});
-      } catch {}
+      } catch { }
 
       const itemCat = extractInstCategory(inst);
       const softwareUser = inst.software_user_id || devAttrs['SOFTWARE USER ID'] || devAttrs['GPS USER ID'] || '—';
@@ -1809,10 +1809,10 @@ router.get('/export', async (req, res) => {
 function cleanDeviceAfterInstallationDelete(devId, imei) {
   if (!devId && !imei) return;
   try {
-    const dev = devId 
+    const dev = devId
       ? db.prepare('SELECT id, vendor_name, purchase_batch_id, additional_attributes FROM devices WHERE id = ?').get(devId)
       : db.prepare('SELECT id, vendor_name, purchase_batch_id, additional_attributes FROM devices WHERE imei_number = ?').get(imei);
-    
+
     if (!dev) return;
 
     // Reset device status to warehouse stock while safely retaining customer & vehicle metadata in history
@@ -1871,7 +1871,7 @@ router.delete('/clear-all', (req, res) => {
     try {
       const cloudSync = require('../db/cloudSync');
       cloudSync.triggerDebouncedSync(1000);
-    } catch (e) {}
+    } catch (e) { }
 
     res.json({
       success: true,
@@ -1894,7 +1894,7 @@ router.delete('/by-date', (req, res) => {
 
     const { standardizeDate, extractInstallationDate } = require('../db/syncFitments');
     const targetDate = standardizeDate(rawDate);
-    
+
     // Also support dd-mm-yyyy matching
     let altDate = targetDate;
     if (/^\d{4}-\d{2}-\d{2}$/.test(targetDate)) {
@@ -1922,7 +1922,7 @@ router.delete('/by-date', (req, res) => {
 
       for (const dev of allDevs) {
         let attrs = {};
-        try { attrs = JSON.parse(dev.additional_attributes || '{}'); } catch {}
+        try { attrs = JSON.parse(dev.additional_attributes || '{}'); } catch { }
         const devDate = extractInstallationDate(dev, attrs);
         if (devDate === targetDate || devDate === altDate) {
           extraDevs.push(dev);
@@ -1930,7 +1930,7 @@ router.delete('/by-date', (req, res) => {
       }
 
       const instIdsToDelete = new Set(matchingInsts.map(i => i.id));
-      
+
       // Also match installations that have device_id in extraDevs
       for (const ed of extraDevs) {
         const found = db.prepare('SELECT id FROM installations WHERE device_id = ? OR imei_number = ?').all(ed.id, ed.imei_number);
@@ -1966,7 +1966,7 @@ router.delete('/by-date', (req, res) => {
     try {
       const cloudSync = require('../db/cloudSync');
       cloudSync.triggerDebouncedSync(1000);
-    } catch (e) {}
+    } catch (e) { }
 
     res.json({
       success: true,
@@ -2015,7 +2015,7 @@ router.post('/bulk-delete', (req, res) => {
     try {
       const cloudSync = require('../db/cloudSync');
       cloudSync.triggerDebouncedSync(1000);
-    } catch (e) {}
+    } catch (e) { }
 
     res.json({
       success: true,
@@ -2053,7 +2053,7 @@ router.delete('/:id', (req, res) => {
     try {
       const cloudSync = require('../db/cloudSync');
       cloudSync.triggerDebouncedSync(1000);
-    } catch (e) {}
+    } catch (e) { }
 
     res.json({ success: true, message: 'Installation record deleted successfully.' });
   } catch (err) {

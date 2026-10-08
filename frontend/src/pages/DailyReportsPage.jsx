@@ -253,9 +253,8 @@ export default function DailyReportsPage({ onOpenTraceDrawer }) {
     <div className="space-y-5">
       {/* Toast Notification Banner */}
       {statusMessage && (
-        <div className={`p-3 rounded-xl border flex items-center justify-between text-xs font-semibold animate-fadeIn ${
-          statusMessage.type === 'success' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-red-50 text-red-800 border-red-200'
-        }`}>
+        <div className={`p-3 rounded-xl border flex items-center justify-between text-xs font-semibold animate-fadeIn ${statusMessage.type === 'success' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-red-50 text-red-800 border-red-200'
+          }`}>
           <div className="flex items-center gap-2">
             {statusMessage.type === 'success' ? <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" /> : <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />}
             <span>{statusMessage.text}</span>
@@ -308,19 +307,6 @@ export default function DailyReportsPage({ onOpenTraceDrawer }) {
             <Trash2 className="w-3.5 h-3.5 text-rose-600" />
             <span>Delete Date ({records.length})</span>
           </button>
-
-          {/* Delete All Button */}
-          <button
-            onClick={() => {
-              setConfirmDeleteText('');
-              setShowDeleteAllModal(true);
-            }}
-            className="px-3.5 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-xl shadow-xs flex items-center gap-1.5 transition-colors cursor-pointer"
-            title="Clear all daily reports across all dates"
-          >
-            <ShieldAlert className="w-3.5 h-3.5" />
-            <span>Delete All</span>
-          </button>
         </div>
       </div>
 
@@ -334,22 +320,20 @@ export default function DailyReportsPage({ onOpenTraceDrawer }) {
 
           <button
             onClick={() => setSelectedDate(todayStr)}
-            className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all cursor-pointer ${
-              selectedDate === todayStr
+            className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all cursor-pointer ${selectedDate === todayStr
                 ? 'bg-emerald-600 text-white shadow-xs'
                 : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-            }`}
+              }`}
           >
             Today
           </button>
 
           <button
             onClick={() => setSelectedDate(yesterdayStr)}
-            className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all cursor-pointer ${
-              selectedDate === yesterdayStr
+            className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all cursor-pointer ${selectedDate === yesterdayStr
                 ? 'bg-emerald-600 text-white shadow-xs'
                 : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-            }`}
+              }`}
           >
             Yesterday
           </button>
@@ -359,16 +343,14 @@ export default function DailyReportsPage({ onOpenTraceDrawer }) {
             <button
               key={d.date}
               onClick={() => setSelectedDate(d.date)}
-              className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all cursor-pointer hidden sm:inline-flex items-center gap-1.5 ${
-                selectedDate === d.date
+              className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all cursor-pointer hidden sm:inline-flex items-center gap-1.5 ${selectedDate === d.date
                   ? 'bg-slate-900 text-white shadow-xs'
                   : 'bg-slate-50 border border-slate-200 text-slate-600 hover:bg-slate-100'
-              }`}
+                }`}
             >
               <span>{d.display_date}</span>
-              <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${
-                selectedDate === d.date ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
-              }`}>
+              <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${selectedDate === d.date ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
+                }`}>
                 {d.total_count}
               </span>
             </button>
@@ -413,11 +395,10 @@ export default function DailyReportsPage({ onOpenTraceDrawer }) {
         {/* TG MINING */}
         <div
           onClick={() => setCategoryFilter(categoryFilter === 'TG MINING' ? 'ALL' : 'TG MINING')}
-          className={`p-4 rounded-2xl border transition-all cursor-pointer ${
-            categoryFilter === 'TG MINING'
+          className={`p-4 rounded-2xl border transition-all cursor-pointer ${categoryFilter === 'TG MINING'
               ? 'bg-amber-600 text-white border-amber-600 shadow-sm ring-2 ring-amber-400'
               : 'bg-white text-slate-800 border-slate-200 hover:border-slate-300 shadow-2xs'
-          }`}
+            }`}
         >
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold uppercase tracking-wider">TG Mining</span>
@@ -430,11 +411,10 @@ export default function DailyReportsPage({ onOpenTraceDrawer }) {
         {/* AP MINING */}
         <div
           onClick={() => setCategoryFilter(categoryFilter === 'AP MINING' ? 'ALL' : 'AP MINING')}
-          className={`p-4 rounded-2xl border transition-all cursor-pointer ${
-            categoryFilter === 'AP MINING'
+          className={`p-4 rounded-2xl border transition-all cursor-pointer ${categoryFilter === 'AP MINING'
               ? 'bg-purple-600 text-white border-purple-600 shadow-sm ring-2 ring-purple-400'
               : 'bg-white text-slate-800 border-slate-200 hover:border-slate-300 shadow-2xs'
-          }`}
+            }`}
         >
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold uppercase tracking-wider">AP Mining</span>
@@ -447,11 +427,10 @@ export default function DailyReportsPage({ onOpenTraceDrawer }) {
         {/* VLTD */}
         <div
           onClick={() => setCategoryFilter(categoryFilter === 'VLTD' ? 'ALL' : 'VLTD')}
-          className={`p-4 rounded-2xl border transition-all cursor-pointer ${
-            categoryFilter === 'VLTD'
+          className={`p-4 rounded-2xl border transition-all cursor-pointer ${categoryFilter === 'VLTD'
               ? 'bg-blue-600 text-white border-blue-600 shadow-sm ring-2 ring-blue-400'
               : 'bg-white text-slate-800 border-slate-200 hover:border-slate-300 shadow-2xs'
-          }`}
+            }`}
         >
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold uppercase tracking-wider">VLTD / AIS-140</span>
@@ -464,11 +443,10 @@ export default function DailyReportsPage({ onOpenTraceDrawer }) {
         {/* General / Other */}
         <div
           onClick={() => setCategoryFilter(categoryFilter === 'GENERAL' ? 'ALL' : 'GENERAL')}
-          className={`p-4 rounded-2xl border transition-all cursor-pointer ${
-            categoryFilter === 'GENERAL'
+          className={`p-4 rounded-2xl border transition-all cursor-pointer ${categoryFilter === 'GENERAL'
               ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm ring-2 ring-emerald-400'
               : 'bg-white text-slate-800 border-slate-200 hover:border-slate-300 shadow-2xs'
-          }`}
+            }`}
         >
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold uppercase tracking-wider">General</span>
@@ -488,11 +466,10 @@ export default function DailyReportsPage({ onOpenTraceDrawer }) {
               <button
                 key={cat}
                 onClick={() => setCategoryFilter(cat)}
-                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  categoryFilter === cat
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${categoryFilter === cat
                     ? 'bg-white text-slate-900 shadow-xs'
                     : 'text-slate-600 hover:text-slate-900'
-                }`}
+                  }`}
               >
                 {cat === 'ALL' ? 'All' : cat}
               </button>
@@ -508,11 +485,10 @@ export default function DailyReportsPage({ onOpenTraceDrawer }) {
               <button
                 key={p.id}
                 onClick={() => setPaymentFilter(p.id)}
-                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  paymentFilter === p.id
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${paymentFilter === p.id
                     ? 'bg-white text-slate-900 shadow-xs'
                     : 'text-slate-600 hover:text-slate-900'
-                }`}
+                  }`}
               >
                 {p.label}
               </button>
@@ -681,9 +657,9 @@ export default function DailyReportsPage({ onOpenTraceDrawer }) {
                           <div className="text-[11px] font-mono text-slate-500">{inst.customer_contact}</div>
                         ) : null}
                         {(!inst.customer_name || inst.customer_name === 'Customer') &&
-                         (!inst.customer_contact || inst.customer_contact === '9999999999') && (
-                          <span className="text-slate-400 italic text-[11px]">—</span>
-                        )}
+                          (!inst.customer_contact || inst.customer_contact === '9999999999') && (
+                            <span className="text-slate-400 italic text-[11px]">—</span>
+                          )}
                       </td>
 
                       {/* Software Credentials */}
@@ -720,9 +696,9 @@ export default function DailyReportsPage({ onOpenTraceDrawer }) {
                           <div className="text-[10px] text-slate-400">{inst.installation_location}</div>
                         ) : null}
                         {(!inst.installed_by || inst.installed_by === 'Technician') &&
-                         (!inst.installation_location || inst.installation_location === 'Field Site' || inst.installation_location === 'Vijayawada') && (
-                          <span className="text-slate-400 italic text-[11px]">—</span>
-                        )}
+                          (!inst.installation_location || inst.installation_location === 'Field Site' || inst.installation_location === 'Vijayawada') && (
+                            <span className="text-slate-400 italic text-[11px]">—</span>
+                          )}
                       </td>
 
                       {/* Payment Status */}

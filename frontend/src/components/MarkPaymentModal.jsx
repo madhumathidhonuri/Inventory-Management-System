@@ -23,17 +23,17 @@ export default function MarkPaymentModal({
   item,
   onPaymentSuccess
 }) {
-  if (!isOpen || !item) return null;
-
-  const totalCost = parseFloat(item.total_sale_price || item.total_cost || item.cost || item.sale_price || 0);
-  const previouslyPaid = parseFloat(item.amount_paid || 0);
-  const currentPendingDue = parseFloat(item.sale_price || item.pending_amount || (totalCost - previouslyPaid) || 0);
+  const totalCost = parseFloat(item?.total_sale_price || item?.total_cost || item?.cost || item?.sale_price || 0);
+  const previouslyPaid = parseFloat(item?.amount_paid || 0);
+  const currentPendingDue = parseFloat(item?.sale_price || item?.pending_amount || (totalCost - previouslyPaid) || 0);
 
   const [amount, setAmount] = useState(currentPendingDue > 0 ? currentPendingDue : totalCost);
   const [paymentMode, setPaymentMode] = useState('UPI'); // 'UPI' | 'CASH' | 'BANK_TRANSFER' | 'CHEQUE'
   const [remarks, setRemarks] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+
+  if (!isOpen || !item) return null;
 
   // Calculate remaining balance dynamically
   const remainingDue = Math.max(0, currentPendingDue - (parseFloat(amount) || 0));
@@ -89,7 +89,7 @@ export default function MarkPaymentModal({
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl animate-in zoom-in-95 duration-150 flex flex-col my-auto relative">
-        
+
         {/* Header */}
         <div className="px-6 py-4.5 bg-gradient-to-r from-emerald-600 to-teal-700 text-white flex items-center justify-between shrink-0">
           <div className="flex items-center space-x-3">
@@ -113,7 +113,7 @@ export default function MarkPaymentModal({
 
         {/* Form Body */}
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          
+
           {/* Vehicle & Customer Summary Card */}
           <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200/80 space-y-2">
             <div className="flex items-center justify-between gap-2">
@@ -209,11 +209,10 @@ export default function MarkPaymentModal({
                     key={mode.id}
                     type="button"
                     onClick={() => setPaymentMode(mode.id)}
-                    className={`p-2.5 rounded-2xl border text-left flex items-center gap-2.5 transition-all cursor-pointer ${
-                      isSelected
+                    className={`p-2.5 rounded-2xl border text-left flex items-center gap-2.5 transition-all cursor-pointer ${isSelected
                         ? 'bg-slate-900 text-white border-slate-900 shadow-md ring-2 ring-emerald-500/30'
                         : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-700'
-                    }`}
+                      }`}
                   >
                     <div className={`p-1.5 rounded-xl shrink-0 ${isSelected ? 'bg-white/20 text-white' : mode.color}`}>
                       <IconComponent className="w-4 h-4" />
