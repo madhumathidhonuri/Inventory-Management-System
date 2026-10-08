@@ -42,6 +42,7 @@ import {
 } from '../services/api';
 import { exportInstallationsToExcel } from '../utils/excelExport';
 import DailyInstallationUploadModal from '../components/DailyInstallationUploadModal';
+import BulkPaymentUploadModal from '../components/BulkPaymentUploadModal';
 import PaymentQrModal from '../components/PaymentQrModal';
 import { buildCustomerCredentialsWhatsAppMessage, buildPaymentQrWhatsAppMessage } from '../utils/whatsapp';
 
@@ -79,6 +80,7 @@ export default function DailyReportsPage({ onOpenTraceDrawer }) {
 
   // Upload modal state
   const [showUploadModal, setShowUploadModal] = useState(false);
+  const [showPaymentUploadModal, setShowPaymentUploadModal] = useState(false);
 
   // Payment QR modal state
   const [paymentQrData, setPaymentQrData] = useState(null);
@@ -312,6 +314,16 @@ export default function DailyReportsPage({ onOpenTraceDrawer }) {
           >
             <Upload className="w-4 h-4" />
             <span>📊 Upload Daily Report (Excel)</span>
+          </button>
+
+          {/* Bulk Payment Excel Upload Button */}
+          <button
+            onClick={() => setShowPaymentUploadModal(true)}
+            className="px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold rounded-xl shadow-xs flex items-center gap-1.5 transition-all cursor-pointer"
+            title="Reconcile and mark payments in bulk from Excel sheet"
+          >
+            <CreditCard className="w-4 h-4" />
+            <span>💳 Upload Payments (Excel)</span>
           </button>
 
           {/* Delete Particular Date Button */}
@@ -1040,6 +1052,22 @@ export default function DailyReportsPage({ onOpenTraceDrawer }) {
           if (uploadedDate && dateMode === 'TODAY' && uploadedDate !== selectedDate) {
             setSelectedDate(uploadedDate);
           } else if (dateMode === 'CUSTOM_RANGE') {
+            loadDailyLog({ startDate, endDate });
+          } else {
+            loadDailyLog({ date: selectedDate });
+          }
+        }}
+      />
+
+      {/* Bulk Payment Excel Reconciliation Modal */}
+      <BulkPaymentUploadModal
+        isOpen={showPaymentUploadModal}
+        onClose={() => setShowPaymentUploadModal(false)}
+        onUploadSuccess={() => {
+          setShowPaymentUploadModal(false);
+          setStatusMessage('🎉 Bulk payments successfully reconciled and applied to ledger!');
+          setTimeout(() => setStatusMessage(null), 5000);
+          if (dateMode === 'CUSTOM_RANGE') {
             loadDailyLog({ startDate, endDate });
           } else {
             loadDailyLog({ date: selectedDate });

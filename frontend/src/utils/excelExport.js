@@ -1632,5 +1632,121 @@ export async function exportDealerStatementExcel(dealer = {}, devices = [], filt
   window.URL.revokeObjectURL(url);
 }
 
+/**
+ * Generates and downloads a standardized Payment Excel Template formatted exactly for bulk payment reconciliation.
+ */
+export async function downloadPaymentExcelTemplate() {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'FuelTracks IMS';
+  workbook.created = new Date();
+
+  const worksheet = workbook.addWorksheet('Payment_Upload_Template', {
+    views: [{ showGridLines: true }]
+  });
+
+  const columns = [
+    { header: 'PAYMENT DATE', key: 'payment_date', width: 16 },
+    { header: 'CATEGORY', key: 'category', width: 16 },
+    { header: 'VEHICLE NUM', key: 'vehicle_no', width: 18 },
+    { header: 'CUSTOMER NAME', key: 'customer_name', width: 22 },
+    { header: 'CUSTOMER PHONE NUMBER', key: 'customer_phone', width: 22 },
+    { header: 'AMOUNT RECEIVED', key: 'amount_received', width: 18 },
+    { header: 'PENDING AMT', key: 'pending_amt', width: 16 },
+    { header: 'PAYMENT MODE', key: 'payment_mode', width: 16 },
+    { header: 'RECEIVED BY', key: 'received_by', width: 18 },
+    { header: 'DEALER/LOCATION', key: 'dealer_location', width: 22 }
+  ];
+
+  worksheet.columns = columns;
+
+  // Header styling - Emerald/Teal Theme
+  const headerRow = worksheet.getRow(1);
+  headerRow.height = 28;
+  headerRow.eachCell((cell) => {
+    cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF059669' }
+    };
+    cell.font = {
+      name: 'Segoe UI',
+      size: 10.5,
+      bold: true,
+      color: { argb: 'FFFFFFFF' }
+    };
+    cell.alignment = {
+      vertical: 'middle',
+      horizontal: 'center'
+    };
+    cell.border = {
+      top: { style: 'thin', color: { argb: 'FF047857' } },
+      left: { style: 'thin', color: { argb: 'FF047857' } },
+      bottom: { style: 'medium', color: { argb: 'FF064E3B' } },
+      right: { style: 'thin', color: { argb: 'FF047857' } }
+    };
+  });
+
+  // Add 2 Sample Rows for guidance
+  const todayStr = new Date().toISOString().split('T')[0];
+  const sampleRows = [
+    {
+      payment_date: todayStr,
+      category: 'DEVICE',
+      vehicle_no: 'TS 09 UA 1234',
+      customer_name: 'Ramesh Kumar',
+      customer_phone: '9876543210',
+      amount_received: 3500,
+      pending_amt: 0,
+      payment_mode: 'UPI / PhonePe',
+      received_by: 'Madhu',
+      dealer_location: 'Hyderabad Main'
+    },
+    {
+      payment_date: todayStr,
+      category: 'DEVICE',
+      vehicle_no: 'AP 28 BC 5678',
+      customer_name: 'Suresh Reddy',
+      customer_phone: '9123456780',
+      amount_received: 2000,
+      pending_amt: 1500,
+      payment_mode: 'Cash',
+      received_by: 'Madhu',
+      dealer_location: 'Zaheerabad Dealer'
+    }
+  ];
+
+  sampleRows.forEach((sRow) => {
+    const row = worksheet.addRow(sRow);
+    row.height = 20;
+    row.eachCell((cell, colNumber) => {
+      cell.font = { name: 'Segoe UI', size: 9.5 };
+      cell.border = {
+        top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+        bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+        left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+        right: { style: 'thin', color: { argb: 'FFE2E8F0' } }
+      };
+      if (colNumber === 1 || colNumber === 3 || colNumber === 5 || colNumber === 8) {
+        cell.alignment = { vertical: 'middle', horizontal: 'center' };
+      } else if (colNumber === 6 || colNumber === 7) {
+        cell.alignment = { vertical: 'middle', horizontal: 'right' };
+        cell.numFmt = '₹#,##0.00';
+      }
+    });
+  });
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `Payment_Upload_Template_${todayStr}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  window.URL.revokeObjectURL(url);
+}
+
+
 
 

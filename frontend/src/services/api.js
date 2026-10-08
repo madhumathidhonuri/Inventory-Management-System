@@ -806,6 +806,32 @@ export async function fetchCustomerAgingBalances() {
   return res.json();
 }
 
+// ==========================================
+// 📊 BULK PAYMENT EXCEL RECONCILIATION API
+// ==========================================
+export async function previewPaymentExcel(formData) {
+  const res = await fetch(`${API_BASE}/installations/payment-excel-preview`, {
+    method: 'POST',
+    body: formData
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) throw new Error(data.error || 'Failed to preview payment excel');
+  return data;
+}
+
+export async function commitPaymentExcel(formDataOrPayload) {
+  const isFormData = formDataOrPayload instanceof FormData;
+  const res = await fetch(`${API_BASE}/installations/payment-excel-commit`, {
+    method: 'POST',
+    headers: isFormData ? undefined : { 'Content-Type': 'application/json' },
+    body: isFormData ? formDataOrPayload : JSON.stringify(formDataOrPayload)
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) throw new Error(data.error || 'Failed to reconcile and commit payments');
+  return data;
+}
+
+
 
 
 

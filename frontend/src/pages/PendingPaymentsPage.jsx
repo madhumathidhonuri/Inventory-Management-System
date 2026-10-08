@@ -19,11 +19,13 @@ import {
   User,
   Wrench,
   Layers,
-  CalendarDays
+  CalendarDays,
+  CreditCard
 } from 'lucide-react';
 import { fetchPendingPaymentAlerts, updateQuickPayment } from '../services/api';
 import PaymentQrModal from '../components/PaymentQrModal';
 import MarkPaymentModal from '../components/MarkPaymentModal';
+import BulkPaymentUploadModal from '../components/BulkPaymentUploadModal';
 import * as XLSX from 'xlsx';
 
 export default function PendingPaymentsPage({ onOpenTraceDrawer }) {
@@ -38,6 +40,7 @@ export default function PendingPaymentsPage({ onOpenTraceDrawer }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedQrItem, setSelectedQrItem] = useState(null);
   const [selectedPayItem, setSelectedPayItem] = useState(null);
+  const [isBulkPaymentModalOpen, setIsBulkPaymentModalOpen] = useState(false);
   const [successToast, setSuccessToast] = useState('');
   const [expandedDates, setExpandedDates] = useState({}); // track collapse/expand per date
 
@@ -192,12 +195,21 @@ export default function PendingPaymentsPage({ onOpenTraceDrawer }) {
 
         <div className="flex items-center gap-2 flex-wrap">
           <button
+            onClick={() => setIsBulkPaymentModalOpen(true)}
+            className="px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+            title="Upload payment Excel to auto-match and reconcile in bulk"
+          >
+            <CreditCard className="w-4 h-4" />
+            <span>📊 Bulk Upload Payments (Excel)</span>
+          </button>
+
+          <button
             onClick={handleExportExcel}
             disabled={currentViewStats.totalPending === 0}
-            className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+            className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
           >
-            <FileSpreadsheet className="w-4 h-4" />
-            <span>Export Excel ({currentViewStats.totalPending})</span>
+            <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
+            <span>Export Pending ({currentViewStats.totalPending})</span>
           </button>
 
           <button
@@ -598,6 +610,18 @@ export default function PendingPaymentsPage({ onOpenTraceDrawer }) {
           }}
         />
       )}
+
+      {/* Bulk Payment Excel Reconciliation Modal */}
+      <BulkPaymentUploadModal
+        isOpen={isBulkPaymentModalOpen}
+        onClose={() => setIsBulkPaymentModalOpen(false)}
+        onUploadSuccess={() => {
+          setIsBulkPaymentModalOpen(false);
+          setSuccessToast('🎉 Bulk payments successfully reconciled and applied to ledger!');
+          setTimeout(() => setSuccessToast(''), 5000);
+          loadAlerts();
+        }}
+      />
 
     </div>
   );
