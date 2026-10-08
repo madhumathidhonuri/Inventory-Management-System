@@ -1,13 +1,35 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   X, Store, MapPin, Phone, Mail, Boxes, Wrench, Clock, CheckCircle2, 
   AlertCircle, ChevronRight, Search, Download, ExternalLink, QrCode, 
-  CreditCard, ArrowRight, Truck, RefreshCw, Send, Check, Receipt
+  CreditCard, ArrowRight, Truck, RefreshCw, Send, Check, Receipt,
+  Calendar, Filter, FileSpreadsheet
 } from 'lucide-react';
 import { fetchDealerSummary, updateQuickPayment } from '../services/api';
 import { buildCustomerCredentialsWhatsAppMessage, buildPaymentDueReminderWhatsAppMessage } from '../utils/whatsapp';
+import { exportDealerStatementExcel } from '../utils/excelExport';
 import FitmentReceiptModal from './FitmentReceiptModal';
 import ConsolidatedReminderModal from './ConsolidatedReminderModal';
+
+function parseStandardDate(raw) {
+  if (!raw || raw === '-') return '';
+  const str = String(raw).trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(str)) {
+    return str.substring(0, 10);
+  }
+  const dmyMatch = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+  if (dmyMatch) {
+    const day = dmyMatch[1].padStart(2, '0');
+    const month = dmyMatch[2].padStart(2, '0');
+    const year = dmyMatch[3];
+    return `${year}-${month}-${day}`;
+  }
+  const parsed = new Date(str);
+  if (!isNaN(parsed.getTime())) {
+    return parsed.toISOString().split('T')[0];
+  }
+  return '';
+}
 
 export default function DealerDetailModal({ isOpen, onClose, dealerName, onOpenDeviceCard }) {
   const [data, setData] = useState(null);
@@ -17,16 +39,32 @@ export default function DealerDetailModal({ isOpen, onClose, dealerName, onOpenD
   const [statusFilter, setStatusFilter] = useState('ALL'); // 'ALL' | 'WITH_DEALER' | 'INSTALLED'
   const [paymentFilter, setPaymentFilter] = useState('ALL'); // 'ALL' | 'RECEIVED' | 'PENDING'
   const [searchQuery, setSearchQuery] = useState('');
+  
+  // Custom Date Range States
+  const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
+  const yesterdayStr = useMemo(() => new Date(Date.now() - 86400000).toISOString().split('T')[0], []);
+  const firstOfMonthStr = useMemo(() => {
+    const d = new Date();
+    d.setDate(1);
+    return d.toISOString().split('T')[0];
+  }, []);
+
+  const [dateRangeMode, setDateRangeMode] = useState('ALL'); // 'ALL' | 'TODAY' | 'YESTERDAY' | 'THIS_MONTH' | 'CUSTOM'
+  const [startDate, setStartDate] = useState(firstOfMonthStr);
+  const [endDate, setEndDate] = useState(todayStr);
+
   const [activePaymentMenuId, setActivePaymentMenuId] = useState(null);
   const [selectedReceiptDevice, setSelectedReceiptDevice] = useState(null);
   const [updatingPaymentId, setUpdatingPaymentId] = useState(null);
   const [consolidatedModalData, setConsolidatedModalData] = useState(null);
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     if (isOpen && dealerName) {
       loadSummary(dealerName);
       setStatusFilter('ALL');
       setPaymentFilter('ALL');
+      setDateRangeMode('ALL');
       setSearchQuery('');
     } else {
       setData(null);
@@ -77,24 +115,132 @@ export default function DealerDetailModal({ isOpen, onClose, dealerName, onOpenD
     return attrs['CUSTOMER PHONE NUMBER'] || attrs['Customer Phone Number'] || attrs['Primary Mobile'] || attrs['PRIMARY MOBILE'] || attrs['Phone'] || attrs['phone_number'] || '-';
   };
 
-  const filteredDevices = devices.filter(d => {
-    if (statusFilter !== 'ALL' && d.current_status !== statusFilter) return false;
-
-    // Payment filter
-    const isPaid = d.payment_status === 'RECEIVED' || String(d.payment_status || '').toUpperCase().includes('REC') || String(d.payment_status || '').toUpperCase().includes('PAID');
-    if (paymentFilter === 'RECEIVED' && !isPaid) return false;
-    if (paymentFilter === 'PENDING' && isPaid) return false;
-
-    const veh = extractVehicleNo(d).toLowerCase();
-    const cust = extractCustName(d).toLowerCase();
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      const imei = (d.imei_number || '').toLowerCase();
-      const model = (d.device_type_name || '').toLowerCase();
-      return imei.includes(q) || model.includes(q) || veh.includes(q) || cust.includes(q);
+  const extractDeviceDate = (d) => {
+    if (d.installation_date && d.installation_date !== '-') {
+      const std = parseStandardDate(d.installation_date);
+      if (std) return std;
     }
-    return true;
-  });
+    const attrs = d.additional_attributes || {};
+    const rawAttrDate = attrs['INSTALLATION DATE'] || attrs['Installation Date'] || attrs['CERTIFICATE ISSUED DATE'] || attrs['Certificate Issued Date'] || attrs['DATE'] || attrs['Date'] || attrs['STOCK PLACE DATE'] || attrs['Stock Place Date'];
+    if (rawAttrDate) {
+      const std = parseStandardDate(rawAttrDate);
+      if (std) return std;
+    }
+    if (d.created_at) {
+      const std = parseStandardDate(d.created_at);
+      if (std) return std;
+    }
+    return '';
+  };
+
+  const filteredDevices = useMemo(() => {
+    return devices.filter(d => {
+      // 1. Status filter
+      if (statusFilter !== 'ALL' && d.current_status !== statusFilter) return false;
+
+      // 2. Payment filter
+      const isPaid = d.payment_status === 'RECEIVED' || String(d.payment_status || '').toUpperCase().includes('REC') || String(d.payment_status || '').toUpperCase().includes('PAID');
+      if (paymentFilter === 'RECEIVED' && !isPaid) return false;
+      if (paymentFilter === 'PENDING' && isPaid) return false;
+
+      // 3. Date Range filter
+      if (dateRangeMode !== 'ALL') {
+        const devDate = extractDeviceDate(d);
+        if (dateRangeMode === 'TODAY') {
+          if (devDate !== todayStr) return false;
+        } else if (dateRangeMode === 'YESTERDAY') {
+          if (devDate !== yesterdayStr) return false;
+        } else if (dateRangeMode === 'THIS_MONTH') {
+          const now = new Date();
+          const monthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+          if (!devDate.startsWith(monthPrefix)) return false;
+        } else if (dateRangeMode === 'CUSTOM') {
+          if (!devDate) return false;
+          if (startDate && devDate < startDate) return false;
+          if (endDate && devDate > endDate) return false;
+        }
+      }
+
+      // 4. Search query
+      const veh = extractVehicleNo(d).toLowerCase();
+      const cust = extractCustName(d).toLowerCase();
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const imei = (d.imei_number || '').toLowerCase();
+        const model = (d.device_type_name || '').toLowerCase();
+        return imei.includes(q) || model.includes(q) || veh.includes(q) || cust.includes(q);
+      }
+      return true;
+    });
+  }, [devices, statusFilter, paymentFilter, dateRangeMode, startDate, endDate, searchQuery, todayStr, yesterdayStr]);
+
+  // Dynamic Sales & Installation Metrics for Filtered Devices
+  const filteredMetrics = useMemo(() => {
+    let total = filteredDevices.length;
+    let installed = 0;
+    let inStock = 0;
+    let faulty = 0;
+    let totalCollection = 0;
+    let paidCount = 0;
+    let pendingCount = 0;
+    let paidAmount = 0;
+    let pendingAmount = 0;
+
+    for (const d of filteredDevices) {
+      const isInstalled = d.current_status === 'INSTALLED' || extractVehicleNo(d) !== '-';
+      const isPaid = d.payment_status === 'RECEIVED' || String(d.payment_status || '').toUpperCase().includes('REC') || String(d.payment_status || '').toUpperCase().includes('PAID');
+      const cost = Number(d.cost) || 0;
+
+      if (d.current_status === 'FAULTY') {
+        faulty++;
+      } else if (isInstalled) {
+        installed++;
+        totalCollection += cost;
+        if (isPaid) {
+          paidCount++;
+          paidAmount += cost;
+        } else {
+          pendingCount++;
+          pendingAmount += cost;
+        }
+      } else {
+        inStock++;
+      }
+    }
+
+    return {
+      total,
+      installed,
+      inStock,
+      faulty,
+      totalCollection,
+      paidCount,
+      pendingCount,
+      paidAmount,
+      pendingAmount
+    };
+  }, [filteredDevices]);
+
+  // Excel Statement Export Handler with Date Range
+  const handleExportStatement = async () => {
+    const listToExport = filteredDevices.length > 0 ? filteredDevices : devices;
+    if (!listToExport || listToExport.length === 0) return;
+    setExporting(true);
+    try {
+      await exportDealerStatementExcel(dealer, listToExport, {
+        dateRangeMode,
+        startDate,
+        endDate,
+        statusFilter,
+        paymentFilter
+      });
+    } catch (err) {
+      console.error('Excel Export failed, falling back to CSV', err);
+      handleExportCsv();
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const handleExportCsv = () => {
     const listToExport = filteredDevices.length > 0 ? filteredDevices : devices;
@@ -109,14 +255,15 @@ export default function DealerDetailModal({ isOpen, onClose, dealerName, onOpenD
       `"${extractCustPhone(d)}"`,
       `"${d.payment_status || '-'}"`,
       `"${d.cost ? `₹${d.cost}` : '-'}"`,
-      `"${d.installation_date || '-'}"`
+      `"${d.installation_date || extractDeviceDate(d) || '-'}"`
     ]);
 
     const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement('a');
     link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `${dealer.name || 'Dealer'}_Stock_Summary_${paymentFilter !== 'ALL' ? paymentFilter + '_' : ''}${new Date().toISOString().split('T')[0]}.csv`);
+    const dateSuffix = dateRangeMode === 'CUSTOM' ? `${startDate}_to_${endDate}` : dateRangeMode;
+    link.setAttribute('download', `${dealer.name || 'Dealer'}_Statement_${dateSuffix}_${new Date().toISOString().split('T')[0]}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -204,13 +351,13 @@ export default function DealerDetailModal({ isOpen, onClose, dealerName, onOpenD
 
           <div className="flex items-center gap-2">
             <button
-              onClick={handleExportCsv}
-              disabled={loading || !data}
-              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-              title="Download Dealer Stock CSV Statement"
+              onClick={handleExportStatement}
+              disabled={loading || !data || exporting}
+              className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
+              title="Download Dealer Sales & Stock Statement Excel with Date Range"
             >
-              <Download className="w-3.5 h-3.5 text-emerald-400" />
-              <span className="hidden sm:inline">Export Statement</span>
+              <FileSpreadsheet className="w-3.5 h-3.5 text-white" />
+              <span className="hidden sm:inline">{exporting ? 'Exporting...' : 'Export Statement (.xlsx)'}</span>
             </button>
             <button
               onClick={onClose}
@@ -475,10 +622,10 @@ export default function DealerDetailModal({ isOpen, onClose, dealerName, onOpenD
                       </select>
 
                       {/* Clear / Reset Filter Button */}
-                      {(statusFilter !== 'ALL' || paymentFilter !== 'ALL' || searchQuery) && (
+                      {(statusFilter !== 'ALL' || paymentFilter !== 'ALL' || dateRangeMode !== 'ALL' || searchQuery) && (
                         <button
                           type="button"
-                          onClick={() => { setStatusFilter('ALL'); setPaymentFilter('ALL'); setSearchQuery(''); }}
+                          onClick={() => { setStatusFilter('ALL'); setPaymentFilter('ALL'); setDateRangeMode('ALL'); setSearchQuery(''); }}
                           className="px-2 py-1 text-[11px] font-bold text-slate-500 hover:text-red-600 bg-slate-100 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
                           title="Clear all filters"
                         >
@@ -489,13 +636,95 @@ export default function DealerDetailModal({ isOpen, onClose, dealerName, onOpenD
                   )}
                 </div>
 
+                {/* DATE RANGE FILTER RIBBON & PERIOD SALES METRICS */}
+                {activeTab === 'devices' && (
+                  <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-2xs space-y-3">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-xs font-bold text-slate-500 flex items-center gap-1 uppercase tracking-wider mr-1">
+                          <Calendar className="w-3.5 h-3.5 text-indigo-600" /> Date Range:
+                        </span>
+
+                        {[
+                          { id: 'ALL', label: 'All Time' },
+                          { id: 'TODAY', label: 'Today' },
+                          { id: 'YESTERDAY', label: 'Yesterday' },
+                          { id: 'THIS_MONTH', label: 'This Month' },
+                          { id: 'CUSTOM', label: 'Custom Range' }
+                        ].map(tab => (
+                          <button
+                            key={tab.id}
+                            type="button"
+                            onClick={() => setDateRangeMode(tab.id)}
+                            className={`px-3 py-1 text-xs font-bold rounded-xl transition-all cursor-pointer ${
+                              dateRangeMode === tab.id
+                                ? 'bg-indigo-600 text-white shadow-xs'
+                                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                            }`}
+                          >
+                            {tab.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      {dateRangeMode === 'CUSTOM' && (
+                        <div className="flex items-center gap-2 bg-slate-50 p-1.5 border border-slate-200 rounded-xl">
+                          <div className="flex items-center gap-1.5 text-xs text-slate-600 font-semibold px-1">
+                            <span className="text-[11px] text-slate-400 uppercase">From</span>
+                            <input
+                              type="date"
+                              value={startDate}
+                              onChange={(e) => setStartDate(e.target.value)}
+                              className="bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-bold text-slate-800 focus:outline-none focus:border-indigo-500 cursor-pointer font-mono shadow-2xs"
+                            />
+                          </div>
+
+                          <span className="text-slate-400 font-bold text-xs">→</span>
+
+                          <div className="flex items-center gap-1.5 text-xs text-slate-600 font-semibold px-1">
+                            <span className="text-[11px] text-slate-400 uppercase">To</span>
+                            <input
+                              type="date"
+                              value={endDate}
+                              onChange={(e) => setEndDate(e.target.value)}
+                              className="bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-bold text-slate-800 focus:outline-none focus:border-indigo-500 cursor-pointer font-mono shadow-2xs"
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Filtered Sales / Installation Highlights Banner */}
+                    {dateRangeMode !== 'ALL' && (
+                      <div className="flex flex-wrap items-center justify-between gap-3 px-3.5 py-2.5 bg-indigo-50/70 border border-indigo-200 rounded-xl text-xs text-indigo-950">
+                        <div className="flex flex-wrap items-center gap-3">
+                          <span className="font-bold flex items-center gap-1 text-indigo-900">
+                            <span>🎯</span> Filtered Period ({dateRangeMode === 'CUSTOM' ? `${startDate} to ${endDate}` : dateRangeMode}):
+                          </span>
+                          <span>Installed / Sales: <strong className="font-mono text-emerald-700">{filteredMetrics.installed} units</strong></span>
+                          <span>In Stock: <strong className="font-mono text-blue-700">{filteredMetrics.inStock} units</strong></span>
+                          <span>Total Value: <strong className="font-mono text-purple-800">₹{filteredMetrics.totalCollection.toLocaleString('en-IN')}</strong></span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-100/80 px-2 py-0.5 rounded-md">
+                            ✓ Paid: ₹{filteredMetrics.paidAmount.toLocaleString('en-IN')} ({filteredMetrics.paidCount})
+                          </span>
+                          <span className="text-[11px] font-semibold text-amber-800 bg-amber-100/80 px-2 py-0.5 rounded-md">
+                            ⏳ Pending: ₹{filteredMetrics.pendingAmount.toLocaleString('en-IN')} ({filteredMetrics.pendingCount})
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* TAB 1: ALLOCATED DEVICES TABLE */}
                 {activeTab === 'devices' && (
                   <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-2xs">
                     <div className="overflow-x-auto max-h-[300px]">
                       {filteredDevices.length === 0 ? (
                         <div className="text-center py-10 text-xs text-slate-400">
-                          No matching devices found for this dealer.
+                          No matching devices found for this dealer in selected filter/date range.
                         </div>
                       ) : (
                         <table className="w-full text-left text-xs border-collapse">
@@ -503,6 +732,7 @@ export default function DealerDetailModal({ isOpen, onClose, dealerName, onOpenD
                             <tr>
                               <th className="p-3">IMEI & Model</th>
                               <th className="p-3">Status</th>
+                              <th className="p-3">Fitment Date</th>
                               <th className="p-3">Vehicle Number</th>
                               <th className="p-3">Customer Details</th>
                               <th className="p-3">Payment</th>
@@ -532,6 +762,10 @@ export default function DealerDetailModal({ isOpen, onClose, dealerName, onOpenD
                                   }`}>
                                     {d.current_status.replace('_', ' ')}
                                   </span>
+                                </td>
+
+                                <td className="p-3 font-mono text-[11px] text-slate-600">
+                                  {d.installation_date && d.installation_date !== '-' ? d.installation_date : (extractDeviceDate(d) || '-')}
                                 </td>
 
                                 <td className="p-3 font-mono font-semibold text-slate-800">
