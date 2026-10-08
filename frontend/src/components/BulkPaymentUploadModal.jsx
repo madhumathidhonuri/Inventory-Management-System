@@ -554,8 +554,13 @@ export default function BulkPaymentUploadModal({ isOpen, onClose, onUploadSucces
 
                               {/* Vehicle Number & Match details */}
                               <td className="py-2 px-3 font-semibold text-white">
-                                <div className="flex items-center gap-1.5">
+                                <div className="flex items-center gap-1.5 flex-wrap">
                                   <span>{row.vehicle_no || row.category || '-'}</span>
+                                  {row.is_split && (
+                                    <span className="text-[9px] px-1.5 py-0.5 rounded font-bold font-sans bg-teal-500/20 text-teal-300 border border-teal-500/30" title={`Divided from single cell: ₹${row.original_amount} ÷ ${row.split_count}`}>
+                                      ÷{row.split_count} Split (₹{row.amount_received})
+                                    </span>
+                                  )}
                                   {row.match_type && (
                                     <span className="text-[9px] px-1 py-0.2 rounded bg-slate-800 text-slate-400 font-sans">
                                       {row.match_type}

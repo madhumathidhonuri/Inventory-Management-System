@@ -1022,6 +1022,34 @@ function findInstallationAndDeviceByVehicle(vehicleNo) {
   return null;
 }
 
+/**
+ * Splits a cell string if it contains multiple vehicle numbers or chassis numbers separated by commas, slashes, newlines, etc.
+ */
+function splitVehicleNumbers(rawVehStr) {
+  if (!rawVehStr || typeof rawVehStr !== 'string') return [];
+  const trimmed = rawVehStr.trim();
+  if (!trimmed) return [];
+
+  // Split by newlines, carriage returns, commas, slashes, semicolons, ampersands, plus signs, or 'and'
+  const rawParts = trimmed
+    .split(/[\r\n,;/&+]+|\s+and\s+/i)
+    .map(p => p.trim())
+    .filter(p => p.length > 0);
+
+  const cleanVehicles = [];
+  for (const part of rawParts) {
+    // Check if the part has space-separated vehicles/chassis (e.g. "AP39WV8555 AP39U7689")
+    const words = part.split(/\s+/).filter(Boolean);
+    if (words.length > 1 && words.every(w => /^[A-Z0-9]{6,25}$/i.test(w.replace(/[^A-Z0-9]/gi, '')))) {
+      cleanVehicles.push(...words);
+    } else {
+      cleanVehicles.push(part);
+    }
+  }
+
+  return cleanVehicles.length > 0 ? cleanVehicles : [trimmed];
+}
+
 function detectPaymentColumns(headers = []) {
   const mapping = {
     payment_date: '',
@@ -1048,15 +1076,15 @@ function detectPaymentColumns(headers = []) {
   };
 
   mapping.payment_date = findCol(['payment_date', 'paymentdate', 'paid_date', 'received_date', 'date', 'pay_date']);
-  mapping.category = findCol(['category', 'project', 'type']);
-  mapping.vehicle_number = findCol(['vehicle_num', 'vehiclenum', 'vehicle_number', 'vehicleno', 'vehicle_no', 'vehicle', 'reg_no', 'regno', 'plate_no']);
-  mapping.customer_name = findCol(['customer_name', 'customername', 'customer', 'party_name', 'name', 'client_name', 'client']);
-  mapping.customer_phone = findCol(['customer_phone_number', 'customer_phone', 'customer_mobile', 'phone_number', 'phone', 'mobile', 'contact']);
-  mapping.amount_received = findCol(['amount_received', 'amountreceived', 'received_amount', 'paid_amount', 'amount_paid', 'received_amt', 'amount', 'amt_received', 'collected_amount']);
+  mapping.category = findCol(['device_name', 'devicename', 'category', 'project', 'type']);
+  mapping.vehicle_number = findCol(['vehicle_number', 'vehiclenumber', 'vehicle_num', 'vehiclenum', 'vehicleno', 'vehicle_no', 'vehicle', 'reg_no', 'regno', 'plate_no']);
+  mapping.customer_name = findCol(['customer_name', 'customername', 'customer', 'party_name', 'name', 'client_name', 'client', 'company_name', 'company']);
+  mapping.customer_phone = findCol(['contact_number', 'contactnumber', 'customer_phone_number', 'customer_phone', 'customer_mobile', 'phone_number', 'phone', 'mobile', 'contact']);
+  mapping.amount_received = findCol(['amount', 'amount_received', 'amountreceived', 'received_amount', 'paid_amount', 'amount_paid', 'received_amt', 'amt_received', 'collected_amount']);
   mapping.pending_amt = findCol(['pending_amt', 'pendingamt', 'pending_amount', 'pending_balance', 'balance_due', 'balance_amt', 'pending', 'balance', 'due_amt']);
   mapping.payment_mode = findCol(['payment_mode', 'paymentmode', 'mode', 'payment_type', 'mode_of_payment', 'method', 'type_of_payment']);
-  mapping.received_by = findCol(['received_by', 'receivedby', 'collected_by', 'staff', 'technician', 'collector']);
-  mapping.dealer_location = findCol(['dealer/location', 'dealer_location', 'dealerlocation', 'dealer', 'location', 'dealer_name', 'place', 'city']);
+  mapping.received_by = findCol(['sales_person', 'salesperson', 'received_by', 'receivedby', 'collected_by', 'staff', 'technician', 'collector', 'sales']);
+  mapping.dealer_location = findCol(['sales_person', 'salesperson', 'dealer/location', 'dealer_location', 'dealerlocation', 'dealer', 'location', 'dealer_name', 'place', 'city']);
 
   return mapping;
 }
@@ -1113,7 +1141,9 @@ router.post('/payment-excel-preview', upload.single('file'), (req, res) => {
     let totalAmountReceived = 0;
     let totalPendingAmount = 0;
 
-    const previewRows = rawRows.map((row, idx) => {
+    const previewRows = [];
+
+    rawRows.forEach((row, idx) => {
       const rowNum = idx + 2;
       const vehKey = autoMapping.vehicle_number;
       const amtKey = autoMapping.amount_received;
@@ -1126,7 +1156,7 @@ router.post('/payment-excel-preview', upload.single('file'), (req, res) => {
       const recByKey = autoMapping.received_by;
       const dealKey = autoMapping.dealer_location;
 
-      const rawVeh = vehKey && row[vehKey] ? String(row[vehKey]).trim() : '';
+      const rawVehCell = vehKey && row[vehKey] ? String(row[vehKey]).trim() : '';
       const rawAmt = amtKey && row[amtKey] !== undefined ? String(row[amtKey]).replace(/[^0-9.]/g, '') : '';
       const rawPend = pendKey && row[pendKey] !== undefined && String(row[pendKey]).trim() !== '' ? String(row[pendKey]).replace(/[^0-9.]/g, '') : '';
       const rawDate = dateKey && row[dateKey] ? standardizeDate(row[dateKey]) : new Date().toISOString().split('T')[0];
@@ -1137,83 +1167,100 @@ router.post('/payment-excel-preview', upload.single('file'), (req, res) => {
       const rawRecBy = recByKey && row[recByKey] ? String(row[recByKey]).trim() : '';
       const rawDealer = dealKey && row[dealKey] ? String(row[dealKey]).trim() : '';
 
-      const amountReceived = parseFloat(rawAmt) || 0;
-      const pendingAmt = rawPend !== '' ? (parseFloat(rawPend) || 0) : 0;
+      const rowAmountReceived = parseFloat(rawAmt) || 0;
+      const rowPendingAmt = rawPend !== '' ? (parseFloat(rawPend) || 0) : 0;
 
-      totalAmountReceived += amountReceived;
-      totalPendingAmount += pendingAmt;
+      totalAmountReceived += rowAmountReceived;
+      totalPendingAmount += rowPendingAmt;
 
-      let status = 'NOT_FOUND';
-      let proposedStatus = 'RECEIVED';
-      let reason = '';
-      let match = null;
-      let matchedInstallation = null;
-      let matchedDevice = null;
+      // Extract and split multiple vehicle numbers if cell contains 2, 3 or more vehicles
+      const splitVehs = splitVehicleNumbers(rawVehCell);
+      const vehicleCount = splitVehs.length > 0 ? splitVehs.length : 1;
 
-      const isDirectEntry = !rawVeh || rawVeh === '-' || rawVeh.toLowerCase().includes('balance') || rawVeh.toLowerCase().includes('device balance');
+      // Divide amount received & pending amount equally among the split vehicles
+      const splitAmt = Math.round((rowAmountReceived / vehicleCount) * 100) / 100;
+      const splitPend = Math.round((rowPendingAmt / vehicleCount) * 100) / 100;
 
-      if (!isDirectEntry) {
-        match = findInstallationAndDeviceByVehicle(rawVeh);
-        if (match) {
-          matchedInstallation = match.installation;
-          matchedDevice = match.device;
+      splitVehs.forEach((singleVeh, vIdx) => {
+        let status = 'NOT_FOUND';
+        let proposedStatus = 'RECEIVED';
+        let reason = '';
+        let match = null;
+        let matchedInstallation = null;
+        let matchedDevice = null;
 
-          const currentPayStatus = String(matchedInstallation?.payment_status || '').toUpperCase();
-          
-          if (pendingAmt > 0) {
-            proposedStatus = 'PARTIAL';
-            status = 'PARTIAL';
-            partialCount++;
-          } else {
-            proposedStatus = 'RECEIVED';
-            if (currentPayStatus === 'RECEIVED' || currentPayStatus === 'PAID') {
-              status = 'ALREADY_PAID';
-              alreadyPaidCount++;
+        const isDirectEntry = !singleVeh || singleVeh === '-' || singleVeh.toLowerCase().includes('balance') || singleVeh.toLowerCase().includes('device balance');
+
+        if (!isDirectEntry) {
+          match = findInstallationAndDeviceByVehicle(singleVeh);
+          if (match) {
+            matchedInstallation = match.installation;
+            matchedDevice = match.device;
+
+            const currentPayStatus = String(matchedInstallation?.payment_status || '').toUpperCase();
+            
+            if (splitPend > 0) {
+              proposedStatus = 'PARTIAL';
+              status = 'PARTIAL';
+              partialCount++;
             } else {
-              status = 'MATCHED';
-              matchedCount++;
+              proposedStatus = 'RECEIVED';
+              if (currentPayStatus === 'RECEIVED' || currentPayStatus === 'PAID') {
+                status = 'ALREADY_PAID';
+                alreadyPaidCount++;
+              } else {
+                status = 'MATCHED';
+                matchedCount++;
+              }
             }
+          } else {
+            status = 'NOT_FOUND';
+            reason = `Vehicle "${singleVeh}" not found in inventory or installations`;
+            notFoundCount++;
           }
         } else {
-          status = 'NOT_FOUND';
-          reason = `Vehicle "${rawVeh}" not found in inventory or installations`;
-          notFoundCount++;
+          status = 'DEALER_DIRECT_ENTRY';
+          reason = `Direct Account/Service Receipt (${rawName || rawDealer || rawCat || 'Non-vehicle entry'})`;
+          dealerDirectCount++;
         }
-      } else {
-        status = 'DEALER_DIRECT_ENTRY';
-        reason = `Direct Account/Service Receipt (${rawName || rawDealer || rawCat || 'Non-vehicle entry'})`;
-        dealerDirectCount++;
-      }
 
-      return {
-        row_number: rowNum,
-        row_index: rowNum,
-        raw: row,
-        vehicle_number: rawVeh,
-        vehicle_no: rawVeh,
-        amount_received: amountReceived,
-        pending_amt: pendingAmt,
-        payment_date: rawDate,
-        category: rawCat,
-        customer_name: rawName || matchedInstallation?.customer_name || '',
-        customer_phone: rawPhone || matchedInstallation?.customer_contact || '',
-        payment_mode: rawMode,
-        received_by: rawRecBy,
-        dealer_location: rawDealer,
-        status,
-        proposed_status: proposedStatus,
-        reason,
-        matched_imei: matchedInstallation?.imei_number || matchedDevice?.imei_number || '',
-        matched_device_imei: matchedInstallation?.imei_number || matchedDevice?.imei_number || '',
-        match_type: match?.type || '',
-        existing_status: matchedInstallation?.payment_status || 'PENDING',
-        existing_sale_price: matchedInstallation?.sale_price || 0
-      };
+        const isMultiSplit = vehicleCount > 1;
+
+        previewRows.push({
+          row_number: rowNum,
+          row_index: isMultiSplit ? `${rowNum}.${vIdx + 1}` : rowNum,
+          raw: row,
+          vehicle_number: singleVeh,
+          vehicle_no: singleVeh,
+          original_vehicle_cell: rawVehCell,
+          amount_received: splitAmt,
+          pending_amt: splitPend,
+          original_amount: rowAmountReceived,
+          is_split: isMultiSplit,
+          split_count: vehicleCount,
+          split_index: vIdx + 1,
+          payment_date: rawDate,
+          category: rawCat,
+          customer_name: rawName || matchedInstallation?.customer_name || '',
+          customer_phone: rawPhone || matchedInstallation?.customer_contact || '',
+          payment_mode: rawMode,
+          received_by: rawRecBy,
+          dealer_location: rawDealer,
+          status,
+          proposed_status: proposedStatus,
+          reason: isMultiSplit ? `Divided ₹${rowAmountReceived.toLocaleString('en-IN')} among ${vehicleCount} vehicles (₹${splitAmt.toLocaleString('en-IN')} each)${reason ? ' | ' + reason : ''}` : reason,
+          matched_imei: matchedInstallation?.imei_number || matchedDevice?.imei_number || '',
+          matched_device_imei: matchedInstallation?.imei_number || matchedDevice?.imei_number || '',
+          match_type: match?.type || '',
+          existing_status: matchedInstallation?.payment_status || 'PENDING',
+          existing_sale_price: matchedInstallation?.sale_price || 0
+        });
+      });
     });
 
     res.json({
       success: true,
-      total_rows: rawRows.length,
+      total_rows: previewRows.length,
       matched_count: matchedCount,
       partial_count: partialCount,
       already_paid_count: alreadyPaidCount,
@@ -1222,7 +1269,7 @@ router.post('/payment-excel-preview', upload.single('file'), (req, res) => {
       total_amount_received: totalAmountReceived,
       total_pending_amount: totalPendingAmount,
       stats: {
-        total: rawRows.length,
+        total: previewRows.length,
         matched: matchedCount,
         partial: partialCount,
         already_paid: alreadyPaidCount,
@@ -1259,19 +1306,41 @@ router.post('/payment-excel-commit', upload.single('file'), (req, res) => {
       const rawData = xlsx.utils.sheet_to_json(worksheet, { defval: '' });
       const mapping = detectPaymentColumns(Object.keys(rawData[0] || {}));
 
-      rowsToProcess = rawData.map((row, idx) => ({
-        row_number: idx + 2,
-        vehicle_number: String(row[mapping.vehicle_number] || '').trim(),
-        amount_received: parseFloat(String(row[mapping.amount_received] || 0).replace(/[^0-9.]/g, '')) || 0,
-        pending_amt: parseFloat(String(row[mapping.pending_amt] || 0).replace(/[^0-9.]/g, '')) || 0,
-        payment_date: standardizeDate(row[mapping.payment_date]) || new Date().toISOString().split('T')[0],
-        payment_mode: String(row[mapping.payment_mode] || 'UPI').trim().toUpperCase(),
-        received_by: String(row[mapping.received_by] || '').trim(),
-        dealer_location: String(row[mapping.dealer_location] || '').trim(),
-        customer_name: String(row[mapping.customer_name] || '').trim(),
-        customer_phone: cleanPhoneString(row[mapping.customer_phone]),
-        category: String(row[mapping.category] || 'VLTD').trim().toUpperCase()
-      }));
+      rawData.forEach((row, idx) => {
+        const rowNum = idx + 2;
+        const rawVehCell = String(row[mapping.vehicle_number] || '').trim();
+        const rowAmount = parseFloat(String(row[mapping.amount_received] || 0).replace(/[^0-9.]/g, '')) || 0;
+        const rowPending = parseFloat(String(row[mapping.pending_amt] || 0).replace(/[^0-9.]/g, '')) || 0;
+        const pDate = standardizeDate(row[mapping.payment_date]) || new Date().toISOString().split('T')[0];
+        const pMode = String(row[mapping.payment_mode] || 'UPI').trim().toUpperCase();
+        const recBy = String(row[mapping.received_by] || '').trim();
+        const dealerLoc = String(row[mapping.dealer_location] || '').trim();
+        const custName = String(row[mapping.customer_name] || '').trim();
+        const custPhone = cleanPhoneString(row[mapping.customer_phone]);
+        const cat = String(row[mapping.category] || 'VLTD').trim().toUpperCase();
+
+        const splitVehs = splitVehicleNumbers(rawVehCell);
+        const count = splitVehs.length > 0 ? splitVehs.length : 1;
+        const splitAmt = Math.round((rowAmount / count) * 100) / 100;
+        const splitPend = Math.round((rowPending / count) * 100) / 100;
+
+        splitVehs.forEach((singleVeh, vIdx) => {
+          rowsToProcess.push({
+            row_number: rowNum,
+            row_index: count > 1 ? `${rowNum}.${vIdx + 1}` : rowNum,
+            vehicle_number: singleVeh,
+            amount_received: splitAmt,
+            pending_amt: splitPend,
+            payment_date: pDate,
+            payment_mode: pMode,
+            received_by: recBy,
+            dealer_location: dealerLoc,
+            customer_name: custName,
+            customer_phone: custPhone,
+            category: cat
+          });
+        });
+      });
     }
 
     if (!Array.isArray(rowsToProcess) || rowsToProcess.length === 0) {
@@ -1281,6 +1350,9 @@ router.post('/payment-excel-commit', upload.single('file'), (req, res) => {
     const successful = [];
     const failed = [];
     let totalUpdatedAmount = 0;
+    let updatedPaidCount = 0;
+    let updatedPartialCount = 0;
+    let dealerEntriesLogged = 0;
 
     const commitTx = db.transaction(() => {
       for (const item of rowsToProcess) {
@@ -1301,6 +1373,12 @@ router.post('/payment-excel-commit', upload.single('file'), (req, res) => {
           if (match) {
             const finalStatus = pend > 0 ? 'PARTIAL' : 'RECEIVED';
             const remarks = recBy ? (dealerLoc ? `${recBy} (${dealerLoc})` : recBy) : dealerLoc;
+
+            if (finalStatus === 'PARTIAL') {
+              updatedPartialCount++;
+            } else {
+              updatedPaidCount++;
+            }
 
             // 1. Update Installation Record
             if (match.installation) {
@@ -1398,9 +1476,18 @@ router.post('/payment-excel-commit', upload.single('file'), (req, res) => {
           totalUpdatedAmount += amt;
         }
       }
+
+      return {
+        total: rowsToProcess.length,
+        updated_paid: updatedPaidCount,
+        updated_partial: updatedPartialCount,
+        dealer_entries_logged: dealerEntriesLogged,
+        not_found: failed.length,
+        total_amount: totalUpdatedAmount
+      };
     });
 
-    commitTx();
+    const summary = commitTx();
 
     // Trigger Cloud Sync
     try {
@@ -1412,6 +1499,7 @@ router.post('/payment-excel-commit', upload.single('file'), (req, res) => {
 
     res.json({
       success: true,
+      summary,
       total_count: rowsToProcess.length,
       success_count: successful.length,
       failed_count: failed.length,
