@@ -31,7 +31,8 @@ import {
   Square,
   X,
   ShieldAlert,
-  Check
+  Check,
+  Building2
 } from 'lucide-react';
 import {
   fetchDailyInstallationLog,
@@ -44,6 +45,7 @@ import { exportInstallationsToExcel } from '../utils/excelExport';
 import DailyInstallationUploadModal from '../components/DailyInstallationUploadModal';
 import BulkPaymentUploadModal from '../components/BulkPaymentUploadModal';
 import PaymentQrModal from '../components/PaymentQrModal';
+import DealersMatrixReportModal from '../components/DealersMatrixReportModal';
 import { buildCustomerCredentialsWhatsAppMessage, buildPaymentQrWhatsAppMessage } from '../utils/whatsapp';
 
 export default function DailyReportsPage({ onOpenTraceDrawer }) {
@@ -85,6 +87,9 @@ export default function DailyReportsPage({ onOpenTraceDrawer }) {
   // Payment QR modal state
   const [paymentQrData, setPaymentQrData] = useState(null);
   const [isPaymentQrOpen, setIsPaymentQrOpen] = useState(false);
+
+  // Dealers Matrix Modal State
+  const [showDealersModal, setShowDealersModal] = useState(false);
 
   useEffect(() => {
     if (dateMode === 'CUSTOM_RANGE') {
@@ -296,6 +301,16 @@ export default function DailyReportsPage({ onOpenTraceDrawer }) {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {/* Dealers Matrix Modal Button */}
+          <button
+            onClick={() => setShowDealersModal(true)}
+            className="px-3.5 py-2 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-xs font-bold rounded-xl shadow-2xs flex items-center gap-1.5 transition-colors cursor-pointer"
+            title="Download multi-dealer installation metrics across custom date ranges"
+          >
+            <Building2 className="w-3.5 h-3.5 text-amber-600" />
+            <span>🏢 Dealers Matrix</span>
+          </button>
+
           {/* Export Excel Button */}
           <button
             onClick={handleExportDateExcel}
@@ -1081,6 +1096,12 @@ export default function DailyReportsPage({ onOpenTraceDrawer }) {
         onClose={() => setIsPaymentQrOpen(false)}
         paymentData={paymentQrData}
         onPaymentUpdated={() => loadDailyLog(selectedDate)}
+      />
+
+      {/* Dealers Installation Matrix Modal */}
+      <DealersMatrixReportModal
+        isOpen={showDealersModal}
+        onClose={() => setShowDealersModal(false)}
       />
     </div>
   );

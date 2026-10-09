@@ -32,7 +32,8 @@ import {
   PieChart,
   DollarSign,
   Wallet,
-  Percent
+  Percent,
+  Building2
 } from 'lucide-react';
 import {
   fetchReportOptions,
@@ -42,15 +43,29 @@ import {
   getCustomerDirectoryExportUrl,
   fetchPaymentsTelemetry,
   getPaymentsExcelDownloadUrl,
-  fetchPnLSummary
+  fetchPnLSummary,
+  fetchDealersMatrix
 } from '../services/api';
+import { exportAllDealersMatrixExcel } from '../utils/excelExport';
 
 export default function ReportsPage() {
-  const [activeTab, setActiveTab] = useState('payments_statement'); // 'payments_statement' | 'pnl_statement' | 'customer_directory' | 'daily_matrix' | 'custom_builder'
+  const [activeTab, setActiveTab] = useState('payments_statement'); // 'payments_statement' | 'pnl_statement' | 'dealers_matrix' | 'customer_directory' | 'daily_matrix' | 'custom_builder'
   const [loadingOptions, setLoadingOptions] = useState(true);
   const [dailyMatrixLoading, setDailyMatrixLoading] = useState(false);
   const [dailyMatrix, setDailyMatrix] = useState(null);
   const [dailyMatrixDate, setDailyMatrixDate] = useState(() => new Date().toISOString().split('T')[0]);
+
+  // Dealers Installation Matrix State
+  const [dealersMatrixData, setDealersMatrixData] = useState(null);
+  const [dealersMatrixLoading, setDealersMatrixLoading] = useState(false);
+  const [dealersRange, setDealersRange] = useState('this_month');
+  const [dealersStartDate, setDealersStartDate] = useState(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+  });
+  const [dealersEndDate, setDealersEndDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [dealersSearch, setDealersSearch] = useState('');
+  const [exportingDealers, setExportingDealers] = useState(false);
 
   // Customer Directory State
   const [customerDirectory, setCustomerDirectory] = useState([]);
@@ -182,8 +197,88 @@ export default function ReportsPage() {
       loadCustomerDirectory();
     } else if (activeTab === 'pnl_statement') {
       loadPnLData();
+    } else if (activeTab === 'dealers_matrix') {
+      loadDealersMatrix();
     }
   }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab === 'dealers_matrix') {
+      loadDealersMatrix();
+    }
+  }, [dealersRange, dealersStartDate, dealersEndDate]);
+
+  const loadDealersMatrix = async () => {
+    setDealersMatrixLoading(true);
+    try {
+      const params = { range: dealersRange };
+      if (dealersRange === 'custom') {
+        params.start_date = dealersStartDate;
+        params.end_date = dealersEndDate;
+      }
+      const res = await fetchDealersMatrix(params);
+      if (res.success) {
+        setDealersMatrixData(res.data);
+      }
+    } catch (err) {
+      console.error('Failed to load dealers matrix:', err);
+    } finally {
+      setDealersMatrixLoading(false);
+    }
+  };
+
+  const handleDealersRangeChange = (mode) => {
+    setDealersRange(mode);
+    const now = new Date();
+    const today = now.toISOString().split('T')[0];
+    if (mode === 'today') {
+      setDealersStartDate(today);
+      setDealersEndDate(today);
+    } else if (mode === 'yesterday') {
+      const y = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+      setDealersStartDate(y);
+      setDealersEndDate(y);
+    } else if (mode === 'this_month') {
+      const first = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+      setDealersStartDate(first);
+      setDealersEndDate(today);
+    } else if (mode === 'last_month') {
+      const firstPrev = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().split('T')[0];
+      const lastPrev = new Date(now.getFullYear(), now.getMonth(), 0).toISOString().split('T')[0];
+      setDealersStartDate(firstPrev);
+      setDealersEndDate(lastPrev);
+    } else if (mode === 'all') {
+      setDealersStartDate('2020-01-01');
+      setDealersEndDate('2099-12-31');
+    }
+  };
+
+  const handleExportDealersMatrixExcel = async () => {
+    if (!dealersMatrixData?.dealers?.length && !dealersMatrixData?.all_installed_records?.length) {
+      alert('No dealer installation data available to export.');
+      return;
+    }
+    setExportingDealers(true);
+    try {
+      const label = dealersRange === 'today' ? `Today (${dealersStartDate})`
+        : dealersRange === 'yesterday' ? `Yesterday (${dealersStartDate})`
+        : dealersRange === 'this_month' ? `This Month (${dealersStartDate} to ${dealersEndDate})`
+        : dealersRange === 'last_month' ? `Last Month (${dealersStartDate} to ${dealersEndDate})`
+        : dealersRange === 'all' ? 'All Time'
+        : `Custom Range (${dealersStartDate} to ${dealersEndDate})`;
+
+      await exportAllDealersMatrixExcel({
+        periodLabel: label,
+        summary: dealersMatrixData.summary || {},
+        dealers: dealersMatrixData.dealers || [],
+        allRecords: dealersMatrixData.all_installed_records || []
+      });
+    } catch (err) {
+      alert('Export failed: ' + err.message);
+    } finally {
+      setExportingDealers(false);
+    }
+  };
 
   const loadCustomerDirectory = async () => {
 
@@ -433,6 +528,23 @@ export default function ReportsPage() {
         </button>
 
         <button
+          onClick={() => setActiveTab('dealers_matrix')}
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 border ${
+            activeTab === 'dealers_matrix'
+              ? 'bg-amber-600 text-white border-amber-600 shadow-2xs'
+              : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+          }`}
+        >
+          <Building2 className="w-4 h-4" />
+          <span>Dealers Performance Matrix</span>
+          {dealersMatrixData?.summary && (
+            <span className="px-2 py-0.5 rounded-full text-[10px] bg-white/20 text-white font-bold">
+              {dealersMatrixData.summary.total_installed_in_period || 0} Installed
+            </span>
+          )}
+        </button>
+
+        <button
           onClick={() => setActiveTab('pnl_statement')}
           className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 border ${
             activeTab === 'pnl_statement'
@@ -493,6 +605,255 @@ export default function ReportsPage() {
           <span>Tailored Report & Billing Register Export</span>
         </button>
       </div>
+
+      {/* TAB: Dealers Installation & Performance Matrix */}
+      {activeTab === 'dealers_matrix' && (
+        <div className="glass-panel p-6 rounded-2xl space-y-6 border border-slate-200 shadow-sm animate-fadeIn">
+          {/* Section Header */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  <Building2 className="w-5 h-5 text-amber-600" /> Dealers Performance & Installation Matrix
+                </h3>
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
+                  {dealersRange.replace('_', ' ').toUpperCase()}
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 mt-1">
+                Comparative analysis of all dealer partners, installations completed in custom date range, holding stock, and sales revenue.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={handleExportDealersMatrixExcel}
+                disabled={exportingDealers || dealersMatrixLoading}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-xs flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                <FileSpreadsheet className="w-4 h-4" />
+                {exportingDealers ? 'Exporting Excel...' : 'Download All Dealers Excel (.xlsx)'}
+              </button>
+
+              <button
+                onClick={loadDealersMatrix}
+                className="p-2 bg-white border border-slate-200 text-slate-600 rounded-xl hover:bg-slate-50 hover:text-slate-900 transition-all shadow-2xs cursor-pointer"
+                title="Refresh Matrix"
+              >
+                <RefreshCw className={`w-4 h-4 ${dealersMatrixLoading ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
+          </div>
+
+          {/* Date Filter & Search Controls */}
+          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              {/* Presets */}
+              <div className="flex flex-wrap items-center gap-1.5 bg-white p-1 rounded-xl border border-slate-200 shadow-2xs">
+                {[
+                  { id: 'today', label: 'Today' },
+                  { id: 'yesterday', label: 'Yesterday' },
+                  { id: 'this_month', label: 'This Month' },
+                  { id: 'last_month', label: 'Last Month' },
+                  { id: 'all', label: 'All Time' },
+                  { id: 'custom', label: 'Custom Range' }
+                ].map(tab => (
+                  <button
+                    key={tab.id}
+                    onClick={() => handleDealersRangeChange(tab.id)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                      dealersRange === tab.id
+                        ? 'bg-amber-600 text-white shadow-2xs font-bold'
+                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Search Box */}
+              <div className="relative flex-1 min-w-[200px] max-w-xs">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                <input
+                  type="text"
+                  placeholder="Filter dealer, region, phone..."
+                  value={dealersSearch}
+                  onChange={(e) => setDealersSearch(e.target.value)}
+                  className="w-full bg-white border border-slate-200 rounded-xl pl-9 pr-3 py-1.5 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-amber-400"
+                />
+              </div>
+            </div>
+
+            {/* Custom Date Pickers */}
+            {dealersRange === 'custom' && (
+              <div className="flex flex-wrap items-center gap-3 p-3 bg-white rounded-xl border border-amber-200 animate-in fade-in duration-150">
+                <div className="flex items-center gap-2 text-xs font-semibold text-slate-700">
+                  <Calendar className="w-4 h-4 text-amber-600" />
+                  <span>Installation Period From:</span>
+                  <input
+                    type="date"
+                    value={dealersStartDate}
+                    onChange={(e) => setDealersStartDate(e.target.value)}
+                    className="border border-slate-200 rounded-lg px-2.5 py-1 text-xs text-slate-900 font-mono focus:border-amber-500 focus:outline-none"
+                  />
+                </div>
+
+                <div className="flex items-center gap-2 text-xs font-semibold text-slate-700">
+                  <span>To:</span>
+                  <input
+                    type="date"
+                    value={dealersEndDate}
+                    onChange={(e) => setDealersEndDate(e.target.value)}
+                    className="border border-slate-200 rounded-lg px-2.5 py-1 text-xs text-slate-900 font-mono focus:border-amber-500 focus:outline-none"
+                  />
+                </div>
+
+                <button
+                  onClick={loadDealersMatrix}
+                  className="px-3.5 py-1.5 bg-slate-900 text-white text-xs font-semibold rounded-lg hover:bg-slate-800 transition-colors ml-auto flex items-center gap-1 cursor-pointer"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" /> Apply Range
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Top KPI Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
+              <div className="flex items-center justify-between text-slate-500 text-xs font-semibold mb-1">
+                <span>Total Installed in Period</span>
+                <Car className="w-4 h-4 text-emerald-600" />
+              </div>
+              <div className="text-2xl font-bold text-emerald-700">
+                {dealersMatrixData?.summary?.total_installed_in_period || 0} <span className="text-xs font-normal text-slate-500">Units</span>
+              </div>
+              <div className="text-[11px] text-slate-400 mt-1">
+                Lifetime: {dealersMatrixData?.summary?.total_installed_all_time || 0} fitments
+              </div>
+            </div>
+
+            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
+              <div className="flex items-center justify-between text-slate-500 text-xs font-semibold mb-1">
+                <span>Total Dispatched Stock</span>
+                <Truck className="w-4 h-4 text-blue-600" />
+              </div>
+              <div className="text-2xl font-bold text-slate-900">
+                {dealersMatrixData?.summary?.total_assigned_stock || 0} <span className="text-xs font-normal text-slate-500">Units</span>
+              </div>
+              <div className="text-[11px] text-slate-400 mt-1">
+                Across {dealersMatrixData?.dealers?.length || 0} registered dealers
+              </div>
+            </div>
+
+            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
+              <div className="flex items-center justify-between text-slate-500 text-xs font-semibold mb-1">
+                <span>Currently In Dealer Stock</span>
+                <Boxes className="w-4 h-4 text-amber-600" />
+              </div>
+              <div className="text-2xl font-bold text-amber-700">
+                {dealersMatrixData?.summary?.total_in_stock || 0} <span className="text-xs font-normal text-slate-500">Units</span>
+              </div>
+              <div className="text-[11px] text-slate-400 mt-1">
+                Uninstalled units ready for fitment
+              </div>
+            </div>
+
+            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
+              <div className="flex items-center justify-between text-slate-500 text-xs font-semibold mb-1">
+                <span>Period Sales Revenue</span>
+                <DollarSign className="w-4 h-4 text-purple-600" />
+              </div>
+              <div className="text-2xl font-bold text-purple-700">
+                ₹{(dealersMatrixData?.summary?.total_revenue_in_period || 0).toLocaleString('en-IN')}
+              </div>
+              <div className="text-[11px] text-emerald-600 font-semibold mt-1">
+                Paid: ₹{(dealersMatrixData?.summary?.total_paid_in_period || 0).toLocaleString('en-IN')} | Due: ₹{(dealersMatrixData?.summary?.total_pending_in_period || 0).toLocaleString('en-IN')}
+              </div>
+            </div>
+          </div>
+
+          {/* Dealers Comparative Table */}
+          <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-2xs">
+            {dealersMatrixLoading ? (
+              <div className="p-16 text-center text-slate-400 text-xs flex flex-col items-center gap-2">
+                <RefreshCw className="w-6 h-6 animate-spin text-amber-600" />
+                <span>Loading dealer performance data...</span>
+              </div>
+            ) : !dealersMatrixData?.dealers?.length ? (
+              <div className="p-16 text-center text-slate-400 text-xs bg-slate-50">
+                No dealer installations found for this date range.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200 uppercase text-[10px] tracking-wider">
+                    <tr>
+                      <th className="p-3.5">#</th>
+                      <th className="p-3.5">Dealer Partner</th>
+                      <th className="p-3.5">Region / Location</th>
+                      <th className="p-3.5 text-center">Dispatched Stock</th>
+                      <th className="p-3.5 text-center bg-emerald-50 text-emerald-900 font-extrabold">Installed in Period</th>
+                      <th className="p-3.5 text-center">Lifetime Installed</th>
+                      <th className="p-3.5 text-center">Current In-Stock</th>
+                      <th className="p-3.5 text-center">Period Rate</th>
+                      <th className="p-3.5 text-right">Period Sales</th>
+                      <th className="p-3.5 text-center">Payment Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {(dealersMatrixData.dealers || [])
+                      .filter(d => {
+                        if (!dealersSearch.trim()) return true;
+                        const q = dealersSearch.toLowerCase().trim();
+                        return d.dealer_name.toLowerCase().includes(q) || (d.region && d.region.toLowerCase().includes(q)) || (d.phone && d.phone.includes(q));
+                      })
+                      .map((d, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50 transition-colors">
+                          <td className="p-3.5 text-slate-400 font-mono text-[11px]">{idx + 1}</td>
+                          <td className="p-3.5">
+                            <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                              <Building2 className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                              <span>{d.dealer_name}</span>
+                            </div>
+                            {d.phone && d.phone !== '-' && (
+                              <div className="text-[10px] text-slate-400 font-mono mt-0.5">{d.phone}</div>
+                            )}
+                          </td>
+                          <td className="p-3.5 text-slate-600">{d.region || 'Regional Hub'}</td>
+                          <td className="p-3.5 text-center font-mono font-semibold text-slate-800">{d.total_assigned}</td>
+                          <td className="p-3.5 text-center font-mono font-bold bg-emerald-50/70 text-emerald-700 text-sm">
+                            {d.installed_in_period}
+                          </td>
+                          <td className="p-3.5 text-center font-mono text-slate-600">{d.installed_all_time}</td>
+                          <td className="p-3.5 text-center font-mono font-semibold text-amber-700">{d.in_stock}</td>
+                          <td className="p-3.5 text-center font-mono text-[11px]">
+                            <span className={`px-2 py-0.5 rounded-full font-bold ${
+                              d.period_install_rate > 50 ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-700'
+                            }`}>
+                              {d.period_install_rate}%
+                            </span>
+                          </td>
+                          <td className="p-3.5 text-right font-mono font-bold text-slate-900">
+                            ₹{(d.revenue_in_period || 0).toLocaleString('en-IN')}
+                          </td>
+                          <td className="p-3.5 text-center font-mono text-[10px]">
+                            <span className="text-emerald-700 font-bold">₹{(d.paid_in_period || 0).toLocaleString('en-IN')}</span>
+                            {d.pending_in_period > 0 && (
+                              <span className="text-amber-700 block font-semibold">Due: ₹{d.pending_in_period.toLocaleString('en-IN')}</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
 
       {/* TAB: Executive Profit & Loss (P&L) Statement */}
       {activeTab === 'pnl_statement' && (

@@ -2709,5 +2709,338 @@ router.get('/pnl', (req, res) => {
   }
 });
 
+// GET /api/reports/dealers-matrix - Consolidated Dealer Performance & Installation Matrix by Custom Date Range
+router.get('/dealers-matrix', (req, res) => {
+  try {
+    const {
+      range = 'this_month',
+      start_date,
+      end_date,
+      dealer_name
+    } = req.query;
+
+    const now = new Date();
+    const todayISO = now.toISOString().split('T')[0];
+
+    const yesterdayObj = new Date(now);
+    yesterdayObj.setDate(yesterdayObj.getDate() - 1);
+    const yesterdayISO = yesterdayObj.toISOString().split('T')[0];
+
+    const firstOfMonthISO = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+
+    const prevMonthFirstObj = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const prevMonthFirstISO = `${prevMonthFirstObj.getFullYear()}-${String(prevMonthFirstObj.getMonth() + 1).padStart(2, '0')}-01`;
+    const prevMonthLastObj = new Date(now.getFullYear(), now.getMonth(), 0);
+    const prevMonthLastISO = `${prevMonthLastObj.getFullYear()}-${String(prevMonthLastObj.getMonth() + 1).padStart(2, '0')}-${String(prevMonthLastObj.getDate()).padStart(2, '0')}`;
+
+    let activeStart = firstOfMonthISO;
+    let activeEnd = todayISO;
+
+    if (range === 'today') {
+      activeStart = todayISO;
+      activeEnd = todayISO;
+    } else if (range === 'yesterday') {
+      activeStart = yesterdayISO;
+      activeEnd = yesterdayISO;
+    } else if (range === 'this_month') {
+      activeStart = firstOfMonthISO;
+      activeEnd = todayISO;
+    } else if (range === 'last_month') {
+      activeStart = prevMonthFirstISO;
+      activeEnd = prevMonthLastISO;
+    } else if (range === 'all' || range === 'all_time') {
+      activeStart = '1970-01-01';
+      activeEnd = '2099-12-31';
+    } else if (range === 'custom') {
+      activeStart = start_date ? formatExcelDate(start_date) || start_date : firstOfMonthISO;
+      activeEnd = end_date ? formatExcelDate(end_date) || end_date : todayISO;
+    } else if (start_date && end_date) {
+      activeStart = start_date;
+      activeEnd = end_date;
+    }
+
+    // Standardize activeStart and activeEnd to YYYY-MM-DD
+    const parseToISO = (val) => {
+      if (!val) return '';
+      const str = String(val).trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+      const parts = str.split(/[-/.]/);
+      if (parts.length === 3) {
+        if (parts[0].length === 4) return `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
+        if (parts[2].length === 4) return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+      }
+      return str;
+    };
+
+    const stdStart = parseToISO(activeStart);
+    const stdEnd = parseToISO(activeEnd);
+
+    // 1. Gather all registered and active dealers
+    const dealerMap = {};
+
+    // From users
+    const dealerUsers = db.prepare(`SELECT id, name, phone, email, region FROM users WHERE role = 'DEALER' AND active = 1`).all();
+    for (const u of dealerUsers) {
+      const key = u.name.trim();
+      dealerMap[key] = {
+        name: key,
+        phone: u.phone || '-',
+        email: u.email || '-',
+        region: u.region || 'Regional Hub',
+        user_id: u.id
+      };
+    }
+
+    // From dispatches
+    const dispatchDealers = db.prepare(`SELECT DISTINCT dealer_name, location, dealer_contact FROM dispatches WHERE dealer_name IS NOT NULL AND dealer_name != ''`).all();
+    for (const d of dispatchDealers) {
+      const key = d.dealer_name.trim();
+      if (!dealerMap[key]) {
+        dealerMap[key] = {
+          name: key,
+          phone: d.dealer_contact || '-',
+          email: '-',
+          region: d.location || 'Regional Hub',
+          user_id: null
+        };
+      }
+    }
+
+    // From devices current_holder_name & additional_attributes
+    const holderRows = db.prepare(`SELECT DISTINCT current_holder_name FROM devices WHERE current_holder_name IS NOT NULL AND current_holder_name NOT IN ('Central Warehouse', 'WAREHOUSE', '')`).all();
+    for (const h of holderRows) {
+      const key = h.current_holder_name.trim();
+      if (!dealerMap[key]) {
+        dealerMap[key] = {
+          name: key,
+          phone: '-',
+          email: '-',
+          region: 'Regional Hub',
+          user_id: null
+        };
+      }
+    }
+
+    // 2. Fetch all devices
+    const allDevices = db.prepare(`
+      SELECT d.*, dt.name as device_type_name, dt.category as device_type_category
+      FROM devices d
+      LEFT JOIN device_types dt ON d.device_type_id = dt.id
+    `).all();
+
+    // Helper to extract cost
+    const getCost = (attrs = {}, fallback = 0) => {
+      const keys = ['TOTAL COST', 'TOTAL_COST', 'COST', 'SALE PRICE', 'PRICE', 'AMOUNT', 'INSTALLATION CHARGES'];
+      for (const k of keys) {
+        if (attrs[k] !== undefined && attrs[k] !== null && String(attrs[k]).trim() !== '') {
+          const clean = String(attrs[k]).replace(/[^0-9.]/g, '');
+          if (clean && !isNaN(Number(clean))) return parseFloat(clean);
+        }
+      }
+      return Number(fallback) || 0;
+    };
+
+    // Helper to check payment received
+    const isPaidStatus = (attrs = {}, status = '') => {
+      const raw = attrs['AMOUNT RECEIVED'] || attrs['PAYMENT STATUS'] || attrs['Amount Received'] || '';
+      if (raw) {
+        const u = String(raw).toUpperCase();
+        if (u.includes('NOT') || u.includes('UNPAID') || u.includes('PENDING') || u.includes('DUE')) return false;
+        if (u.includes('REC') || u.includes('PAID') || u.includes('DONE')) return true;
+      }
+      if (attrs['AMOUNT RECEIVED BY'] && String(attrs['AMOUNT RECEIVED BY']).trim()) return true;
+      return false;
+    };
+
+    // Helper to get standard date
+    const getDeviceDateISO = (dev, attrs = {}) => {
+      const dateKeys = [
+        'INSTALLATION DATE', 'Installation Date', 'CERTIFICATE ISSUED DATE',
+        'Certificate Issued Date', 'STOCK PLACE DATE', 'Stock Place Date',
+        'DATE', 'Date', 'PAYMENT DATE'
+      ];
+      for (const k of dateKeys) {
+        if (attrs[k] && String(attrs[k]).trim()) {
+          const iso = parseToISO(attrs[k]);
+          if (iso && /^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso;
+        }
+      }
+      if (dev.purchase_date) {
+        const iso = parseToISO(dev.purchase_date);
+        if (iso && /^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso;
+      }
+      return '';
+    };
+
+    const dealerResults = [];
+    const allInstalledRecords = [];
+
+    let overallTotalDealers = 0;
+    let overallAssignedStock = 0;
+    let overallInstalledInPeriod = 0;
+    let overallInstalledAllTime = 0;
+    let overallInStock = 0;
+    let overallRevenueInPeriod = 0;
+    let overallPaidInPeriod = 0;
+    let overallPendingInPeriod = 0;
+
+    const dealerEntries = Object.values(dealerMap);
+
+    for (const dealer of dealerEntries) {
+      if (dealer_name && !dealer.name.toLowerCase().includes(dealer_name.toLowerCase())) {
+        continue;
+      }
+
+      const cleanName = dealer.name.toLowerCase();
+      
+      // Match devices belonging to this dealer
+      const dealerDevs = allDevices.filter(d => {
+        if (d.current_holder_name && d.current_holder_name.toLowerCase().includes(cleanName)) return true;
+        if (d.additional_attributes) {
+          const lowAttrs = d.additional_attributes.toLowerCase();
+          if (lowAttrs.includes(`"${cleanName}`) || lowAttrs.includes(`:${cleanName}`) || lowAttrs.includes(cleanName)) return true;
+        }
+        return false;
+      });
+
+      let totalAssigned = dealerDevs.length;
+      let installedAllTime = 0;
+      let inStock = 0;
+      let faultyStock = 0;
+      let installedInPeriod = 0;
+      let revenueInPeriod = 0;
+      let paidInPeriod = 0;
+      let pendingInPeriod = 0;
+
+      const modelBreakdown = {};
+      const installedDevicesInPeriod = [];
+
+      for (const dev of dealerDevs) {
+        let attrs = {};
+        try { attrs = JSON.parse(dev.additional_attributes || '{}'); } catch {}
+
+        const vehNo = getVehicleNumber(dev, attrs) || attrs['VEHICLE NUMBER'] || attrs['Vehicle Number'] || '-';
+        const isInstalled = vehNo !== '-' || dev.current_status === 'INSTALLED';
+        const cost = getCost(attrs, dev.purchase_price);
+        const isPaid = isPaidStatus(attrs, dev.current_status);
+        const dateISO = getDeviceDateISO(dev, attrs);
+
+        const mName = dev.device_type_name || 'GPS Tracker';
+
+        if (dev.current_status === 'FAULTY') {
+          faultyStock++;
+        } else if (isInstalled) {
+          installedAllTime++;
+        } else {
+          inStock++;
+        }
+
+        // Check if installed in selected date range
+        let inDateRange = false;
+        if (isInstalled) {
+          if (dateISO) {
+            inDateRange = dateISO >= stdStart && dateISO <= stdEnd;
+          } else if (range === 'all' || range === 'all_time') {
+            inDateRange = true;
+          }
+        }
+
+        if (inDateRange) {
+          installedInPeriod++;
+          revenueInPeriod += cost;
+          if (isPaid) {
+            paidInPeriod += cost;
+          } else {
+            pendingInPeriod += cost;
+          }
+
+          modelBreakdown[mName] = (modelBreakdown[mName] || 0) + 1;
+
+          const rec = {
+            id: dev.id,
+            dealer_name: dealer.name,
+            dealer_region: dealer.region,
+            dealer_phone: dealer.phone,
+            imei_number: dev.imei_number,
+            device_type_name: mName,
+            device_type_category: dev.device_type_category || 'GPS Tracker',
+            installation_date: dateISO || '-',
+            vehicle_number: vehNo !== '-' ? vehNo : 'Installed Vehicle',
+            customer_name: getCustomerName(attrs),
+            customer_phone: getCustomerPhone(attrs),
+            cost: cost,
+            payment_status: isPaid ? 'PAID' : 'PENDING',
+            technician: attrs['TECHNICIAN'] || attrs['Installed By'] || 'Technician',
+            remarks: attrs['REMARKS'] || attrs['Remarks'] || ''
+          };
+
+          installedDevicesInPeriod.push(rec);
+          allInstalledRecords.push(rec);
+        }
+      }
+
+      if (totalAssigned > 0 || installedInPeriod > 0) {
+        overallTotalDealers++;
+        overallAssignedStock += totalAssigned;
+        overallInstalledInPeriod += installedInPeriod;
+        overallInstalledAllTime += installedAllTime;
+        overallInStock += inStock;
+        overallRevenueInPeriod += revenueInPeriod;
+        overallPaidInPeriod += paidInPeriod;
+        overallPendingInPeriod += pendingInPeriod;
+
+        dealerResults.push({
+          dealer_name: dealer.name,
+          region: dealer.region,
+          phone: dealer.phone,
+          email: dealer.email,
+          total_assigned: totalAssigned,
+          installed_in_period: installedInPeriod,
+          installed_all_time: installedAllTime,
+          in_stock: inStock,
+          faulty_stock: faultyStock,
+          install_rate: totalAssigned > 0 ? Math.round((installedAllTime / totalAssigned) * 100) : 0,
+          period_install_rate: totalAssigned > 0 ? Math.round((installedInPeriod / totalAssigned) * 100) : 0,
+          revenue_in_period: revenueInPeriod,
+          paid_in_period: paidInPeriod,
+          pending_in_period: pendingInPeriod,
+          model_breakdown: modelBreakdown,
+          installed_devices: installedDevicesInPeriod
+        });
+      }
+    }
+
+    // Sort dealers by highest installations in period
+    dealerResults.sort((a, b) => b.installed_in_period - a.installed_in_period || b.total_assigned - a.total_assigned);
+
+    res.json({
+      success: true,
+      data: {
+        period: {
+          range,
+          start_date: stdStart,
+          end_date: stdEnd
+        },
+        summary: {
+          total_dealers: overallTotalDealers,
+          total_assigned_stock: overallAssignedStock,
+          total_installed_in_period: overallInstalledInPeriod,
+          total_installed_all_time: overallInstalledAllTime,
+          total_in_stock: overallInStock,
+          total_revenue_in_period: overallRevenueInPeriod,
+          total_paid_in_period: overallPaidInPeriod,
+          total_pending_in_period: overallPendingInPeriod,
+          overall_conversion_rate: overallAssignedStock > 0 ? Math.round((overallInstalledAllTime / overallAssignedStock) * 100) : 0
+        },
+        dealers: dealerResults,
+        all_installed_records: allInstalledRecords
+      }
+    });
+  } catch (err) {
+    console.error('[Reports] Dealers Matrix error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;
 

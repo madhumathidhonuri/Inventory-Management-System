@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Truck, Plus, Search, Barcode, Eye, RotateCcw, RefreshCw, CheckCircle2, Building2, MapPin, UserCheck, Check, Layers, ArrowRight, Printer, Download, Store, Trash2 } from 'lucide-react';
+import { Truck, Plus, Search, Barcode, Eye, RotateCcw, RefreshCw, CheckCircle2, Building2, MapPin, UserCheck, Check, Layers, ArrowRight, Printer, Download, Store, Trash2, FileSpreadsheet } from 'lucide-react';
 import { fetchDispatches, fetchDispatchById, createDispatch, returnDispatchStock, fetchDealerStockSummary, fetchUsers, fetchDevices, deleteDispatch, clearAllDispatches, resetDealerStock } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import DealerDetailModal from '../components/DealerDetailModal';
 import DeliveryChallanModal from '../components/DeliveryChallanModal';
+import DealersMatrixReportModal from '../components/DealersMatrixReportModal';
 
 export default function DispatchPage({ onOpenScannerWithCallback, onOpenTraceDrawer }) {
   const { user } = useAuth();
@@ -35,6 +36,9 @@ export default function DispatchPage({ onOpenScannerWithCallback, onOpenTraceDra
   // Detail Modal State
   const [selectedDispatch, setSelectedDispatch] = useState(null);
   
+  // Dealers Installation & Stock Matrix Modal State
+  const [isMatrixModalOpen, setIsMatrixModalOpen] = useState(false);
+
   // Return Modal State
   const [showReturnModal, setShowReturnModal] = useState(false);
   const [returnImeisInput, setReturnImeisInput] = useState('');
@@ -254,6 +258,14 @@ export default function DispatchPage({ onOpenScannerWithCallback, onOpenTraceDra
         </div>
 
         <div className="flex gap-2 self-start md:self-auto items-center">
+          <button
+            onClick={() => setIsMatrixModalOpen(true)}
+            className="px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+            title="Download dealer-wise installations and stock data across custom date ranges"
+          >
+            <FileSpreadsheet className="w-4 h-4 text-emerald-600" /> Dealers Installation Report
+          </button>
+
           {!isDealer && dispatches.length > 0 && (
             <button
               onClick={handleClearAllDispatches}
@@ -693,6 +705,12 @@ export default function DispatchPage({ onOpenScannerWithCallback, onOpenTraceDra
           setSelectedChallanId(null);
         }}
         onAcknowledgeSuccess={loadData}
+      />
+
+      {/* Multi-Dealer Performance & Installation Matrix Modal */}
+      <DealersMatrixReportModal
+        isOpen={isMatrixModalOpen}
+        onClose={() => setIsMatrixModalOpen(false)}
       />
 
     </div>

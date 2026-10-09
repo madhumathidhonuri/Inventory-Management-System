@@ -1747,6 +1747,358 @@ export async function downloadPaymentExcelTemplate() {
   window.URL.revokeObjectURL(url);
 }
 
+/**
+ * Generates and downloads a consolidated Multi-Dealer Installation & Stock Matrix Excel Report
+ * containing a Dealer Performance Summary sheet and a Detailed Installations Log sheet.
+ */
+export async function exportAllDealersMatrixExcel({ periodLabel = 'All Time', summary = {}, dealers = [], allRecords = [] }) {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'FuelTracks IMS';
+  workbook.lastModifiedBy = 'Admin';
+  workbook.created = new Date();
+
+  // -------------------------------------------------------------
+  // SHEET 1: DEALER PERFORMANCE SUMMARY
+  // -------------------------------------------------------------
+  const summarySheet = workbook.addWorksheet('Dealer_Performance_Summary', {
+    views: [{ showGridLines: true }]
+  });
+
+  // Title Block
+  summarySheet.mergeCells('A1:L1');
+  const titleCell = summarySheet.getCell('A1');
+  titleCell.value = `DEALER PARTNER PERFORMANCE & INSTALLATION MATRIX`;
+  titleCell.font = { name: 'Segoe UI', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
+  titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F172A' } }; // Slate-900
+  titleCell.alignment = { vertical: 'middle', horizontal: 'center' };
+  summarySheet.getRow(1).height = 34;
+
+  // Subtitle / Filter Metadata
+  summarySheet.mergeCells('A2:L2');
+  const subCell = summarySheet.getCell('A2');
+  subCell.value = `Filter Period: ${periodLabel} | Total Active Dealers: ${dealers.length} | Generated: ${new Date().toLocaleString('en-IN')}`;
+  subCell.font = { name: 'Segoe UI', size: 10, italic: true, color: { argb: 'FF334155' } };
+  subCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
+  subCell.alignment = { vertical: 'middle', horizontal: 'center' };
+  summarySheet.getRow(2).height = 22;
+
+  // KPI Block (Row 3 & 4)
+  summarySheet.mergeCells('A3:B3');
+  summarySheet.getCell('A3').value = 'Total Dealers';
+  summarySheet.getCell('A3').font = { name: 'Segoe UI', size: 9, bold: true, color: { argb: 'FF475569' } };
+
+  summarySheet.mergeCells('C3:D3');
+  summarySheet.getCell('C3').value = 'Installed in Selected Period';
+  summarySheet.getCell('C3').font = { name: 'Segoe UI', size: 9, bold: true, color: { argb: 'FF166534' } };
+
+  summarySheet.mergeCells('E3:F3');
+  summarySheet.getCell('E3').value = 'Total Stock Dispatched';
+  summarySheet.getCell('E3').font = { name: 'Segoe UI', size: 9, bold: true, color: { argb: 'FF1E40AF' } };
+
+  summarySheet.mergeCells('G3:H3');
+  summarySheet.getCell('G3').value = 'Currently in Stock (Holding)';
+  summarySheet.getCell('G3').font = { name: 'Segoe UI', size: 9, bold: true, color: { argb: 'FFD97706' } };
+
+  summarySheet.mergeCells('I3:J3');
+  summarySheet.getCell('I3').value = 'Period Sales Value';
+  summarySheet.getCell('I3').font = { name: 'Segoe UI', size: 9, bold: true, color: { argb: 'FF6B21A8' } };
+
+  summarySheet.mergeCells('K3:L3');
+  summarySheet.getCell('K3').value = 'Period Collections';
+  summarySheet.getCell('K3').font = { name: 'Segoe UI', size: 9, bold: true, color: { argb: 'FF0D9488' } };
+
+  // KPI Values (Row 4)
+  summarySheet.mergeCells('A4:B4');
+  summarySheet.getCell('A4').value = dealers.length;
+  summarySheet.getCell('A4').font = { name: 'Segoe UI', size: 14, bold: true };
+
+  summarySheet.mergeCells('C4:D4');
+  summarySheet.getCell('C4').value = `${summary.total_installed_in_period || 0} Units`;
+  summarySheet.getCell('C4').font = { name: 'Segoe UI', size: 14, bold: true, color: { argb: 'FF166534' } };
+
+  summarySheet.mergeCells('E4:F4');
+  summarySheet.getCell('E4').value = `${summary.total_assigned_stock || 0} Units`;
+  summarySheet.getCell('E4').font = { name: 'Segoe UI', size: 14, bold: true, color: { argb: 'FF1E40AF' } };
+
+  summarySheet.mergeCells('G4:H4');
+  summarySheet.getCell('G4').value = `${summary.total_in_stock || 0} Units`;
+  summarySheet.getCell('G4').font = { name: 'Segoe UI', size: 14, bold: true, color: { argb: 'FFD97706' } };
+
+  summarySheet.mergeCells('I4:J4');
+  summarySheet.getCell('I4').value = summary.total_revenue_in_period || 0;
+  summarySheet.getCell('I4').numFmt = '₹#,##0.00';
+  summarySheet.getCell('I4').font = { name: 'Segoe UI', size: 13, bold: true, color: { argb: 'FF6B21A8' } };
+
+  summarySheet.mergeCells('K4:L4');
+  summarySheet.getCell('K4').value = `Paid: ₹${(summary.total_paid_in_period || 0).toLocaleString('en-IN')} | Due: ₹${(summary.total_pending_in_period || 0).toLocaleString('en-IN')}`;
+  summarySheet.getCell('K4').font = { name: 'Segoe UI', size: 9.5, bold: true, color: { argb: 'FF0D9488' } };
+
+  [3, 4].forEach(r => {
+    const row = summarySheet.getRow(r);
+    row.height = 24;
+    row.eachCell(cell => {
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+      cell.alignment = { vertical: 'middle', horizontal: 'center' };
+      cell.border = {
+        top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+        bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+        left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+        right: { style: 'thin', color: { argb: 'FFE2E8F0' } }
+      };
+    });
+  });
+
+  // Spacer Row 5
+  summarySheet.getRow(5).height = 10;
+
+  // Table Headers (Row 6)
+  const headers = [
+    'Sl No',
+    'Dealer Partner Name',
+    'Region / Location',
+    'Contact Phone',
+    'Dispatched Stock',
+    'Installed in Period',
+    'Lifetime Installed',
+    'Current In-Stock',
+    'Install Rate %',
+    'Period Revenue',
+    'Period Collected (Paid)',
+    'Period Pending (Due)'
+  ];
+
+  const headerRow = summarySheet.getRow(6);
+  headerRow.values = headers;
+  headerRow.height = 28;
+  headerRow.eachCell(cell => {
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E3A8A' } }; // Navy Blue
+    cell.font = { name: 'Segoe UI', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+    cell.alignment = { vertical: 'middle', horizontal: 'center' };
+    cell.border = {
+      top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+      bottom: { style: 'medium', color: { argb: 'FF0F172A' } },
+      left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+      right: { style: 'thin', color: { argb: 'FFCBD5E1' } }
+    };
+  });
+
+  // Data Rows
+  let totalAssignedSum = 0;
+  let installedInPeriodSum = 0;
+  let installedAllTimeSum = 0;
+  let inStockSum = 0;
+  let revenueSum = 0;
+  let paidSum = 0;
+  let pendingSum = 0;
+
+  dealers.forEach((d, idx) => {
+    totalAssignedSum += (d.total_assigned || 0);
+    installedInPeriodSum += (d.installed_in_period || 0);
+    installedAllTimeSum += (d.installed_all_time || 0);
+    inStockSum += (d.in_stock || 0);
+    revenueSum += (d.revenue_in_period || 0);
+    paidSum += (d.paid_in_period || 0);
+    pendingSum += (d.pending_in_period || 0);
+
+    const rate = d.total_assigned > 0 ? `${Math.round(((d.installed_in_period || 0) / d.total_assigned) * 100)}%` : '0%';
+
+    const row = summarySheet.addRow([
+      idx + 1,
+      d.dealer_name || '',
+      d.region || 'Regional Hub',
+      d.phone || '-',
+      d.total_assigned || 0,
+      d.installed_in_period || 0,
+      d.installed_all_time || 0,
+      d.in_stock || 0,
+      rate,
+      d.revenue_in_period || 0,
+      d.paid_in_period || 0,
+      d.pending_in_period || 0
+    ]);
+
+    row.height = 22;
+    row.eachCell((cell, colNumber) => {
+      cell.font = { name: 'Segoe UI', size: 9.5 };
+      cell.border = {
+        top: { style: 'thin', color: { argb: 'FFF1F5F9' } },
+        bottom: { style: 'thin', color: { argb: 'FFF1F5F9' } },
+        left: { style: 'thin', color: { argb: 'FFF1F5F9' } },
+        right: { style: 'thin', color: { argb: 'FFF1F5F9' } }
+      };
+
+      if (colNumber === 1 || colNumber === 4 || colNumber === 9) {
+        cell.alignment = { vertical: 'middle', horizontal: 'center' };
+      } else if (colNumber === 5 || colNumber === 6 || colNumber === 7 || colNumber === 8) {
+        cell.alignment = { vertical: 'middle', horizontal: 'center' };
+        if (colNumber === 6 && (d.installed_in_period || 0) > 0) {
+          cell.font = { name: 'Segoe UI', size: 9.5, bold: true, color: { argb: 'FF166534' } };
+        }
+      } else if (colNumber >= 10) {
+        cell.numFmt = '₹#,##0.00';
+        cell.alignment = { vertical: 'middle', horizontal: 'right' };
+        if (colNumber === 10) cell.font = { name: 'Segoe UI', size: 9.5, bold: true };
+        if (colNumber === 11) cell.font = { name: 'Segoe UI', size: 9.5, color: { argb: 'FF166534' } };
+        if (colNumber === 12 && (d.pending_in_period || 0) > 0) cell.font = { name: 'Segoe UI', size: 9.5, color: { argb: 'FFB45309' } };
+      }
+    });
+  });
+
+  // Total Summary Row
+  const totalRow = summarySheet.addRow([
+    'TOTAL',
+    `All ${dealers.length} Dealers`,
+    '—',
+    '—',
+    totalAssignedSum,
+    installedInPeriodSum,
+    installedAllTimeSum,
+    inStockSum,
+    totalAssignedSum > 0 ? `${Math.round((installedInPeriodSum / totalAssignedSum) * 100)}%` : '0%',
+    revenueSum,
+    paidSum,
+    pendingSum
+  ]);
+
+  totalRow.height = 26;
+  totalRow.eachCell((cell, colNumber) => {
+    cell.font = { name: 'Segoe UI', size: 10, bold: true };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
+    cell.border = {
+      top: { style: 'medium', color: { argb: 'FF0F172A' } },
+      bottom: { style: 'medium', color: { argb: 'FF0F172A' } },
+      left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+      right: { style: 'thin', color: { argb: 'FFCBD5E1' } }
+    };
+    if (colNumber >= 5 && colNumber <= 9) {
+      cell.alignment = { vertical: 'middle', horizontal: 'center' };
+    } else if (colNumber >= 10) {
+      cell.numFmt = '₹#,##0.00';
+      cell.alignment = { vertical: 'middle', horizontal: 'right' };
+    }
+  });
+
+  // Auto-fit column widths
+  summarySheet.columns.forEach((column, i) => {
+    let maxLength = headers[i] ? headers[i].length : 12;
+    column.eachCell({ includeEmpty: false }, cell => {
+      const val = cell.value ? String(cell.value) : '';
+      if (val.length > maxLength && val.length < 40) maxLength = val.length;
+    });
+    column.width = Math.max(maxLength + 4, 15);
+  });
+
+  // -------------------------------------------------------------
+  // SHEET 2: DETAILED PERIOD INSTALLATIONS LOG
+  // -------------------------------------------------------------
+  const logSheet = workbook.addWorksheet('Period_Installations_Log', {
+    views: [{ showGridLines: true }]
+  });
+
+  // Log Sheet Title
+  logSheet.mergeCells('A1:L1');
+  const logTitleCell = logSheet.getCell('A1');
+  logTitleCell.value = `PERIOD INSTALLATIONS BREAKDOWN — ${periodLabel.toUpperCase()}`;
+  logTitleCell.font = { name: 'Segoe UI', size: 13, bold: true, color: { argb: 'FFFFFFFF' } };
+  logTitleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF065F46' } }; // Emerald-800
+  logTitleCell.alignment = { vertical: 'middle', horizontal: 'center' };
+  logSheet.getRow(1).height = 30;
+
+  const logHeaders = [
+    'Sl No',
+    'Dealer Partner',
+    'Region',
+    'IMEI / Device ID',
+    'Device Model',
+    'Category',
+    'Installation Date',
+    'Vehicle Number',
+    'Customer Name',
+    'Customer Phone',
+    'Amount / Price',
+    'Payment Status'
+  ];
+
+  const logHeaderRow = logSheet.getRow(2);
+  logHeaderRow.values = logHeaders;
+  logHeaderRow.height = 26;
+  logHeaderRow.eachCell(cell => {
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF059669' } }; // Emerald-600
+    cell.font = { name: 'Segoe UI', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+    cell.alignment = { vertical: 'middle', horizontal: 'center' };
+    cell.border = {
+      top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+      bottom: { style: 'medium', color: { argb: 'FF064E3B' } },
+      left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+      right: { style: 'thin', color: { argb: 'FFCBD5E1' } }
+    };
+  });
+
+  allRecords.forEach((rec, idx) => {
+    const isPaid = String(rec.payment_status || '').toUpperCase() === 'PAID';
+    const row = logSheet.addRow([
+      idx + 1,
+      rec.dealer_name || '',
+      rec.dealer_region || 'Regional Hub',
+      rec.imei_number || '',
+      rec.device_type_name || '',
+      rec.device_type_category || 'GPS Tracker',
+      rec.installation_date || '-',
+      rec.vehicle_number || '-',
+      rec.customer_name || '-',
+      rec.customer_phone || '-',
+      rec.cost || 0,
+      rec.payment_status || 'PENDING'
+    ]);
+
+    row.height = 20;
+    row.eachCell((cell, colNumber) => {
+      cell.font = { name: 'Segoe UI', size: 9.5 };
+      cell.border = {
+        top: { style: 'thin', color: { argb: 'FFF1F5F9' } },
+        bottom: { style: 'thin', color: { argb: 'FFF1F5F9' } },
+        left: { style: 'thin', color: { argb: 'FFF1F5F9' } },
+        right: { style: 'thin', color: { argb: 'FFF1F5F9' } }
+      };
+
+      if (colNumber === 1 || colNumber === 4 || colNumber === 7) {
+        cell.alignment = { vertical: 'middle', horizontal: 'center' };
+      } else if (colNumber === 11) {
+        cell.numFmt = '₹#,##0.00';
+        cell.alignment = { vertical: 'middle', horizontal: 'right' };
+        cell.font = { name: 'Segoe UI', size: 9.5, bold: true };
+      } else if (colNumber === 12) {
+        cell.alignment = { vertical: 'middle', horizontal: 'center' };
+        cell.font = { name: 'Segoe UI', size: 9.5, bold: true, color: isPaid ? { argb: 'FF166534' } : { argb: 'FFB45309' } };
+      }
+    });
+  });
+
+  // Auto-fit column widths for Sheet 2
+  logSheet.columns.forEach((column, i) => {
+    let maxLength = logHeaders[i] ? logHeaders[i].length : 12;
+    column.eachCell({ includeEmpty: false }, cell => {
+      const val = cell.value ? String(cell.value) : '';
+      if (val.length > maxLength && val.length < 40) maxLength = val.length;
+    });
+    logSheet.getColumn(i + 1).width = Math.max(maxLength + 4, 15);
+  });
+
+  // Write and Trigger Download
+  const cleanPeriod = periodLabel.replace(/[^a-zA-Z0-9_\s-]/g, '_');
+  const filename = `All_Dealers_Installation_Report_${cleanPeriod}_${new Date().toISOString().split('T')[0]}.xlsx`;
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  window.URL.revokeObjectURL(url);
+}
+
 
 
 

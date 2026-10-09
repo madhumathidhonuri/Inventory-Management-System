@@ -831,6 +831,16 @@ export async function commitPaymentExcel(formDataOrPayload) {
   return data;
 }
 
+// ==========================================
+// 🏢 DEALERS MATRIX & MULTI-DEALER REPORT API
+// ==========================================
+export async function fetchDealersMatrix(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  const res = await fetch(`${API_BASE}/reports/dealers-matrix?${query}`);
+  if (!res.ok) throw new Error('Failed to fetch dealers matrix report');
+  return res.json();
+}
+
 
 
 
